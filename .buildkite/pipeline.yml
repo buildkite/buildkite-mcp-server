@@ -17,6 +17,29 @@ steps:
           run: golangci-lint
           tty: true
 
+  - name: ":book: update docs"
+    command: |
+      go run cmd/update-docs/main.go
+      
+      # If there are changes, commit and push them
+      if [[ -n $(git status --porcelain README.md) ]]; then
+        git config --global user.email "ci@buildkite.com"
+        git config --global user.name "Buildkite CI"
+        git add README.md
+        git commit -m "Update tools documentation in README [skip ci]"
+        git push origin HEAD:$BUILDKITE_BRANCH
+      else
+        echo "No changes to README.md"
+      fi
+    plugins:
+      - docker-compose#v5.2.0:
+          config: .buildkite/docker-compose.yaml
+          run: golangci-lint
+          tty: true
+          mount-buildkite-agent: true
+          environment:
+            - BUILDKITE_BRANCH
+
   - name: ":go: test"
     artifact_paths:
       - cover-tree.svg

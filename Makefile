@@ -22,3 +22,7 @@ lint:
 .PHONY: lint-fix
 lint-fix:
 	golangci-lint run --fix ./...
+
+.PHONY: update-docs
+update-docs:
+	go run cmd/update-docs/main.go
