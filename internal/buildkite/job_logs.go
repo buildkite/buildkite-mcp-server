@@ -2,11 +2,11 @@ package buildkite
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 
+	"github.com/buildkite/buildkite-mcp-server/internal/buildkite/joblogs"
 	"github.com/buildkite/go-buildkite/v4"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -66,11 +66,13 @@ func GetJobLogs(ctx context.Context, client *buildkite.Client) (tool mcp.Tool, h
 				return mcp.NewToolResultError(fmt.Sprintf("failed to get issue: %s", string(body))), nil
 			}
 
-			r, err := json.Marshal(joblog)
+			// the default logs that come from the API can be pretty dense with ANSI codes or HTML
+			// so we can strip that out before returning it to the LLM
+			processedLog, err := joblogs.Process(joblog)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal job logs: %w", err)
+				return nil, fmt.Errorf("failed process job log: %w", err)
 			}
 
-			return mcp.NewToolResultText(string(r)), nil
+			return mcp.NewToolResultText(processedLog), nil
 		}
 }
