@@ -36,7 +36,7 @@ func optionalPaginationParams(r mcp.CallToolRequest) (buildkite.ListOptions, err
 	if err != nil {
 		return buildkite.ListOptions{}, err
 	}
-	perPage, err := optionalIntParamWithDefault(r, "perPage", 30)
+	perPage, err := optionalIntParamWithDefault(r, "perPage", 1)
 	if err != nil {
 		return buildkite.ListOptions{}, err
 	}

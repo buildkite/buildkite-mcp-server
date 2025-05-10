@@ -70,8 +70,10 @@ func TestListBuilds(t *testing.T) {
 	assert := require.New(t)
 
 	ctx := context.Background()
+	var capturedOptions *buildkite.BuildsListOptions
 	client := &MockBuildsClient{
 		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+			capturedOptions = opt
 			return []buildkite.Build{
 					{
 						ID:        "123",
@@ -101,4 +103,52 @@ func TestListBuilds(t *testing.T) {
 	textContent := getTextResult(t, result)
 
 	assert.Equal(`[{"id":"123","number":1,"state":"running","author":{},"created_at":"0001-01-01T00:00:00Z","creator":{"avatar_url":"","created_at":null,"email":"","id":"","name":""}}]`, textContent.Text)
+	
+	// Verify default pagination parameters - ensure they are set to 1 per page
+	assert.NotNil(capturedOptions)
+	assert.Equal(1, capturedOptions.Page)
+	assert.Equal(1, capturedOptions.PerPage)
+}
+
+func TestListBuildsWithCustomPagination(t *testing.T) {
+	assert := require.New(t)
+
+	ctx := context.Background()
+	var capturedOptions *buildkite.BuildsListOptions
+	client := &MockBuildsClient{
+		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+			capturedOptions = opt
+			return []buildkite.Build{
+					{
+						ID:        "123",
+						Number:    1,
+						State:     "running",
+						CreatedAt: &buildkite.Timestamp{},
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
+		},
+	}
+
+	tool, handler := ListBuilds(ctx, client)
+	assert.NotNil(tool)
+	assert.NotNil(handler)
+
+	// Test with custom pagination parameters
+	request := createMCPRequest(t, map[string]any{
+		"org":           "org",
+		"pipeline_slug": "pipeline",
+		"page":          float64(3),
+		"perPage":       float64(50),
+	})
+	_, err := handler(ctx, request)
+	assert.NoError(err)
+
+	// Verify custom pagination parameters were used
+	assert.NotNil(capturedOptions)
+	assert.Equal(3, capturedOptions.Page)
+	assert.Equal(50, capturedOptions.PerPage)
 }
