@@ -10,7 +10,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type StdioCmd struct{}
+type StdioCmd struct {
+}
 
 func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 	// Create a client adapter so that we can use a mock or true client
@@ -27,6 +28,7 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 
 	log.Ctx(ctx).Info().Str("version", globals.Version).Msg("Starting Buildkite MCP server")
 
+	s.AddTool(buildkite.CreatePipeline(ctx, globals.Client.Pipelines))
 	s.AddTool(buildkite.GetPipeline(ctx, globals.Client.Pipelines))
 	s.AddTool(buildkite.ListPipelines(ctx, globals.Client.Pipelines))
 
