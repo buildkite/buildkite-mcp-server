@@ -17,8 +17,8 @@ var (
 
 	cli struct {
 		Stdio       commands.StdioCmd `cmd:"" help:"stdio mcp server."`
-		APIToken    string            `help:"The Buildkite API token to use." env:"BUILDKITE_API_TOKEN"`
-		BaseURL     string            `help:"The base URL of the Buildkite API to use." env:"BUILDKITE_BASE_URL"`
+		APIToken    string            `help:"The Buildkite API token to use." env:"BUILDKITE_API_TOKEN" kong:"required"`
+		BaseURL     string            `help:"The base URL of the Buildkite API to use." env:"BUILDKITE_BASE_URL" default:"https://api.buildkite.com/"`
 		Debug       bool              `help:"Enable debug mode."`
 		HTTPHeaders []string          `help:"Additional HTTP headers to send with every request. Format: 'Key: Value'" name:"http-header" env:"BUILDKITE_HTTP_HEADERS"`
 		Version     kong.VersionFlag
