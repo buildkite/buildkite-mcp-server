@@ -33,6 +33,13 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 	s.AddTool(buildkite.GetClusterQueue(ctx, globals.Client.ClusterQueues))
 	s.AddTool(buildkite.ListClusterQueues(ctx, globals.Client.ClusterQueues))
 
+	s.AddTool(buildkite.GetCluster(ctx, globals.Client.Clusters))
+	s.AddTool(buildkite.ListClusters(ctx, globals.Client.Clusters))
+
+	s.AddTool(buildkite.GetClusterQueue(ctx, globals.Client.ClusterQueues))
+	s.AddTool(buildkite.ListClusterQueues(ctx, globals.Client.ClusterQueues))
+
+	s.AddTool(buildkite.CreatePipeline(ctx, globals.Client.Pipelines))
 	s.AddTool(buildkite.GetPipeline(ctx, globals.Client.Pipelines))
 	s.AddTool(buildkite.ListPipelines(ctx, globals.Client.Pipelines))
 
