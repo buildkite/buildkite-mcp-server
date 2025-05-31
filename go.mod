@@ -7,7 +7,7 @@ require (
 	github.com/buildkite/go-buildkite/v4 v4.1.0
 	github.com/buildkite/terminal-to-html/v3 v3.16.8
 	github.com/huantt/plaintext-extractor v1.1.0
-	github.com/mark3labs/mcp-go v0.29.0
+	github.com/mark3labs/mcp-go v0.31.0
 	github.com/rs/zerolog v1.34.0
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0

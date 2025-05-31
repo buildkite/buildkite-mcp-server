@@ -9,6 +9,12 @@ This contains some notes on developing this software locally.
 
 # building
 
+List the available make targets.
+
+```
+make help
+```
+
 ## Local Build
 
 Build the binary locally.
@@ -16,6 +22,16 @@ Build the binary locally.
 ```bash
 make build
 ```
+
+## Check the code
+
+Check the code for style and correctness and running tests.
+
+```bash
+make check
+```
+
+## Copy it to your path
 
 Copy it to your path.
 
@@ -48,7 +64,7 @@ When developing and testing the tools, and verifying their configuration https:/
 
 ```
 make
-npx @modelcontextprotocol/inspector buildkite-mcp-server stdio
+npx @modelcontextprotocol/inspector@latest buildkite-mcp-server stdio
 ```
 
 Then log into the web UI and hit connect.

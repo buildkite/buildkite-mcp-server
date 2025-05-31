@@ -6,20 +6,28 @@ This is an [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introd
 
 # Tools
 
+* `get_cluster` - Get details of a buildkite cluster in an organization
+* `list_clusters` - List all buildkite clusters in an organization
+* `get_cluster_queue` - Get details of a buildkite cluster queue in an organization
+* `list_cluster_queues` - List all buildkite queues in a cluster
 * `get_pipeline` - Get details of a specific pipeline in Buildkite
 * `list_pipelines` - List all pipelines in a buildkite organization
 * `list_builds` - List all builds in a pipeline in Buildkite
-* `get_job_logs` - Get logs for a specific job in Buildkite
-* `list_artifacts` - List all artifacts for a specific job in Buildkite
-* `get_artifact` - Get a specific artifact for a specific job in Buildkite
-* `current_user` - Get details of the current user in Buildkite
+* `get_build` - Get a build in Buildkite
+* `current_user` - Get the current user
 * `user_token_organization` - Get the organization associated with the user token used for this request
+* `get_job_logs` - Get the logs of a job in a Buildkite build
+* `access_token` - Get the details for the API access token that was used to authenticate the request
+* `list_artifacts` - List the artifacts for a Buildkite build
+* `get_artifact` - Get an artifact from a Buildkite build
 
 Example of the `get_pipeline` tool in action.
 
 ![Get Pipeline Tool](docs/images/get_pipeline.png)
 
 ### Production
+
+To ensure the MCP server is run in a secure environment, we recommend running it in a container. 
 
 Pull the pre-built image (recommended):
 
@@ -145,10 +153,13 @@ extensions:
 }
 ```
 
+# Security
+
+This container image is built using [cgr.dev/chainguard/static](https://images.chainguard.dev/directory/image/static/versions) base image and is configured to run the MCP server as a non-root user.
+
 # Contributing
 
-Notes on building this project are in the [Development.md](Development.md)
-
+Notes on building this project are in the [DEVELOPMENT.md](DEVELOPMENT.md)
 
 ## Disclaimer
 
