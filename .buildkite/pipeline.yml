@@ -12,7 +12,7 @@ steps:
   - name: ":golangci-lint: lint"
     command: golangci-lint run --verbose --timeout 3m
     plugins:
-      - docker-compose#v5.2.0:
+      - docker-compose#v5.9.0:
           config: .buildkite/docker-compose.yaml
           run: golangci-lint
           tty: true
@@ -25,7 +25,7 @@ steps:
       - go run github.com/nikolaydubina/go-cover-treemap@latest -coverprofile cover.out > cover-tree.svg
       - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
     plugins:
-      -  docker-compose#v5.2.0:
+      - docker-compose#v5.9.0:
           config: .buildkite/docker-compose.yaml
           run: golangci-lint
           tty: true
@@ -35,13 +35,13 @@ steps:
 
   - label: ":terminal: build ({{matrix}})"
     matrix:
-          - "darwin"
-          - "linux"
-          - "windows"
+      - "darwin"
+      - "linux"
+      - "windows"
     artifact_paths:
       - dist/**/*
     plugins:
-      - docker-compose#v5.2.0:
+      - docker-compose#v5.9.0:
           command:
             - .buildkite/release.sh
             - release
@@ -56,3 +56,28 @@ steps:
           run: goreleaser
           shell: false
           tty: true
+
+  - block: ":package: Create a release?"
+    prompt: "Fill out the tag to create for this release"
+    branches:
+      - main
+    blocked_state: passed
+    fields:
+      - key: release-tag
+        text: Tag
+        required: true
+        hint: "Eg: v0.28.0"
+
+  - label: ":rocket: Pushing a tag to release"
+    command: ".buildkite/tag.sh"
+    branches:
+      - main
+    env:
+      AWS_REGION: us-east-1
+    plugins:
+      - aws-assume-role-with-web-identity:
+          role-arn: arn:aws:iam::445615400570:role/pipeline-buildkite-buildkite-mcp-server
+      - aws-ssm#v1.1.0:
+          parameters:
+            GITHUB_TOKEN: /pipelines/buildkite/buildkite-mcp-server/github-token
+            GITHUB_USER: /pipelines/buildkite/buildkite-mcp-server/github-user
