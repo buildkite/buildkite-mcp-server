@@ -50,11 +50,45 @@ Or build it yourself using GoReleaser and copy the binary into your path:
 goreleaser build --snapshot --clean
 ```
 
-# configuration
 
-Create a [Buildkite API Access Token with read access to pipelines].
+## API Token Scopes
 
-## Claude Desktop Configuration
+Your Buildkite API access token requires the following scopes for the MCP server to function properly:
+
+### Required Scopes
+
+For full functionality with all available tools, your API token needs these scopes:
+
+- **read_clusters** - Access cluster and queue information
+- **read_pipelines** - Access pipeline details and configurations  
+- **read_builds** - Access builds, jobs, and annotations
+- **read_build_logs** - Access job log output
+- **read_user** - Access current user information
+- **read_organizations** - Access organization details
+- **read_artifacts** - Access build artifacts and metadata
+- **read_suites** - Access Test Engine data (if using Test Engine)
+
+Create a buildkite API token with the required scopes at: [https://buildkite.com/user/api-access-tokens/new](https://buildkite.com/user/api-access-tokens/new?scopes[]=read_clusters&scopes[]=read_pipelines&scopes[]=read_builds&scopes[]=read_build_logs&scopes[]=read_user&scopes[]=read_organizations&scopes[]=read_artifacts&scopes[]=read_suites)
+
+### Minimum Recommended Scopes
+
+For basic CI/CD monitoring and inspection, these core scopes provide the most commonly used functionality:
+
+- **read_builds** - Covers builds, jobs, and annotations
+- **read_pipelines** - Pipeline information
+- **read_user** - User identification
+
+Create a buildkite API token with [Basic functionality (minimum scopes)](https://buildkite.com/user/api-access-tokens/new?scopes[]=read_builds&scopes[]=read_pipelines&scopes[]=read_user)
+
+# Configuration
+
+To get started with various tools select one of the following.
+
+<details>
+
+<summary>Claude Desktop</summary>
+
+## Claude Desktop
 
 Use this configuration if you want to run the server `buildkite-mcp-server` Docker (recommended):
 
@@ -97,8 +131,13 @@ Configuration if you have `buildkite-mcp-server` installed locally.
     }
 }
 ```
+</details>
 
-## Goose Configuration
+<details>
+
+<summary>Goose</summary>
+
+## Goose
 
 For Docker with [Goose](https://block.github.io/goose/) (recommended):
 
@@ -128,7 +167,13 @@ extensions:
     timeout: 300
 ```
 
-## VSCode Configuration
+</details>
+
+<details>
+
+<summary>VSCode</summary>
+
+## VSCode
 
 [VSCode](https://code.visualstudio.com/) supports interactive inputs for variables. To get the API token interactively on MCP startup, put the following in `.vscode/mcp.json`
 
@@ -162,6 +207,12 @@ extensions:
 }
 ```
 
+</details>
+
+<details>
+
+<summary>Zed</summary>
+
 ## Zed
 
 There is a [Zed](https://zed.dev) editor [extension](https://github.com/mcncl/zed-mcp-server-buildkite) available in the [official extension gallery](https://zed.dev/extensions?query=buildkite). During installation it will ask for an API token which will be added to your settings. Or you can manually configure:
@@ -179,6 +230,10 @@ There is a [Zed](https://zed.dev) editor [extension](https://github.com/mcncl/ze
 }
 ```
 
+</details>
+
+---
+
 # Security
 
 This container image is built using [cgr.dev/chainguard/static](https://images.chainguard.dev/directory/image/static/versions) base image and is configured to run the MCP server as a non-root user.
@@ -195,5 +250,3 @@ This project is in the early stages of development and is not yet ready for use.
 
 This project is released under MIT license.
 
-
-[Buildkite API Access Token with read access to pipelines]: https://buildkite.com/user/api-access-tokens/new?scopes[]=read_pipelines
