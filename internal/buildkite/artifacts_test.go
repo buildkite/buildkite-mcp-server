@@ -196,3 +196,55 @@ func TestGetArtifact_ErrorResponse(t *testing.T) {
 	assert.NotNil(result)
 	assert.Contains(getTextResult(t, result).Text, "failed to get artifact")
 }
+
+func TestBuildkiteClientAdapter_URLRewriting(t *testing.T) {
+	assert := require.New(t)
+
+	// Test rewriteArtifactURL method
+	tests := []struct {
+		name        string
+		baseURL     string
+		inputURL    string
+		expectedURL string
+	}{
+		{
+			name:        "should rewrite api.buildkite.com URLs when using custom base URL",
+			baseURL:     "https://buildkite.proxy.com/rest/",
+			inputURL:    "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
+			expectedURL: "https://buildkite.proxy.com/rest/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
+		},
+		{
+			name:        "should not rewrite URLs when using default base URL",
+			baseURL:     "https://api.buildkite.com/",
+			inputURL:    "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
+			expectedURL: "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
+		},
+		{
+			name:        "should not rewrite non-api.buildkite.com URLs",
+			baseURL:     "https://buildkite.proxy.com/rest/",
+			inputURL:    "https://example.com/some/other/url",
+			expectedURL: "https://example.com/some/other/url",
+		},
+		{
+			name:        "should handle base URL without trailing slash",
+			baseURL:     "https://buildkite.proxy.com/rest",
+			inputURL:    "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
+			expectedURL: "https://buildkite.proxy.com/rest/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a mock buildkite client with the desired base URL
+			client, err := buildkite.NewOpts(
+				buildkite.WithTokenAuth("fake-token"),
+				buildkite.WithBaseURL(tt.baseURL),
+			)
+			assert.NoError(err)
+
+			adapter := &BuildkiteClientAdapter{Client: client}
+			result := adapter.rewriteArtifactURL(tt.inputURL)
+			assert.Equal(tt.expectedURL, result)
+		})
+	}
+}

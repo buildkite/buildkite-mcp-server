@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/internal/trace"
 	"github.com/buildkite/go-buildkite/v4"
@@ -32,9 +33,29 @@ func (a *BuildkiteClientAdapter) ListByBuild(ctx context.Context, org, pipelineS
 	return a.Artifacts.ListByBuild(ctx, org, pipelineSlug, buildNumber, opts)
 }
 
-// DownloadArtifactByURL implements ArtifactsClient
+// DownloadArtifactByURL implements ArtifactsClient with URL rewriting support
 func (a *BuildkiteClientAdapter) DownloadArtifactByURL(ctx context.Context, url string, writer io.Writer) (*buildkite.Response, error) {
-	return a.Artifacts.DownloadArtifactByURL(ctx, url, writer)
+	// Rewrite URL if it's using the default Buildkite API URL and we have a custom base URL
+	rewrittenURL := a.rewriteArtifactURL(url)
+	return a.Artifacts.DownloadArtifactByURL(ctx, rewrittenURL, writer)
+}
+
+// rewriteArtifactURL rewrites artifact URLs to use the configured base URL
+func (a *BuildkiteClientAdapter) rewriteArtifactURL(url string) string {
+	// Get the configured base URL from the client
+	clientBaseURL := a.BaseURL.String()
+
+	// If the client is using a custom base URL (not the default api.buildkite.com)
+	// and the artifact URL is using the default URL, rewrite it
+	if !strings.Contains(clientBaseURL, "api.buildkite.com") && strings.Contains(url, "api.buildkite.com") {
+		// Replace the default API URL with the configured base URL
+		// Remove trailing slash from base URL if present
+		baseURL := strings.TrimSuffix(clientBaseURL, "/")
+		rewrittenURL := strings.Replace(url, "https://api.buildkite.com", baseURL, 1)
+		return rewrittenURL
+	}
+
+	return url
 }
 
 func ListArtifacts(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
@@ -155,7 +176,7 @@ func GetArtifact(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, ha
 			var buffer bytes.Buffer
 			resp, err := client.DownloadArtifactByURL(ctx, artifactURL, &buffer)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError(fmt.Sprintf("response failed with error %s", err.Error())), nil
 			}
 
 			if resp.StatusCode != http.StatusOK {
