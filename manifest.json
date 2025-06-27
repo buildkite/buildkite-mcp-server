@@ -1,0 +1,137 @@
+{
+  "dxt_version": "0.1",
+  "name": "buildkite-mcp-server",
+  "display_name": "Buildkite MCP Server",
+  "version": "0.5.0",
+  "description": "Official MCP Server for Buildkite",
+  "author": {
+    "name": "Buildkite",
+    "url": "https://buildkite.com"
+  },
+  "homepage": "https://buildkite.com",
+  "documentation": "https://github.com/buildkite/buildkite-mcp-server",
+  "support": "https://github.com/buildkite/buildkite-mcp-server/issues",
+  "server": {
+    "type": "binary",
+    "entry_point": "cmd/buildkite-mcp-server/main.go",
+    "mcp_config": {
+      "command": "${__dirname}/cmd/buildkite-mcp-server/main.go",
+      "args": [],
+      "env": {}
+    }
+  },
+  "tools": [
+    {
+      "name": "create_pipeline",
+      "description": "Set up a new CI/CD pipeline in Buildkite with YAML configuration, repository connection, and cluster assignment"
+    },
+    {
+      "name": "list_pipelines",
+      "description": "List all pipelines in an organization with their basic details, build counts, and current status"
+    },
+    {
+      "name": "get_pipeline",
+      "description": "Get detailed information about a specific pipeline including its configuration, steps, environment variables, and build statistics"
+    },
+    {
+      "name": "update_pipeline",
+      "description": "Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata"
+    },
+    {
+      "name": "list_clusters",
+      "description": "List all clusters in an organization with their names, descriptions, default queues, and creation details"
+    },
+    {
+      "name": "get_cluster",
+      "description": "Get detailed information about a specific cluster including its name, description, default queue, and configuration"
+    },
+    {
+      "name": "get_cluster_queue",
+      "description": "Get detailed information about a specific queue including its key, description, dispatch status, and hosted agent configuration"
+    },
+    {
+      "name": "list_cluster_queues",
+      "description": "List all queues in a cluster with their keys, descriptions, dispatch status, and agent configuration"
+    },
+    {
+      "name": "list_builds",
+      "description": "List all builds for a pipeline with their status, commit information, and metadata"
+    },
+    {
+      "name": "get_build",
+      "description": "Get detailed information about a specific build including its jobs, timing, and execution details"
+    },
+    {
+      "name": "get_build_test_engine_runs",
+      "description": "Get test engine runs data for a specific build in Buildkite. This can be used to look up Test Runs."
+    },
+    {
+      "name": "create_build",
+      "description": "Trigger a new build on a Buildkite pipeline for a specific commit and branch, with optional environment variables, metadata, and author information"
+    },
+    {
+      "name": "current_user",
+      "description": "Get details about the user account that owns the API token, including name, email, avatar, and account creation date"
+    },
+    {
+      "name": "user_token_organization",
+      "description": "Get the organization associated with the user token used for this request"
+    },
+    {
+      "name": "get_jobs",
+      "description": "Get all jobs for a specific build including their state, timing, commands, and execution details"
+    },
+    {
+      "name": "get_job_logs",
+      "description": "Get the log output and metadata for a specific job, including content, size, and header timestamps"
+    },
+    {
+      "name": "list_artifacts",
+      "description": "List all artifacts for a build across all jobs, including file details, paths, sizes, MIME types, and download URLs"
+    },
+    {
+      "name": "get_artifact",
+      "description": "Get detailed information about a specific artifact including its metadata, file size, SHA-1 hash, and download URL"
+    },
+    {
+      "name": "list_annotations",
+      "description": "List all annotations for a build, including their context, style (success/info/warning/error), rendered HTML content, and creation timestamps"
+    },
+    {
+      "name": "list_test_runs",
+      "description": "List all test runs for a test suite in Buildkite Test Engine"
+    },
+    {
+      "name": "get_test_run",
+      "description": "Get a specific test run in Buildkite Test Engine"
+    },
+    {
+      "name": "get_failed_executions",
+      "description": "Get failed test executions for a specific test run in Buildkite Test Engine. Optionally get the expanded failure details such as full error messages and stack traces."
+    },
+    {
+      "name": "get_test",
+      "description": "Get a specific test in Buildkite Test Engine. This provides additional metadata for failed test executions"
+    },
+    {
+      "name": "access_token",
+      "description": "Get information about the current API access token including its scopes and UUID"
+    }
+  ],
+  "tools_generated": false,
+  "user_config": {
+    "BUILDKITE_API_TOKEN": {
+      "type": "string",
+      "title": "Buildkite API token",
+      "description": "An API token for the MCP server to interact with Buildkite",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "keywords": ["buildkite", "ci", "cd"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/buildkite/buildkite-mcp-server"
+  }
+}
