@@ -291,8 +291,6 @@ Local binary:
 
 ![Get Pipeline Tool](docs/images/get_pipeline.png)
 
-
-
 ---
 
 ## 🔒 Security
