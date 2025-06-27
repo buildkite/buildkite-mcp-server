@@ -3,7 +3,7 @@
   "version": "0.5.0",
   "description": "NPM wrapper for Buildkite MCP Server binary",
   "bin": {
-    "buildkite-mcp-server": "node/bin/run.js"
+    "buildkite-mcp-server": "bin/run.js"
   },
   "scripts": {
     "local": "node local.js",
