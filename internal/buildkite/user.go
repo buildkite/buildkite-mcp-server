@@ -17,7 +17,7 @@ type UserClient interface {
 
 func CurrentUser(ctx context.Context, client UserClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("current_user",
-			mcp.WithDescription("Get the current user"),
+			mcp.WithDescription("Get details about the user account that owns the API token, including name, email, avatar, and account creation date"),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:        "Get Current User",
 				ReadOnlyHint: mcp.ToBoolPtr(true),

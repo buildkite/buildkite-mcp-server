@@ -1,3 +1,3 @@
-FROM public.ecr.aws/docker/library/golang:1.24.2@sha256:1ecc479bc712a6bdb56df3e346e33edcc141f469f82840bab9f4bc2bc41bf91d
+FROM golang:1.24.3@sha256:81bf5927dc91aefb42e2bc3a5abdbe9bb3bae8ba8b107e2a4cf43ce3402534c6
 
-COPY --from=goreleaser/goreleaser-pro:v2.8.2@sha256:62bff5f26c37e1615265ae9c1106fbabc427882fd442c67a89db4c513d31b326 /usr/bin/goreleaser /usr/local/bin/goreleaser
+COPY --from=goreleaser/goreleaser-pro:v2.9.0@sha256:adf70d3f53233855f6091c58c2e3f182fd41311fe322cbf3284994bb6991a53d /usr/bin/goreleaser /usr/local/bin/goreleaser

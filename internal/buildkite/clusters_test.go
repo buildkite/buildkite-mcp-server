@@ -59,7 +59,7 @@ func TestListClusters(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.Equal("[{\"id\":\"cluster-id\",\"name\":\"cluster-name\",\"created_by\":{}}]", textContent.Text)
+	assert.Equal(`{"headers":{"Link":""},"items":[{"id":"cluster-id","name":"cluster-name","created_by":{}}]}`, textContent.Text)
 }
 
 func TestGetCluster(t *testing.T) {

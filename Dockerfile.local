@@ -1,0 +1,28 @@
+# Build stage
+FROM public.ecr.aws/docker/library/golang:1.24.2 AS builder
+
+WORKDIR /app
+
+# Copy go.mod and go.sum first to leverage Docker cache
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the rest of the source code
+COPY . .
+
+# Build the binary
+RUN CGO_ENABLED=0 go build -o buildkite-mcp-server ./cmd/buildkite-mcp-server/main.go
+
+# Final stage
+FROM alpine:3.21
+
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /app
+
+# Copy the binary from the builder stage
+COPY --from=builder /app/buildkite-mcp-server /app/buildkite-mcp-server
+
+# Set the entrypoint to run the server in stdio mode
+ENTRYPOINT ["/app/buildkite-mcp-server", "stdio"]

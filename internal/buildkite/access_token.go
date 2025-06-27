@@ -17,7 +17,7 @@ type AccessTokenClient interface {
 
 func AccessToken(ctx context.Context, client AccessTokenClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("access_token",
-			mcp.WithDescription("Get the details for the API access token that was used to authenticate the request"),
+			mcp.WithDescription("Get information about the current API access token including its scopes and UUID"),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:        "Get Access Token",
 				ReadOnlyHint: mcp.ToBoolPtr(true),

@@ -19,7 +19,7 @@ type ClusterQueuesClient interface {
 
 func ListClusterQueues(ctx context.Context, client ClusterQueuesClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("list_cluster_queues",
-			mcp.WithDescription("List all buildkite queues in a cluster"),
+			mcp.WithDescription("List all queues in a cluster with their keys, descriptions, dispatch status, and agent configuration"),
 			mcp.WithString("org",
 				mcp.Required(),
 				mcp.Description("The organization slug for the owner of the pipeline"),
@@ -72,7 +72,14 @@ func ListClusterQueues(ctx context.Context, client ClusterQueuesClient) (tool mc
 				return mcp.NewToolResultText("No clusters found"), nil
 			}
 
-			r, err := json.Marshal(queues)
+			result := PaginatedResult[buildkite.ClusterQueue]{
+				Items: queues,
+				Headers: map[string]string{
+					"Link": resp.Header.Get("Link"),
+				},
+			}
+
+			r, err := json.Marshal(&result)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal cluster queues response: %w", err)
 			}
@@ -83,7 +90,7 @@ func ListClusterQueues(ctx context.Context, client ClusterQueuesClient) (tool mc
 
 func GetClusterQueue(ctx context.Context, client ClusterQueuesClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("get_cluster_queue",
-			mcp.WithDescription("Get details of a buildkite cluster queue in an organization"),
+			mcp.WithDescription("Get detailed information about a specific queue including its key, description, dispatch status, and hosted agent configuration"),
 			mcp.WithString("org",
 				mcp.Required(),
 				mcp.Description("The organization slug for the owner of the pipeline"),

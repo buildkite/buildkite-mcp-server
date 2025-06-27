@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/buildkite/buildkite-mcp-server/internal/trace"
 	"github.com/buildkite/go-buildkite/v4"
@@ -38,7 +39,7 @@ func (a *BuildkiteClientAdapter) DownloadArtifactByURL(ctx context.Context, url 
 
 func ListArtifacts(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("list_artifacts",
-			mcp.WithDescription("List the artifacts for a Buildkite build"),
+			mcp.WithDescription("List all artifacts for a build across all jobs, including file details, paths, sizes, MIME types, and download URLs"),
 			mcp.WithString("org",
 				mcp.Required(),
 				mcp.Description("The organization slug for the owner of the pipeline"),
@@ -107,7 +108,14 @@ func ListArtifacts(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, 
 				return mcp.NewToolResultError(fmt.Sprintf("failed to get issue: %s", string(body))), nil
 			}
 
-			r, err := json.Marshal(artifacts)
+			result := PaginatedResult[buildkite.Artifact]{
+				Items: artifacts,
+				Headers: map[string]string{
+					"Link": resp.Header.Get("Link"),
+				},
+			}
+
+			r, err := json.Marshal(result)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal artifacts: %w", err)
 			}
@@ -117,7 +125,7 @@ func ListArtifacts(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, 
 
 func GetArtifact(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
 	return mcp.NewTool("get_artifact",
-			mcp.WithDescription("Get an artifact from a Buildkite build"),
+			mcp.WithDescription("Get detailed information about a specific artifact including its metadata, file size, SHA-1 hash, and download URL"),
 			mcp.WithString("url",
 				mcp.Required(),
 				mcp.Description("The URL of the artifact to get"),
@@ -131,16 +139,21 @@ func GetArtifact(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, ha
 			ctx, span := trace.Start(ctx, "buildkite.GetArtifact")
 			defer span.End()
 
-			url, err := request.RequireString("url")
+			artifactURL, err := request.RequireString("url")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			span.SetAttributes(attribute.String("url", url))
+			// Validate the URL format
+			if _, err := url.Parse(artifactURL); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid URL format: %s", err.Error())), nil
+			}
+
+			span.SetAttributes(attribute.String("url", artifactURL))
 
 			// Use a buffer to capture the artifact data instead of writing directly to stdout
 			var buffer bytes.Buffer
-			resp, err := client.DownloadArtifactByURL(ctx, url, &buffer)
+			resp, err := client.DownloadArtifactByURL(ctx, artifactURL, &buffer)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -154,7 +167,7 @@ func GetArtifact(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, ha
 			}
 
 			// Create a response with the artifact data encoded safely for JSON
-			result := map[string]interface{}{
+			result := map[string]any{
 				"status":     resp.Status,
 				"statusCode": resp.StatusCode,
 				"data":       base64.StdEncoding.EncodeToString(buffer.Bytes()),

@@ -23,7 +23,7 @@ func TestProcess(t *testing.T) {
 
 	// write out golden file if WRITE_JOB_LOG_GOLDEN_FILE is set
 	if os.Getenv("WRITE_JOB_LOG_GOLDEN_FILE") != "" {
-		err = os.WriteFile("testdata/processed.log", []byte(processedLog), 0644)
+		err = os.WriteFile("testdata/processed.log", []byte(processedLog), 0600)
 		if err != nil {
 			t.Fatalf("failed to write processed log golden file: %v", err)
 		}
