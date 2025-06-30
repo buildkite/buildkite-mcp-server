@@ -3,21 +3,31 @@
   "name": "buildkite-mcp-server",
   "display_name": "Buildkite MCP Server",
   "version": "0.5.0",
-  "description": "Official MCP Server for Buildkite",
+  "description": "Official MCP Server for Buildkite - Connect Claude to your Buildkite CI/CD pipelines",
+  "long_description": "The Buildkite MCP Server enables Claude to interact with your Buildkite CI/CD infrastructure. Manage pipelines, trigger builds, monitor job status, view logs, download artifacts, and analyze test results directly from Claude. Perfect for DevOps workflows, build automation, and CI/CD pipeline management.",
   "author": {
     "name": "Buildkite",
+    "email": "support@buildkite.com",
     "url": "https://buildkite.com"
   },
   "homepage": "https://buildkite.com",
+  "icon": "icon.png",
   "documentation": "https://github.com/buildkite/buildkite-mcp-server",
   "support": "https://github.com/buildkite/buildkite-mcp-server/issues",
   "server": {
     "type": "binary",
-    "entry_point": "cmd/buildkite-mcp-server/main.go",
+    "entry_point": "buildkite-mcp-server",
     "mcp_config": {
-      "command": "${__dirname}/cmd/buildkite-mcp-server/main.go",
-      "args": [],
-      "env": {}
+      "command": "${__dirname}/buildkite-mcp-server",
+      "args": ["stdio"],
+      "env": {
+        "BUILDKITE_API_TOKEN": "${user_config.BUILDKITE_API_TOKEN}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}/buildkite-mcp-server.bat"
+        }
+      }
     }
   },
   "tools": [
@@ -122,16 +132,20 @@
   "user_config": {
     "BUILDKITE_API_TOKEN": {
       "type": "string",
-      "title": "Buildkite API token",
-      "description": "An API token for the MCP server to interact with Buildkite",
+      "title": "Buildkite API Token",
+      "description": "Your Buildkite API token with appropriate permissions for pipeline and build management",
       "required": true,
       "sensitive": true
     }
   },
-  "keywords": ["buildkite", "ci", "cd"],
+  "keywords": ["buildkite", "ci", "cd", "devops", "automation", "pipelines", "builds"],
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/buildkite/buildkite-mcp-server"
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"]
   }
 }

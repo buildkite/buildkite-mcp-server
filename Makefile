@@ -48,10 +48,17 @@ lint: ## Run linter
 lint-fix: ## Run linter with auto-fix
 	golangci-lint run --fix ./...
 
-.PHONY: clean
-clean: ## Clean build artifacts
-	rm -f $(BINARY_NAME) $(COVERAGE_FILE)
-	go clean
+.PHONY: dxt
+dxt:
+	@$(MAKE) -s build
+	@command -v dxt >/dev/null 2>&1 || { \
+		echo >&2 "dxt is required but not installed."; \
+		echo >&2 "Please install it using: npm install -g @anthropics/dxt"; \
+		exit 1; \
+	}
+	@echo "Creating DXT package..."
+	dxt pack
+	@echo "DXT package created successfully: buildkite-mcp-server.dxt"
 
 .PHONY: deps
 deps: ## Download and tidy dependencies
@@ -63,3 +70,8 @@ check: lint test ## Run all checks (lint + test)
 
 .PHONY: all
 all: clean deps check build ## Run full build pipeline
+
+.PHONY: clean
+clean: ## Clean build artifacts
+	rm -f $(BINARY_NAME) $(COVERAGE_FILE)
+	go clean

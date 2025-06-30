@@ -6,6 +6,7 @@ This contains some notes on developing this software locally.
 
 * [goreleaser](http://goreleaser.com)
 * [go 1.24](https://go.dev)
+* [dxt CLI](https://github.com/anthropics/dxt) - for building Desktop Extensions
 
 # building
 
@@ -22,6 +23,29 @@ Build the binary locally.
 ```bash
 make build
 ```
+
+## Desktop Extension (DXT) Build
+
+Build a Desktop Extension package for distribution:
+
+```bash
+# Install the DXT CLI if you haven't already
+npm install -g @anthropics/dxt
+
+# Build the binary from source
+make build
+
+# Pack the `.dxt` file
+dxt pack
+```
+
+This will create a `buildkite-mcp-server.dxt` file that can be installed in Claude Desktop and other compatible applications.
+
+The DXT package includes:
+- Cross-platform binaries (macOS, Windows, Linux)
+- Platform detection wrapper scripts
+- Proper manifest configuration
+- User configuration for API tokens
 
 ## Check the code
 

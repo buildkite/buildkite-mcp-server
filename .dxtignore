@@ -1,0 +1,36 @@
+# Development files
+.git/
+.github/
+.buildkite/
+.opencode/
+.vscode/
+.envrc*
+vendor/
+dist/
+coverage.out
+*.log
+.goreleaser.yaml
+.golangci.yml
+Dockerfile.local
+
+# Documentation and development files
+DEVELOPMENT.md
+AGENT.md
+spec/
+docs/
+
+# Go source files (not needed for binary distribution)
+cmd/
+internal/
+go.mod
+go.sum
+*.go
+
+# Test files
+*_test.go
+testdata/
+
+# Misc
+mise.toml
+OpenCode.md
+CODE_OF_CONDUCT.md
