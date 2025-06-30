@@ -15,6 +15,10 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
+# Build DXT package
+echo "Building DXT package..."
+make dxt
+
 if ! goreleaser "$@"; then
     echo "Failed to build a release"
     exit 1
