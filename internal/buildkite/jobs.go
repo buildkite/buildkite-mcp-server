@@ -8,10 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/buildkite/buildkite-mcp-server/internal/buildkite/joblogs"
 	"github.com/buildkite/buildkite-mcp-server/internal/tokens"
@@ -20,7 +17,6 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"go.opentelemetry.io/otel/attribute"
-	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // withJobsPagination adds client-side pagination options to a tool with a max of 50 per page
@@ -169,12 +165,6 @@ func GetJobLogs(ctx context.Context, client *buildkite.Client) (tool mcp.Tool, h
 				mcp.Required(),
 				mcp.Description("The UUID of the job"),
 			),
-			mcp.WithString("output_dir",
-				mcp.Description("Directory to save log file when using file mode (defaults to system temp directory)"),
-			),
-			mcp.WithString("filename_prefix",
-				mcp.Description("Prefix for log filename when using file mode (defaults to job UUID)"),
-			),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:        "Get Job Logs",
 				ReadOnlyHint: mcp.ToBoolPtr(false),
@@ -204,16 +194,11 @@ func GetJobLogs(ctx context.Context, client *buildkite.Client) (tool mcp.Tool, h
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			outputDir := request.GetString("output_dir", "")
-			filenamePrefix := request.GetString("filename_prefix", jobUUID)
-
 			span.SetAttributes(
 				attribute.String("org", org),
 				attribute.String("pipeline_slug", pipelineSlug),
 				attribute.String("build_number", buildNumber),
 				attribute.String("job_uuid", jobUUID),
-				attribute.String("output_dir", outputDir),
-				attribute.String("filename_prefix", filenamePrefix),
 			)
 
 			// Get job logs from API
@@ -239,16 +224,27 @@ func GetJobLogs(ctx context.Context, client *buildkite.Client) (tool mcp.Tool, h
 
 			// Estimate tokens to decide delivery mode
 			tokenCount := tokens.EstimateTokens(processedLog)
-			threshold := getTokenThreshold()
-
 			span.SetAttributes(
 				attribute.Int("token_count", tokenCount),
-				attribute.Int("token_threshold", threshold),
 			)
 
-			// Smart switching: use file mode for large logs
-			if tokenCount > threshold {
-				return handleLargeLogFile(ctx, span, processedLog, tokenCount, org, pipelineSlug, buildNumber, jobUUID, outputDir, filenamePrefix, threshold)
+			// if a threshold is set, we can use it to determine if we should switch to file mode
+			// this allows us to handle large logs more efficiently
+			// and avoid hitting token limits in the LLM
+			// this is configurable via the BUILDKITE_MCP_LOG_TOKEN_THRESHOLD environment variable
+			// if not set, we default to -1 which means no threshold
+			if threshold, ok := getTokenThreshold(); ok {
+				span.SetAttributes(attribute.Int("token_threshold", threshold))
+
+				// Smart switching: use file mode for large logs
+				if tokenCount > threshold {
+					return handleLargeLogFile(ctx, processedLog, JobLogsResponse{
+						TokenCount:  tokenCount,
+						JobUUID:     jobUUID,
+						BuildNumber: buildNumber,
+						Reason:      fmt.Sprintf("Log exceeded %d token threshold", threshold),
+					}, threshold)
+				}
 			}
 
 			// Inline mode for small logs
@@ -271,139 +267,62 @@ func GetJobLogs(ctx context.Context, client *buildkite.Client) (tool mcp.Tool, h
 		}
 }
 
-// sanitizeFilename removes unsafe characters from filename components
-var unsafeChars = regexp.MustCompile(`[^\w\-_.]`)
-
-func sanitizeFilename(name string) string {
-	return unsafeChars.ReplaceAllString(name, "_")
-}
-
 // JobLogsResponse represents the unified response for job logs
 type JobLogsResponse struct {
-	DeliveryMode    string `json:"delivery_mode"`              // "inline" | "file"
-	Content         string `json:"content,omitempty"`          // Only for inline
-	FilePath        string `json:"file_path,omitempty"`        // Only for file
-	FileSizeBytes   int64  `json:"file_size_bytes,omitempty"`  // Only for file
-	TokenCount      int    `json:"token_count"`                // Always included
-	JobUUID         string `json:"job_uuid"`                   // Always included
-	BuildNumber     string `json:"build_number"`               // Always included
-	Reason          string `json:"reason,omitempty"`           // Why file mode was chosen
+	DeliveryMode  string `json:"delivery_mode"`             // "inline" | "file"
+	Content       string `json:"content,omitempty"`         // Only for inline
+	FilePath      string `json:"file_path,omitempty"`       // Only for file
+	FileSizeBytes int64  `json:"file_size_bytes,omitempty"` // Only for file
+	TokenCount    int    `json:"token_count"`               // Always included
+	JobUUID       string `json:"job_uuid"`                  // Always included
+	BuildNumber   string `json:"build_number"`              // Always included
+	Reason        string `json:"reason,omitempty"`          // Why file mode was chosen
 }
 
 // getTokenThreshold returns the configurable token threshold for switching to file mode
-func getTokenThreshold() int {
+func getTokenThreshold() (int, bool) {
 	if thresholdStr := os.Getenv("BUILDKITE_MCP_LOG_TOKEN_THRESHOLD"); thresholdStr != "" {
 		if threshold, err := strconv.Atoi(thresholdStr); err == nil && threshold > 0 {
-			return threshold
+			return threshold, true
 		}
 	}
-	return 12000 // Default threshold
+	return -1, false
 }
 
 // handleLargeLogFile handles saving large logs to file
-func handleLargeLogFile(ctx context.Context, span oteltrace.Span, processedLog string, tokenCount int, org, pipelineSlug, buildNumber, jobUUID, outputDir, filenamePrefix string, threshold int) (*mcp.CallToolResult, error) {
-	span.SetAttributes(attribute.String("delivery_mode", "file"))
+func handleLargeLogFile(ctx context.Context, processedLog string, response JobLogsResponse, threshold int) (*mcp.CallToolResult, error) {
+	_, span := trace.Start(ctx, "buildkite.handleLargeLogFile")
+	defer span.End()
 
-	// Determine output directory
-	if outputDir == "" {
-		outputDir = os.TempDir()
-	} else {
-		// Clean and validate the path
-		outputDir = filepath.Clean(outputDir)
-		if strings.Contains(outputDir, "..") {
-			return mcp.NewToolResultError("invalid output directory: path traversal not allowed"), nil
-		}
+	outputDir, err := os.MkdirTemp("", "buildkite-job-logs-") // Ensure the directory exists
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary output directory: %w", err)
 	}
 
-	// Verify directory exists and is writable, fallback to inline if file operations fail
-	if info, err := os.Stat(outputDir); err != nil {
-		// Fallback to inline mode on directory error
-		response := JobLogsResponse{
-			DeliveryMode: "inline",
-			Content:      processedLog,
-			TokenCount:   tokenCount,
-			JobUUID:      jobUUID,
-			BuildNumber:  buildNumber,
-			Reason:       fmt.Sprintf("Intended file mode due to %d tokens > %d threshold, but fell back to inline due to directory error: %s", tokenCount, threshold, err.Error()),
-		}
-		r, err := json.Marshal(&response)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal fallback response: %w", err)
-		}
-		return mcp.NewToolResultText(string(r)), nil
-	} else if !info.IsDir() {
-		// Fallback to inline mode if path is not a directory
-		response := JobLogsResponse{
-			DeliveryMode: "inline",
-			Content:      processedLog,
-			TokenCount:   tokenCount,
-			JobUUID:      jobUUID,
-			BuildNumber:  buildNumber,
-			Reason:       fmt.Sprintf("Intended file mode due to %d tokens > %d threshold, but fell back to inline because output path is not a directory", tokenCount, threshold),
-		}
-		r, err := json.Marshal(&response)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal fallback response: %w", err)
-		}
-		return mcp.NewToolResultText(string(r)), nil
-	}
-
-	// Generate safe filename
-	timestamp := time.Now().Unix()
-	sanitizedPrefix := sanitizeFilename(filenamePrefix)
-	sanitizedBuildNumber := sanitizeFilename(buildNumber)
-	filename := fmt.Sprintf("%s_%s_%s_%d.log", sanitizedPrefix, sanitizedBuildNumber, jobUUID, timestamp)
-	filePath := filepath.Join(outputDir, filename)
+	filePath := filepath.Join(outputDir, "job.log")
 
 	// Create and write file
 	file, err := os.Create(filePath)
 	if err != nil {
-		// Fallback to inline mode on file creation error
-		response := JobLogsResponse{
-			DeliveryMode: "inline",
-			Content:      processedLog,
-			TokenCount:   tokenCount,
-			JobUUID:      jobUUID,
-			BuildNumber:  buildNumber,
-			Reason:       fmt.Sprintf("Intended file mode due to %d tokens > %d threshold, but fell back to inline due to file creation error: %s", tokenCount, threshold, err.Error()),
-		}
-		r, err := json.Marshal(&response)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal fallback response: %w", err)
-		}
-		return mcp.NewToolResultText(string(r)), nil
+		return nil, fmt.Errorf("failed to create log file: %w", err)
 	}
 	defer file.Close()
 
 	_, err = file.WriteString(processedLog)
 	if err != nil {
-		// Clean up partial file and fallback to inline
-		os.Remove(filePath)
-		response := JobLogsResponse{
-			DeliveryMode: "inline",
-			Content:      processedLog,
-			TokenCount:   tokenCount,
-			JobUUID:      jobUUID,
-			BuildNumber:  buildNumber,
-			Reason:       fmt.Sprintf("Intended file mode due to %d tokens > %d threshold, but fell back to inline due to file write error: %s", tokenCount, threshold, err.Error()),
-		}
-		r, err := json.Marshal(&response)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal fallback response: %w", err)
-		}
-		return mcp.NewToolResultText(string(r)), nil
+		return nil, fmt.Errorf("failed to write log file: %w", err)
 	}
 
 	// Get file info
 	fileInfo, err := file.Stat()
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get file info: %s", err.Error())), nil
+		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
 
 	// Get absolute path for response
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
-		absPath = filePath // fallback to relative path
+		return nil, fmt.Errorf("failed to get absolute file path: %w", err)
 	}
 
 	span.SetAttributes(
@@ -411,15 +330,10 @@ func handleLargeLogFile(ctx context.Context, span oteltrace.Span, processedLog s
 		attribute.Int64("file_size_bytes", fileInfo.Size()),
 	)
 
-	response := JobLogsResponse{
-		DeliveryMode:  "file",
-		FilePath:      absPath,
-		FileSizeBytes: fileInfo.Size(),
-		TokenCount:    tokenCount,
-		JobUUID:       jobUUID,
-		BuildNumber:   buildNumber,
-		Reason:        fmt.Sprintf("Log exceeded %d token threshold", threshold),
-	}
+	response.DeliveryMode = "file"
+	response.FilePath = absPath
+	response.FileSizeBytes = fileInfo.Size()
+	response.Reason = fmt.Sprintf("Log exceeded %d token threshold, saved to file", threshold)
 
 	r, err := json.Marshal(&response)
 	if err != nil {
