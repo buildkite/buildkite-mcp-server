@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/buildkite/buildkite-mcp-server/internal/trace"
 	"github.com/buildkite/go-buildkite/v4"
@@ -138,16 +139,21 @@ func GetArtifact(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, ha
 			ctx, span := trace.Start(ctx, "buildkite.GetArtifact")
 			defer span.End()
 
-			url, err := request.RequireString("url")
+			artifactURL, err := request.RequireString("url")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			span.SetAttributes(attribute.String("url", url))
+			// Validate the URL format
+			if _, err := url.Parse(artifactURL); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("invalid URL format: %s", err.Error())), nil
+			}
+
+			span.SetAttributes(attribute.String("url", artifactURL))
 
 			// Use a buffer to capture the artifact data instead of writing directly to stdout
 			var buffer bytes.Buffer
-			resp, err := client.DownloadArtifactByURL(ctx, url, &buffer)
+			resp, err := client.DownloadArtifactByURL(ctx, artifactURL, &buffer)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

@@ -13,6 +13,7 @@ import (
 type MockBuildsClient struct {
 	ListByPipelineFunc func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	GetFunc            func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
+	CreateFunc         func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error)
 }
 
 func (m *MockBuildsClient) Get(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -27,6 +28,13 @@ func (m *MockBuildsClient) ListByPipeline(ctx context.Context, org string, pipel
 		return m.ListByPipelineFunc(ctx, org, pipeline, opt)
 	}
 	return nil, nil, nil
+}
+
+func (m *MockBuildsClient) Create(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error) {
+	if m.CreateFunc != nil {
+		return m.CreateFunc(ctx, org, pipeline, b)
+	}
+	return buildkite.Build{}, nil, nil
 }
 
 var _ BuildsClient = (*MockBuildsClient)(nil)
@@ -113,8 +121,6 @@ func TestGetBuildWithJobSummary(t *testing.T) {
 	assert.Contains(textContent.Text, `"by_state":{"failed":1,"passed":1,"running":1,"waiting":1}`)
 	assert.NotContains(textContent.Text, `"jobs"`) // Jobs always excluded
 }
-
-
 
 func TestListBuilds(t *testing.T) {
 	assert := require.New(t)
@@ -379,4 +385,58 @@ func TestGetBuildTestEngineRunsMissingParameters(t *testing.T) {
 	assert.NoError(err)
 	assert.True(result.IsError)
 	assert.Contains(result.Content[0].(mcp.TextContent).Text, "build_number")
+}
+
+func TestCreateBuild(t *testing.T) {
+	assert := require.New(t)
+
+	ctx := context.Background()
+	client := &MockBuildsClient{
+		CreateFunc: func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error) {
+			// Return created build
+			return buildkite.Build{
+					ID:        "123",
+					Number:    1,
+					State:     "created",
+					CreatedAt: &buildkite.Timestamp{},
+					Env: map[string]any{
+						"ENV_VAR": "value",
+					},
+					MetaData: map[string]string{
+						"meta_key": "meta_value",
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 201,
+					},
+				}, nil
+		},
+	}
+
+	tool, handler := CreateBuild(ctx, client)
+	assert.NotNil(tool)
+	assert.NotNil(handler)
+
+	request := createMCPRequest(t, map[string]any{
+		"org":           "org",
+		"pipeline_slug": "pipeline",
+	})
+
+	args := CreateBuildArgs{
+		Commit:  "abc123",
+		Message: "Test build",
+		Branch:  "main",
+		Environment: []Entry{
+			{Key: "ENV_VAR", Value: "value"},
+		},
+		MetaData: []Entry{
+			{Key: "meta_key", Value: "meta_value"},
+		},
+	}
+
+	result, err := handler(ctx, request, args)
+	assert.NoError(err)
+
+	textContent := getTextResult(t, result)
+	assert.Equal(`{"id":"123","number":1,"state":"created","blocked":false,"author":{},"env":{"ENV_VAR":"value"},"created_at":"0001-01-01T00:00:00Z","meta_data":{"meta_key":"meta_value"},"creator":{"avatar_url":"","created_at":null,"email":"","id":"","name":""}}`, textContent.Text)
 }

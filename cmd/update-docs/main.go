@@ -16,8 +16,8 @@ import (
 const (
 	readmePath = "README.md"
 	// Markers for the tools section in the README
-	toolsSectionStart = "# Tools"
-	toolsSectionEnd   = "Example of the `get_pipeline` tool in action."
+	toolsSectionStart = "## 🛠️ Tools & Features"
+	toolsSectionEnd   = "## 📸 Screenshots"
 )
 
 func main() {
@@ -39,13 +39,13 @@ func main() {
 func generateToolsDocs(tools []server.ServerTool) string {
 	var buffer strings.Builder
 
-	buffer.WriteString(toolsSectionStart + "\n\n")
+	buffer.WriteString(toolsSectionStart + "\n\n| Tool | Description |\n|------|-------------|\n")
 
 	for _, st := range tools {
-		buffer.WriteString(fmt.Sprintf("* `%s` - %s\n", st.Tool.Name, st.Tool.Description))
+		buffer.WriteString(fmt.Sprintf("| `%s` | %s |\n", st.Tool.Name, st.Tool.Description))
 	}
 
-	buffer.WriteString("\n")
+	buffer.WriteString("\n---\n\n")
 
 	return buffer.String()
 }
