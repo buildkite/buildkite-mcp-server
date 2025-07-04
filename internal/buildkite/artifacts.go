@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/internal/trace"
 	"github.com/buildkite/go-buildkite/v4"
@@ -32,9 +33,44 @@ func (a *BuildkiteClientAdapter) ListByBuild(ctx context.Context, org, pipelineS
 	return a.Artifacts.ListByBuild(ctx, org, pipelineSlug, buildNumber, opts)
 }
 
-// DownloadArtifactByURL implements ArtifactsClient
+// DownloadArtifactByURL implements ArtifactsClient with URL rewriting support
 func (a *BuildkiteClientAdapter) DownloadArtifactByURL(ctx context.Context, url string, writer io.Writer) (*buildkite.Response, error) {
-	return a.Artifacts.DownloadArtifactByURL(ctx, url, writer)
+	// Rewrite URL if it's using the default Buildkite API URL and we have a custom base URL
+	rewrittenURL := a.rewriteArtifactURL(url)
+	return a.Artifacts.DownloadArtifactByURL(ctx, rewrittenURL, writer)
+}
+
+// rewriteArtifactURL rewrites artifact URLs to use the configured base URL
+func (a *BuildkiteClientAdapter) rewriteArtifactURL(inputURL string) string {
+	// Parse the input URL
+	parsedURL, err := url.Parse(inputURL)
+	if err != nil {
+		// If we can't parse the URL, return it as-is
+		return inputURL
+	}
+
+	// Get the configured base URL from the client
+	baseURL := a.BaseURL
+	if baseURL == nil || baseURL.String() == "" {
+		return inputURL
+	}
+
+	// Only rewrite if the base URL is different from the input URL's host and scheme
+	// and the base URL is non-empty
+	if baseURL.Host != parsedURL.Host || baseURL.Scheme != parsedURL.Scheme {
+		// Replace the host and scheme with the configured base URL
+		parsedURL.Scheme = baseURL.Scheme
+		parsedURL.Host = baseURL.Host
+
+		// If the base URL has a path prefix, prepend it to the existing path
+		if baseURL.Path != "" && baseURL.Path != "/" {
+			// Remove trailing slash from base path if present
+			basePath := strings.TrimSuffix(baseURL.Path, "/")
+			parsedURL.Path = basePath + parsedURL.Path
+		}
+	}
+
+	return parsedURL.String()
 }
 
 func ListArtifacts(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
@@ -155,7 +191,7 @@ func GetArtifact(ctx context.Context, client ArtifactsClient) (tool mcp.Tool, ha
 			var buffer bytes.Buffer
 			resp, err := client.DownloadArtifactByURL(ctx, artifactURL, &buffer)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return mcp.NewToolResultError(fmt.Sprintf("response failed with error %s", err.Error())), nil
 			}
 
 			if resp.StatusCode != http.StatusOK {
