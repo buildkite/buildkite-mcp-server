@@ -41,9 +41,9 @@ kos:
     build: buildkite-mcp-server
     main: ./cmd/buildkite-mcp-server/
     creation_time: "{{.CommitTimestamp}}"
-    base_image: 'cgr.dev/chainguard/static:latest'
+    base_image: "cgr.dev/chainguard/static:latest"
     tags:
-      - '{{.Version}}'
+      - "{{.Version}}"
       - latest
     labels:
       org.opencontainers.image.authors: Buildkite Inc. https://buildkite.com
@@ -55,7 +55,7 @@ kos:
     bare: true
     preserve_import_paths: false
     # FIXME: We use GOOS and -split in our pipeline which is causing issues with the ko integration
-    # so we disable it here when the GOOS is set to something other than linux. This avoids 
+    # so we disable it here when the GOOS is set to something other than linux. This avoids
     # the ko build to fail when running on macos or windows.
     disable: '{{ and (isEnvSet "GOOS") (ne .Env.GOOS "linux") }}'
     platforms:
@@ -82,6 +82,27 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+
+# Publish new releases to our homebrew tap:
+# https://github.com/buildkite/homebrew-buildkite
+homebrew_casks:
+  - name: buildkite-mcp-server
+    repository:
+      owner: buildkite
+      name: homebrew-buildkite
+      branch: master
+    homepage: https://github.com/buildkite/buildkite-mcp-server
+    description: "Model Context Protocol server for Buildkite"
+    # We don't notarize our binaries so they fail to run when quarantined, which
+    # homebrew does by default. `brew install --no-quarantine ...` is possible,
+    # but nobody does it, and the error is opaque. So just self-release from
+    # quarantine.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/buildkite-mcp-server"]
+          end
 
 release:
   footer: >-
