@@ -42,6 +42,8 @@ kos:
     main: ./cmd/buildkite-mcp-server/
     creation_time: "{{.CommitTimestamp}}"
     base_image: 'cgr.dev/chainguard/static:latest'
+    flags:
+      - verbose
     tags:
       - '{{.Version}}'
       - latest
