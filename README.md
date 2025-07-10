@@ -352,8 +352,6 @@ Or you can manually configure:
 
 ![Get Pipeline Tool](docs/images/get_pipeline.png)
 
-
-
 ---
 
 ## 🔒 Security
