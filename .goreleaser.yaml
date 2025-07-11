@@ -84,6 +84,8 @@ changelog:
       - "^test:"
 
 release:
+  extra_files:
+    - glob: "*.dxt"
   footer: >-
 
     ---
