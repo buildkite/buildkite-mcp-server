@@ -375,8 +375,6 @@ When the threshold is exceeded, the `get_job_logs` tool will:
 
 ![Get Pipeline Tool](docs/images/get_pipeline.png)
 
-
-
 ---
 
 ## 🔒 Security
