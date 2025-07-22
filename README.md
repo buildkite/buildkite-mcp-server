@@ -153,7 +153,7 @@ Local binary, with the [Job Log Token Threshold](#job-log-token-threshold) flag 
     "buildkite": {
       "command": "buildkite-mcp-server",
       "args": ["stdio"],
-      "env": { "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx", "JOB_LOG_TOKEN_THRESHOLD": 2000 }
+      "env": { "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx", "JOB_LOG_TOKEN_THRESHOLD": "2000" }
     }
   }
 }
@@ -204,7 +204,7 @@ Local binary, with the [Job Log Token Threshold](#job-log-token-threshold) flag 
     "buildkite": {
       "command": "buildkite-mcp-server",
       "args": ["stdio"],
-      "env": { "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx", "JOB_LOG_TOKEN_THRESHOLD": 2000 }
+      "env": { "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx", "JOB_LOG_TOKEN_THRESHOLD": "2000" }
     }
   }
 }
@@ -237,7 +237,7 @@ extensions:
     cmd: buildkite-mcp-server
     args: [stdio]
     enabled: true
-    envs: { "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx", "JOB_LOG_TOKEN_THRESHOLD": 2000 }
+    envs: { "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx", "JOB_LOG_TOKEN_THRESHOLD": "2000" }
     type: stdio
     timeout: 300
 ```
@@ -294,7 +294,7 @@ Local binary, with the [Job Log Token Threshold](#job-log-token-threshold) flag 
     "buildkite": {
       "command": "buildkite-mcp-server",
       "args": ["stdio"],
-      "env": { "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx", "JOB_LOG_TOKEN_THRESHOLD": 2000 }
+      "env": { "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx", "JOB_LOG_TOKEN_THRESHOLD": "2000" }
     }
   }
 }
