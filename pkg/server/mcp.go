@@ -76,6 +76,9 @@ func BuildkiteTools(client *gobuildkite.Client) []server.ServerTool {
 	// Job tools
 	tools = addTool(buildkite.GetJobs(client.Builds))
 	tools = addTool(buildkite.GetJobLogs(client))
+	tools = addTool(
+		fromTypeTool(buildkite.UnblockJob(client.Jobs)),
+	)
 
 	// Artifacts tools
 	tools = addTool(buildkite.ListArtifacts(clientAdapter))

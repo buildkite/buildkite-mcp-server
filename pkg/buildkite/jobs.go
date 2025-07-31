@@ -20,6 +20,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+// JobsClient defines the interface for job operations
+type JobsClient interface {
+	UnblockJob(ctx context.Context, org, pipeline, buildNumber, jobID string, opt *buildkite.JobUnblockOptions) (buildkite.Job, *buildkite.Response, error)
+}
+
 // withJobsPagination adds client-side pagination options to a tool with a max of 50 per page
 func withJobsPagination() mcp.ToolOption {
 	return func(tool *mcp.Tool) {
@@ -335,4 +340,103 @@ func handleLargeLogFile(ctx context.Context, processedLog string, response JobLo
 	}
 
 	return mcp.NewToolResultText(string(r)), nil
+}
+
+// UnblockJobArgs represents the arguments for unblocking a job
+type UnblockJobArgs struct {
+	OrgSlug      string            `json:"org_slug"`
+	PipelineSlug string            `json:"pipeline_slug"`
+	BuildNumber  string            `json:"build_number"`
+	JobID        string            `json:"job_id"`
+	Fields       map[string]string `json:"fields,omitempty"`
+}
+
+func UnblockJob(client JobsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[UnblockJobArgs]) {
+	return mcp.NewTool("unblock_job",
+			mcp.WithDescription("Unblock a blocked job in a build pipeline. This allows you to continue pipeline execution that is waiting on manual approval or input."),
+			mcp.WithString("org_slug",
+				mcp.Required(),
+				mcp.Description("The organization slug for the owner of the pipeline"),
+			),
+			mcp.WithString("pipeline_slug",
+				mcp.Required(),
+				mcp.Description("The slug of the pipeline"),
+			),
+			mcp.WithString("build_number",
+				mcp.Required(),
+				mcp.Description("The number of the build"),
+			),
+			mcp.WithString("job_id",
+				mcp.Required(),
+				mcp.Description("The UUID of the job to unblock"),
+			),
+			mcp.WithObject("fields",
+				mcp.Description("Optional form field values to submit with the unblock request. This should be a map of field keys to their values as defined in the block step configuration."),
+			),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        "Unblock Job",
+				ReadOnlyHint: mcp.ToBoolPtr(false),
+			}),
+		),
+		func(ctx context.Context, request mcp.CallToolRequest, args UnblockJobArgs) (*mcp.CallToolResult, error) {
+			ctx, span := trace.Start(ctx, "buildkite.UnblockJob")
+			defer span.End()
+
+			if args.OrgSlug == "" {
+				return mcp.NewToolResultError("org_slug is required"), nil
+			}
+			if args.PipelineSlug == "" {
+				return mcp.NewToolResultError("pipeline_slug is required"), nil
+			}
+			if args.BuildNumber == "" {
+				return mcp.NewToolResultError("build_number is required"), nil
+			}
+			if args.JobID == "" {
+				return mcp.NewToolResultError("job_id is required"), nil
+			}
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("build_number", args.BuildNumber),
+				attribute.String("job_id", args.JobID),
+			)
+
+			// Prepare unblock options
+			var unblockOptions *buildkite.JobUnblockOptions
+			if args.Fields != nil && len(args.Fields) > 0 {
+				unblockOptions = &buildkite.JobUnblockOptions{
+					Fields: args.Fields,
+				}
+			}
+
+			// Call the API to unblock the job
+			job, resp, err := client.UnblockJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, unblockOptions)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("failed to unblock job: %s", err.Error())), nil
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return nil, fmt.Errorf("failed to read response body: %w", err)
+				}
+				return mcp.NewToolResultError(fmt.Sprintf("failed to unblock job: %s", string(body))), nil
+			}
+
+			// Marshal the response
+			r, err := json.Marshal(&job)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal unblocked job: %w", err)
+			}
+
+			log.Info().
+				Str("org_slug", args.OrgSlug).
+				Str("pipeline_slug", args.PipelineSlug).
+				Str("build_number", args.BuildNumber).
+				Str("job_id", args.JobID).
+				Msg("Successfully unblocked job")
+
+			return mcp.NewToolResultText(string(r)), nil
+		}
 }
