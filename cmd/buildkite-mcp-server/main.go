@@ -18,7 +18,7 @@ var (
 
 	cli struct {
 		Stdio       commands.StdioCmd `cmd:"" help:"stdio mcp server."`
-		HTTP        commands.HTTPCmd  `cmd:"" help:"http mcp server."`
+		HTTP        commands.HTTPCmd  `cmd:"" help:"http mcp server. (pass --use-sse to use SSE transport"`
 		Tools       commands.ToolsCmd `cmd:"" help:"list available tools." hidden:""`
 		APIToken    string            `help:"The Buildkite API token to use." env:"BUILDKITE_API_TOKEN"`
 		BaseURL     string            `help:"The base URL of the Buildkite API to use." env:"BUILDKITE_BASE_URL" default:"https://api.buildkite.com/"`
