@@ -10,7 +10,6 @@ import (
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/go-buildkite/v4"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -21,40 +20,71 @@ type PipelinesClient interface {
 	Update(ctx context.Context, org, pipelineSlug string, p buildkite.UpdatePipeline) (buildkite.Pipeline, *buildkite.Response, error)
 }
 
-func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+type ListPipelinesArgs struct {
+	Org         string `json:"org"`
+	Name        string `json:"name"`
+	Repository  string `json:"repository"`
+	Page        int    `json:"page"`
+	PerPage     int    `json:"per_page"`
+	DetailLevel string `json:"detail_level"` // "summary", "detailed", "full"
+}
+
+func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[ListPipelinesArgs]) {
 	return mcp.NewTool("list_pipelines",
 			mcp.WithDescription("List all pipelines in an organization with their basic details, build counts, and current status"),
 			mcp.WithString("org",
 				mcp.Required(),
 				mcp.Description("The organization slug for the owner of the pipeline"),
 			),
+			mcp.WithString("name",
+				mcp.Description("Filter pipelines by name"),
+			),
+			mcp.WithString("repository",
+				mcp.Description("Filter pipelines by repository URL"),
+			),
+			mcp.WithString("detail_level",
+				mcp.Description("Response detail level: 'summary' (default), 'detailed', or 'full'"),
+			),
 			withPagination(),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:        "List Pipelines",
 				ReadOnlyHint: mcp.ToBoolPtr(true),
 			}),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		), func(ctx context.Context, request mcp.CallToolRequest, args ListPipelinesArgs) (*mcp.CallToolResult, error) {
 			ctx, span := trace.Start(ctx, "buildkite.ListPipelines")
 			defer span.End()
 
-			org, err := request.RequireString("org")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.Org == "" {
+				return mcp.NewToolResultError("org is required"), nil
 			}
 
-			paginationParams, err := optionalPaginationParams(request)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			// Set defaults
+			if args.DetailLevel == "" {
+				args.DetailLevel = "summary"
+			}
+			if args.Page == 0 {
+				args.Page = 1
+			}
+			if args.PerPage == 0 {
+				args.PerPage = 30
 			}
 
 			span.SetAttributes(
-				attribute.String("org", org),
-				attribute.Int("page", paginationParams.Page),
-				attribute.Int("per_page", paginationParams.PerPage),
+				attribute.String("org", args.Org),
+				attribute.String("name_filter", args.Name),
+				attribute.String("repository_filter", args.Repository),
+				attribute.String("detail_level", args.DetailLevel),
+				attribute.Int("page", args.Page),
+				attribute.Int("per_page", args.PerPage),
 			)
 
-			pipelines, resp, err := client.List(ctx, org, &buildkite.PipelineListOptions{
-				ListOptions: paginationParams,
+			pipelines, resp, err := client.List(ctx, args.Org, &buildkite.PipelineListOptions{
+				ListOptions: buildkite.ListOptions{
+					Page:    args.Page,
+					PerPage: args.PerPage,
+				},
+				Name:       args.Name,
+				Repository: args.Repository,
 			})
 			if err != nil {
 				var errResp *buildkite.ErrorResponse
@@ -67,14 +97,19 @@ func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler server.ToolHa
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			result := PaginatedResult[buildkite.Pipeline]{
-				Items: pipelines,
-				Headers: map[string]string{
-					"Link": resp.Header.Get("Link"),
-				},
+			headers := map[string]string{"Link": resp.Header.Get("Link")}
+
+			var result interface{}
+			switch args.DetailLevel {
+			case "summary":
+				result = createPaginatedResult(pipelines, summarizePipeline, headers)
+			case "detailed":
+				result = createPaginatedResult(pipelines, detailPipeline, headers)
+			default: // "full"
+				result = createPaginatedResult(pipelines, func(p buildkite.Pipeline) buildkite.Pipeline { return p }, headers)
 			}
 
-			r, err := json.Marshal(&result)
+			r, err := json.Marshal(result)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal pipelines: %w", err)
 			}
@@ -83,7 +118,13 @@ func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler server.ToolHa
 		}
 }
 
-func GetPipeline(client PipelinesClient) (tool mcp.Tool, handler server.ToolHandlerFunc) {
+type GetPipelineArgs struct {
+	Org          string `json:"org"`
+	PipelineSlug string `json:"pipeline_slug"`
+	DetailLevel  string `json:"detail_level"` // "summary", "detailed", "full"
+}
+
+func GetPipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[GetPipelineArgs]) {
 	return mcp.NewTool("get_pipeline",
 			mcp.WithDescription("Get detailed information about a specific pipeline including its configuration, steps, environment variables, and build statistics"),
 			mcp.WithString("org",
@@ -94,31 +135,37 @@ func GetPipeline(client PipelinesClient) (tool mcp.Tool, handler server.ToolHand
 				mcp.Required(),
 				mcp.Description("The slug of the pipeline"),
 			),
+			mcp.WithString("detail_level",
+				mcp.Description("Response detail level: 'summary', 'detailed', or 'full' (default)"),
+			),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:        "Get Pipeline",
 				ReadOnlyHint: mcp.ToBoolPtr(true),
 			}),
 		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		func(ctx context.Context, request mcp.CallToolRequest, args GetPipelineArgs) (*mcp.CallToolResult, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetPipeline")
 			defer span.End()
 
-			org, err := request.RequireString("org")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.Org == "" {
+				return mcp.NewToolResultError("org is required"), nil
+			}
+			if args.PipelineSlug == "" {
+				return mcp.NewToolResultError("pipeline_slug is required"), nil
 			}
 
-			pipelineSlug, err := request.RequireString("pipeline_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			// Set default
+			if args.DetailLevel == "" {
+				args.DetailLevel = "full"
 			}
 
 			span.SetAttributes(
-				attribute.String("org", org),
-				attribute.String("pipeline_slug", pipelineSlug),
+				attribute.String("org", args.Org),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("detail_level", args.DetailLevel),
 			)
 
-			pipeline, _, err := client.Get(ctx, org, pipelineSlug)
+			pipeline, _, err := client.Get(ctx, args.Org, args.PipelineSlug)
 			if err != nil {
 				var errResp *buildkite.ErrorResponse
 				if errors.As(err, &errResp) {
@@ -130,13 +177,108 @@ func GetPipeline(client PipelinesClient) (tool mcp.Tool, handler server.ToolHand
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			r, err := json.Marshal(&pipeline)
+			var result any
+			switch args.DetailLevel {
+			case "summary":
+				result = summarizePipeline(pipeline)
+			case "detailed":
+				result = detailPipeline(pipeline)
+			default: // "full"
+				result = pipeline
+			}
+
+			r, err := json.Marshal(result)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal issue: %w", err)
+				return nil, fmt.Errorf("failed to marshal pipeline: %w", err)
 			}
 
 			return mcp.NewToolResultText(string(r)), nil
 		}
+}
+
+// PipelineSummary contains essential pipeline fields for token-efficient responses
+type PipelineSummary struct {
+	ID            string               `json:"id"`
+	Name          string               `json:"name"`
+	Slug          string               `json:"slug"`
+	Repository    string               `json:"repository"`
+	DefaultBranch string               `json:"default_branch"`
+	WebURL        string               `json:"web_url"`
+	Visibility    string               `json:"visibility"`
+	CreatedAt     *buildkite.Timestamp `json:"created_at"`
+	ArchivedAt    *buildkite.Timestamp `json:"archived_at,omitempty"`
+}
+
+// PipelineDetail contains pipeline fields excluding heavy configuration data
+type PipelineDetail struct {
+	ID                        string               `json:"id"`
+	Name                      string               `json:"name"`
+	Slug                      string               `json:"slug"`
+	Repository                string               `json:"repository"`
+	WebURL                    string               `json:"web_url"`
+	DefaultBranch             string               `json:"default_branch"`
+	Description               string               `json:"description"`
+	ClusterID                 string               `json:"cluster_id"`
+	Visibility                string               `json:"visibility"`
+	Tags                      []string             `json:"tags"`
+	SkipQueuedBranchBuilds    bool                 `json:"skip_queued_branch_builds"`
+	CancelRunningBranchBuilds bool                 `json:"cancel_running_branch_builds"`
+	StepsCount                int                  `json:"steps_count"`
+	CreatedAt                 *buildkite.Timestamp `json:"created_at"`
+	ArchivedAt                *buildkite.Timestamp `json:"archived_at,omitempty"`
+}
+
+// summarizePipeline converts a full Pipeline to PipelineSummary
+func summarizePipeline(p buildkite.Pipeline) PipelineSummary {
+	return PipelineSummary{
+		ID:            p.ID,
+		Name:          p.Name,
+		Slug:          p.Slug,
+		Repository:    p.Repository,
+		DefaultBranch: p.DefaultBranch,
+		WebURL:        p.WebURL,
+		Visibility:    p.Visibility,
+		CreatedAt:     p.CreatedAt,
+		ArchivedAt:    p.ArchivedAt,
+	}
+}
+
+// detailPipeline converts a full Pipeline to PipelineDetail
+func detailPipeline(p buildkite.Pipeline) PipelineDetail {
+	stepsCount := 0
+	if p.Steps != nil {
+		stepsCount = len(p.Steps)
+	}
+
+	return PipelineDetail{
+		ID:                        p.ID,
+		Name:                      p.Name,
+		Slug:                      p.Slug,
+		Repository:                p.Repository,
+		WebURL:                    p.WebURL,
+		DefaultBranch:             p.DefaultBranch,
+		Description:               p.Description,
+		ClusterID:                 p.ClusterID,
+		Visibility:                p.Visibility,
+		Tags:                      p.Tags,
+		SkipQueuedBranchBuilds:    p.SkipQueuedBranchBuilds,
+		CancelRunningBranchBuilds: p.CancelRunningBranchBuilds,
+		StepsCount:                stepsCount,
+		CreatedAt:                 p.CreatedAt,
+		ArchivedAt:                p.ArchivedAt,
+	}
+}
+
+// createPaginatedResult is a generic helper to convert pipelines and wrap in paginated result
+func createPaginatedResult[T any](pipelines []buildkite.Pipeline, converter func(buildkite.Pipeline) T, headers map[string]string) PaginatedResult[T] {
+	items := make([]T, len(pipelines))
+	for i, p := range pipelines {
+		items[i] = converter(p)
+	}
+	return PaginatedResult[T]{
+		Items:   items,
+		Headers: headers,
+	}
 }
 
 type CreatePipelineArgs struct {

@@ -71,15 +71,18 @@ func TestListPipelines(t *testing.T) {
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org": "org",
-	})
-	result, err := handler(ctx, request)
+	request := createMCPRequest(t, map[string]any{})
+
+	args := ListPipelinesArgs{
+		Org: "org",
+	}
+
+	result, err := handler(ctx, request, args)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
 
-	assert.Equal(`{"headers":{"Link":""},"items":[{"id":"123","name":"Test Pipeline","slug":"test-pipeline","created_at":"0001-01-01T00:00:00Z","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider":{"id":"","webhook_url":"","settings":null}}]}`, textContent.Text)
+	assert.Equal(`{"headers":{"Link":""},"items":[{"id":"123","name":"Test Pipeline","slug":"test-pipeline","repository":"","default_branch":"","web_url":"","visibility":"","created_at":"0001-01-01T00:00:00Z"}]}`, textContent.Text)
 }
 
 func TestGetPipeline(t *testing.T) {
@@ -105,11 +108,14 @@ func TestGetPipeline(t *testing.T) {
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org":           "org",
-		"pipeline_slug": "pipeline",
-	})
-	result, err := handler(ctx, request)
+	request := createMCPRequest(t, map[string]any{})
+
+	args := GetPipelineArgs{
+		Org:          "org",
+		PipelineSlug: "pipeline",
+	}
+
+	result, err := handler(ctx, request, args)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)

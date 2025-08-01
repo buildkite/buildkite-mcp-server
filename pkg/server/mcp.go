@@ -53,8 +53,12 @@ func BuildkiteTools(client *gobuildkite.Client, buildkiteLogsClient *buildkitelo
 	tools = addTool(buildkite.ListClusterQueues(client.ClusterQueues))
 
 	// Pipeline tools
-	tools = addTool(buildkite.GetPipeline(client.Pipelines))
-	tools = addTool(buildkite.ListPipelines(client.Pipelines))
+	tools = addTool(
+		fromTypeTool(buildkite.GetPipeline(client.Pipelines)),
+	)
+	tools = addTool(
+		fromTypeTool(buildkite.ListPipelines(client.Pipelines)),
+	)
 	tools = addTool(
 		fromTypeTool(buildkite.CreatePipeline(client.Pipelines)),
 	)
