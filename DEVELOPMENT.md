@@ -53,7 +53,7 @@ docker run -i --rm -e BUILDKITE_API_TOKEN="your-token" buildkite/buildkite-mcp-s
 
 # Adding a new Tool
 
-1. Implement a tool following the patterns in the [internal/buildkite](internal/buildkite) package - mostly delegating to [go-buildkite](https://github.com/buildkite/go-buildkite) and returning JSON. We can play with nicer formatting later and see if it helps. 
+1. Implement a tool following the patterns in the [internal/buildkite](internal/buildkite) package - mostly delegating to [go-buildkite](https://github.com/buildkite/go-buildkite) and returning JSON. We can play with nicer formatting later and see if it helps.
 2. Register the tool here in the [internal/stdio](internal/commands/stdio.go) file.
 3. Update the README tool list.
 4. Profit!
@@ -69,12 +69,24 @@ npx @modelcontextprotocol/inspector@latest buildkite-mcp-server stdio
 
 Then log into the web UI and hit connect.
 
-# Releasing to GitHub
+# Publishing a release
+
+- Draft a new release on GitHub: https://github.com/buildkite/buildkite-mcp-server/releases/new
+- Select a new tag version, bumping the minor or patch versions as appropriate. This project is pre-1.0, so we don't make strong compatibility guarantees.
+- Generate release notes
+- Save the release as a draft, and mention internal contributors on Slack before publishing
+- Publish the release
+
+A Buildkite pipeline will then automatically invoke the publishing pipeline, including publishing to GitHub Container Registry, Docker Hub, and update binaries to the GitHub release assets.
+
+# Manually releasing to GitHub Container Registry
+
+This process is automated by the CI pipeline, however you can manually release by following these steps:
 
 To push docker images GHCR you will need to login, you will need to generate a legacy GitHub PSK to do a release locally. This will be entered in the command below.
 
 ```
-docker login ghcr.io --username $(gh api user --jq '.login') 
+docker login ghcr.io --username $(gh api user --jq '.login')
 ```
 
 Publish a release in GitHub, use the "generate changelog" button to build the changelog, this will create a tag for the release.
