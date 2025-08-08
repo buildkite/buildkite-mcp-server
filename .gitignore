@@ -6,6 +6,8 @@ vendor/
 *.zip
 .bk.yaml
 /buildkite-mcp-server
+buildkite-mcp-server-*
+*.dxt
 coverage.out
 /specs
 
