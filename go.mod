@@ -3,7 +3,7 @@ module github.com/buildkite/buildkite-mcp-server
 go 1.24.5
 
 require (
-	github.com/alecthomas/kong v1.12.0
+	github.com/alecthomas/kong v1.12.1
 	github.com/buildkite/buildkite-logs v0.5.2
 	github.com/buildkite/go-buildkite/v4 v4.5.1
 	github.com/buildkite/terminal-to-html/v3 v3.16.8
