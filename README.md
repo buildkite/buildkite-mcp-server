@@ -384,6 +384,7 @@ Or you can manually configure:
 | Variable | Description | Default | Usage |
 |----------|-------------|---------|-------|
 | `BUILDKITE_API_TOKEN` | Your Buildkite API access token | Required | Authentication for all API requests |
+| `HTTP_LISTEN_ADDR` | Address for HTTP server to listen on | `localhost:3000` | Used with `http` command |
 
 ---
 
@@ -430,7 +431,7 @@ Inspect Buildkite job logs in milliseconds, with full-text search, tail, and str
 The server ships with four log analysis tools that convert Buildkite job output to structured Parquet data for efficient querying:
 
 - **`search_logs`** – Regex search with context lines for debugging failures
-- **`tail_logs`** – Show last N lines for recent errors and status checks  
+- **`tail_logs`** – Show last N lines for recent errors and status checks
 - **`read_logs`** – Stream log entries from specific positions
 - **`get_logs_info`** – File metadata and statistics before reading content
 
@@ -451,7 +452,7 @@ The first request downloads and converts logs to Parquet format; subsequent requ
 # Local development with persistent cache
 export BKLOG_CACHE_URL="file:///Users/me/bklog-cache"
 
-# Shared cache across build agents  
+# Shared cache across build agents
 export BKLOG_CACHE_URL="s3://ci-logs-cache/buildkite/"
 ```
 
@@ -462,14 +463,29 @@ export BKLOG_CACHE_URL="s3://ci-logs-cache/buildkite/"
 You can also run the MCP server using the Streamable HTTP Transport, and connect to the MCP server at <http://localhost:3000/mcp>.
 
 ```sh
-buildkite-mcp-server http --listen "localhost:3000" --api-token=${BUILDKITE_API_TOKEN}
+buildkite-mcp-server http --api-token=${BUILDKITE_API_TOKEN}
 ```
 
 Or with the legacy HTTP/SSE transport, and connect to the MCP server at <http://localhost:3000/sse>.
 
 ```sh
-buildkite-mcp-server http --listen "localhost:3000" --use-sse --api-token=${BUILDKITE_API_TOKEN}
+buildkite-mcp-server http --use-sse --api-token=${BUILDKITE_API_TOKEN}
 ```
+
+You can also set the listen address via environment variable:
+
+```sh
+HTTP_LISTEN_ADDR="localhost:4321" buildkite-mcp-server http
+```
+
+To run the server with Streamable HTTP transport in a docker and expose on port 3000.
+
+```sh
+docker run --pull=always -q --rm -e BUILDKITE_API_TOKEN -e HTTP_LISTEN_ADDR=":3000" -p 127.0.0.1:3000:3000 buildkite/mcp-server http
+```
+
+> [!CAUTION]
+> By default, [Docker will bind published ports on all interfaces](https://docs.docker.com/engine/network/#published-ports), making your MCP server accessible from any devices on your local network. We recommend using the default stdio transport when used locally, but if you must use HTTP/SSE, binding the forwarded port to `127.0.0.1`, as in the example above will prevent other devices on your local network from accessing the server.
 
 ## 📸 Screenshots
 
