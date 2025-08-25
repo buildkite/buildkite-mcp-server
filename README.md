@@ -32,7 +32,20 @@ docker run --pull=always -q -it --rm -e BUILDKITE_API_TOKEN=bkua_xxxxx buildkite
 
 ---
 
-## 🛠️ Prerequisites
+## Installation
+
+### Desktop Extension (DXT) - Recommended
+
+The easiest way to install and use the Buildkite MCP Server is as a Desktop Extension (DXT). This provides a one-click installation experience for Claude Desktop and other compatible applications.
+
+1. Download the latest `buildkite-mcp-server.dxt` file from the [releases page](https://github.com/buildkite/buildkite-mcp-server/releases)
+2. Double-click the `.dxt` file to install it in Claude Desktop
+3. Configure your Buildkite API token when prompted
+4. Start using Buildkite tools in Claude!
+
+The DXT package includes cross-platform binaries and handles all configuration automatically.
+
+### Production
 
 | Requirement | Notes |
 |-------------|-------|
