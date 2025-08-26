@@ -78,8 +78,8 @@ github.com/buger/jsonparser v1.1.1 h1:2PnMjfWD7wBILjqQbt530v576A/cAbQvEW9gGIpYMU
 github.com/buger/jsonparser v1.1.1/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
 github.com/buildkite/buildkite-logs v0.6.0 h1:wp0B2upLG6ChjpmdEeYhHvn6rDVTIGovAFk7phLSQfU=
 github.com/buildkite/buildkite-logs v0.6.0/go.mod h1:ejxwp0IDk7Wd0yTH0Cvnw8GgRGnpboe6Up4k9SGmWTg=
-github.com/buildkite/go-buildkite/v4 v4.5.1 h1:45Vgtua5PlZwaaHiI0i7Zz9icOS8PTHkW1YIetpf7Xs=
-github.com/buildkite/go-buildkite/v4 v4.5.1/go.mod h1:fMPu+/7hXzJ7Gy3HpGuVCLgeHqzDdrgHuwQvt8p370I=
+github.com/buildkite/go-buildkite/v4 v4.6.0 h1:9CSR/ENA5pc1rqp1fjlybKeG3VAKsLN8qCiNzvUAQW8=
+github.com/buildkite/go-buildkite/v4 v4.6.0/go.mod h1:fMPu+/7hXzJ7Gy3HpGuVCLgeHqzDdrgHuwQvt8p370I=
 github.com/buildkite/terminal-to-html/v3 v3.16.8 h1:QN/daUob6cmK8GcdKnwn9+YTlPr1vNj+oeAIiJK6fPc=
 github.com/buildkite/terminal-to-html/v3 v3.16.8/go.mod h1:+k1KVKROZocrTLsEQ9PEf9A+8+X8uaVV5iO1ZIOwKYM=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=
