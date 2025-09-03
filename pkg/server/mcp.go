@@ -14,14 +14,25 @@ func fromTypeTool[T any](tool mcp.Tool, handler mcp.TypedToolHandlerFunc[T]) (mc
 	return tool, mcp.NewTypedToolHandler(handler)
 }
 
-func NewMCPServer(version string, client *gobuildkite.Client, buildkiteLogsClient *buildkitelogs.Client) *server.MCPServer {
+func NewMCPServer(version string, client *gobuildkite.Client, buildkiteLogsClient *buildkitelogs.Client, opts ...Option) *server.MCPServer {
+	// apply functional options
+	newMCPOptions := &options{}
+	for _, opt := range opts {
+		opt(newMCPOptions)
+	}
+
+	hooks := trace.NewHooks()
+	if newMCPOptions.hooksCallback != nil {
+		newMCPOptions.hooksCallback(hooks)
+	}
+
 	s := server.NewMCPServer(
 		"buildkite-mcp-server",
 		version,
 		server.WithToolCapabilities(true),
 		server.WithPromptCapabilities(true),
 		server.WithResourceCapabilities(true, true),
-		server.WithHooks(trace.NewHooks()),
+		server.WithHooks(hooks),
 		server.WithLogging())
 
 	log.Info().Str("version", version).Msg("Starting Buildkite MCP server")
@@ -39,6 +50,20 @@ func NewMCPServer(version string, client *gobuildkite.Client, buildkiteLogsClien
 	), buildkite.HandleDebugLogsGuideResource)
 
 	return s
+}
+
+// Option is an optional parameter to the new MCP server
+type Option func(*options)
+
+type options struct {
+	hooksCallback func(hooks *server.Hooks)
+}
+
+// WithHooks allows passing in a callback to modify the hooks in MCP server creation
+func WithHooks(callback func(hooks *server.Hooks)) Option {
+	return func(o *options) {
+		o.hooksCallback = callback
+	}
 }
 
 func BuildkiteTools(client *gobuildkite.Client, buildkiteLogsClient *buildkitelogs.Client) []server.ServerTool {
