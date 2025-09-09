@@ -326,7 +326,7 @@ extensions:
     "buildkite": {
       "command": "docker",
       "args": [
-        "run", "--pull=always", "-q", 
+        "run", "--pull=always", "-q",
         "-i", "--rm", "-e", "BUILDKITE_API_TOKEN",
         "buildkite/mcp-server", "stdio"
       ],
@@ -345,7 +345,7 @@ extensions:
     "buildkite": {
       "command": "docker",
       "args": [
-        "run", "--pull=always", "-q", 
+        "run", "--pull=always", "-q",
         "-i", "--rm", "-e", "BUILDKITE_API_TOKEN",
         "buildkite/mcp-server", "stdio"
       ],
@@ -418,7 +418,47 @@ Or you can manually configure:
 | Variable | Description | Default | Usage |
 |----------|-------------|---------|-------|
 | `BUILDKITE_API_TOKEN` | Your Buildkite API access token | Required | Authentication for all API requests |
+| `BUILDKITE_READ_ONLY` | Enable read-only mode, filtering out write operations | `false` | Restricts server to only expose read-only tools |
+| `BUILDKITE_TOOLSETS` | Comma-separated list of toolsets to enable | `all` | Controls which tool categories are available |
 | `HTTP_LISTEN_ADDR` | Address for HTTP server to listen on | `localhost:3000` | Used with `http` command |
+
+### 🔒 Read-Only Mode
+
+When `BUILDKITE_READ_ONLY=true` is set, the MCP server will only expose read-only tools, filtering out any tools that perform write operations (like creating builds, updating pipelines, or unblocking jobs). This is useful for:
+
+- **Production monitoring**: Access data without risk of accidental modifications
+- **Audit environments**: Ensure compliance with read-only access policies
+- **CI/CD pipelines**: Safely query build status and logs without side effects
+- **Shared AI assistants**: Allow multiple users to query data without write permissions
+
+**Examples:**
+
+```bash
+# Docker with read-only mode
+docker run --pull=always -q -it --rm \
+  -e BUILDKITE_API_TOKEN=bkua_xxxxx \
+  -e BUILDKITE_READ_ONLY=true \
+  buildkite/mcp-server stdio
+
+# Local binary with read-only mode and specific toolsets
+BUILDKITE_READ_ONLY=true BUILDKITE_TOOLSETS=builds,pipelines buildkite-mcp-server stdio
+```
+
+For Claude Desktop configuration with read-only mode:
+```json
+{
+  "mcpServers": {
+    "buildkite-readonly": {
+      "command": "docker",
+      "args": ["run", "--pull=always", "-q", "-i", "--rm", "-e", "BUILDKITE_API_TOKEN", "-e", "BUILDKITE_READ_ONLY", "buildkite/mcp-server", "stdio"],
+      "env": {
+        "BUILDKITE_API_TOKEN": "bkua_xxxxxxxx",
+        "BUILDKITE_READ_ONLY": "true"
+      }
+    }
+  }
+}
+```
 
 ---
 
