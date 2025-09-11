@@ -78,8 +78,8 @@ github.com/buger/jsonparser v1.1.1 h1:2PnMjfWD7wBILjqQbt530v576A/cAbQvEW9gGIpYMU
 github.com/buger/jsonparser v1.1.1/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
 github.com/buildkite/buildkite-logs v0.6.1 h1:5SlAsAFYKy1rl3j7GNldgeOzBMbuKYSgdFlvNnVINEs=
 github.com/buildkite/buildkite-logs v0.6.1/go.mod h1:ejxwp0IDk7Wd0yTH0Cvnw8GgRGnpboe6Up4k9SGmWTg=
-github.com/buildkite/go-buildkite/v4 v4.5.1 h1:45Vgtua5PlZwaaHiI0i7Zz9icOS8PTHkW1YIetpf7Xs=
-github.com/buildkite/go-buildkite/v4 v4.5.1/go.mod h1:fMPu+/7hXzJ7Gy3HpGuVCLgeHqzDdrgHuwQvt8p370I=
+github.com/buildkite/go-buildkite/v4 v4.7.0 h1:/uYw/zhUyFZphwHCWOf3eAI70PvhvLcA51eIGmtdZbQ=
+github.com/buildkite/go-buildkite/v4 v4.7.0/go.mod h1:fMPu+/7hXzJ7Gy3HpGuVCLgeHqzDdrgHuwQvt8p370I=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=
 github.com/cenkalti/backoff v2.2.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
