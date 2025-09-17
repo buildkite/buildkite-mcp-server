@@ -481,10 +481,79 @@ This is particularly useful when you want to grant AI assistants access to query
 
 | Variable | Description | Default | Usage |
 |----------|-------------|---------|-------|
-| `BUILDKITE_API_TOKEN` | Your Buildkite API access token | Required | Authentication for all API requests |
+| `BUILDKITE_API_TOKEN` | Your Buildkite API access token | Required* | Authentication for all API requests |
+| `BUILDKITE_API_TOKEN_FROM_1PASSWORD` | 1Password item reference for API token | - | Alternative to `BUILDKITE_API_TOKEN`. Format: `op://vault/item/field` |
 | `BUILDKITE_TOOLSETS` | Comma-separated list of toolsets to enable | `all` | Controls which tool groups are available |
 | `BUILDKITE_READ_ONLY` | Enable read-only mode (filters out write operations) | `false` | Security setting for AI assistants |
 | `HTTP_LISTEN_ADDR` | Address for HTTP server to listen on | `localhost:3000` | Used with `http` command |
+
+*Either `BUILDKITE_API_TOKEN` or `BUILDKITE_API_TOKEN_FROM_1PASSWORD` must be specified, but not both.
+
+---
+
+## 🔐 1Password Integration
+
+For enhanced security, you can store your Buildkite API token in [1Password](https://1password.com/) and reference it using the 1Password CLI instead of exposing it as a plain environment variable.
+
+### Prerequisites
+
+- [1Password CLI](https://developer.1password.com/docs/cli/get-started/) installed and authenticated
+- Your Buildkite API token stored in a 1Password item
+
+### Usage
+
+Instead of using `BUILDKITE_API_TOKEN`, use `BUILDKITE_API_TOKEN_FROM_1PASSWORD` with a 1Password item reference:
+
+**Environment Variable:**
+```bash
+export BUILDKITE_API_TOKEN_FROM_1PASSWORD="op://Private/Buildkite API Token/credential"
+buildkite-mcp-server stdio
+```
+
+**Command Line:**
+```bash
+buildkite-mcp-server stdio --api-token-from-1password="op://Private/Buildkite API Token/credential"
+```
+
+> **Note:** The server will call `op read -n <reference>` to fetch the token. Ensure your 1Password CLI is properly authenticated before starting the server.
+
+### Client Configuration Examples
+
+<details>
+<summary>Claude Desktop with 1Password</summary>
+
+```jsonc
+{
+  "mcpServers": {
+    "buildkite": {
+      "command": "buildkite-mcp-server",
+      "args": ["stdio"],
+      "env": {
+        "BUILDKITE_API_TOKEN_FROM_1PASSWORD": "op://Private/Buildkite API Token/credential"
+      }
+    }
+  }
+}
+```
+</details>
+
+<details>
+<summary>VS Code with 1Password</summary>
+
+```jsonc
+{
+  "servers": {
+    "buildkite": {
+      "command": "buildkite-mcp-server",
+      "args": ["stdio"],
+      "env": {
+        "BUILDKITE_API_TOKEN_FROM_1PASSWORD": "op://Private/Buildkite API Token/credential"
+      }
+    }
+  }
+}
+```
+</details>
 
 ---
 

@@ -20,16 +20,17 @@ var (
 	version = "dev"
 
 	cli struct {
-		Stdio        commands.StdioCmd `cmd:"" help:"stdio mcp server."`
-		HTTP         commands.HTTPCmd  `cmd:"" help:"http mcp server. (pass --use-sse to use SSE transport"`
-		Tools        commands.ToolsCmd `cmd:"" help:"list available tools." hidden:""`
-		APIToken     string            `help:"The Buildkite API token to use." env:"BUILDKITE_API_TOKEN"`
-		BaseURL      string            `help:"The base URL of the Buildkite API to use." env:"BUILDKITE_BASE_URL" default:"https://api.buildkite.com/"`
-		CacheURL     string            `help:"The blob storage URL for job logs cache." env:"BKLOG_CACHE_URL"`
-		Debug        bool              `help:"Enable debug mode." env:"DEBUG"`
-		OTELExporter string            `help:"OpenTelemetry exporter to enable. Options are 'http/protobuf', 'grpc', or 'noop'." enum:"http/protobuf, grpc, noop" env:"OTEL_EXPORTER_OTLP_PROTOCOL" default:"noop"`
-		HTTPHeaders  []string          `help:"Additional HTTP headers to send with every request. Format: 'Key: Value'" name:"http-header" env:"BUILDKITE_HTTP_HEADERS"`
-		Version      kong.VersionFlag
+		Stdio                 commands.StdioCmd `cmd:"" help:"stdio mcp server."`
+		HTTP                  commands.HTTPCmd  `cmd:"" help:"http mcp server. (pass --use-sse to use SSE transport"`
+		Tools                 commands.ToolsCmd `cmd:"" help:"list available tools." hidden:""`
+		APIToken              string            `help:"The Buildkite API token to use." env:"BUILDKITE_API_TOKEN"`
+		APITokenFrom1Password string            `help:"The 1Password item to read the Buildkite API token from. Format: 'op://vault/item/field'" env:"BUILDKITE_API_TOKEN_FROM_1PASSWORD"`
+		BaseURL               string            `help:"The base URL of the Buildkite API to use." env:"BUILDKITE_BASE_URL" default:"https://api.buildkite.com/"`
+		CacheURL              string            `help:"The blob storage URL for job logs cache." env:"BKLOG_CACHE_URL"`
+		Debug                 bool              `help:"Enable debug mode." env:"DEBUG"`
+		OTELExporter          string            `help:"OpenTelemetry exporter to enable. Options are 'http/protobuf', 'grpc', or 'noop'." enum:"http/protobuf, grpc, noop" env:"OTEL_EXPORTER_OTLP_PROTOCOL" default:"noop"`
+		HTTPHeaders           []string          `help:"Additional HTTP headers to send with every request. Format: 'Key: Value'" name:"http-header" env:"BUILDKITE_HTTP_HEADERS"`
+		Version               kong.VersionFlag
 	}
 )
 
@@ -64,8 +65,14 @@ func run(ctx context.Context, cmd *kong.Context) error {
 	// Parse additional headers into a map
 	headers := commands.ParseHeaders(cli.HTTPHeaders)
 
+	// resolve the api token from either the token or 1password flag
+	apiToken, err := commands.ResolveAPIToken(cli.APIToken, cli.APITokenFrom1Password)
+	if err != nil {
+		return fmt.Errorf("failed to resolve Buildkite API token: %w", err)
+	}
+
 	client, err := gobuildkite.NewOpts(
-		gobuildkite.WithTokenAuth(cli.APIToken),
+		gobuildkite.WithTokenAuth(apiToken),
 		gobuildkite.WithUserAgent(commands.UserAgent(version)),
 		gobuildkite.WithHTTPClient(trace.NewHTTPClientWithHeaders(headers)),
 		gobuildkite.WithBaseURL(cli.BaseURL),
