@@ -17,6 +17,7 @@ type PipelinesClient interface {
 	List(ctx context.Context, org string, options *buildkite.PipelineListOptions) ([]buildkite.Pipeline, *buildkite.Response, error)
 	Create(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error)
 	Update(ctx context.Context, org, pipelineSlug string, p buildkite.UpdatePipeline) (buildkite.Pipeline, *buildkite.Response, error)
+	AddWebhook(ctx context.Context, org, slug string) (*buildkite.Response, error)
 }
 
 type ListPipelinesArgs struct {
@@ -282,6 +283,7 @@ type CreatePipelineArgs struct {
 	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds"`
 	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds"`
 	Tags                      []string `json:"tags"`
+	CreateWebhook             *bool    `json:"create_webhook"`
 }
 
 func CreatePipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[CreatePipelineArgs], scopes []string) {
@@ -313,6 +315,10 @@ func CreatePipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToo
 			),
 			mcp.WithBoolean("cancel_running_branch_builds",
 				mcp.Description("Cancel running builds when new builds are created on the same branch"),
+			),
+			mcp.WithBoolean("create_webhook",
+				mcp.Description("Create a GitHub webhook to trigger builds in response to pull-request and push events"),
+				mcp.DefaultBool(true),
 			),
 			mcp.WithArray("tags",
 				mcp.Description("Tags to apply to the pipeline. These can be used for filtering and organization"),
@@ -381,6 +387,36 @@ func CreatePipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToo
 				}
 
 				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			// create webhooks by default to align with the behavior in the dashboard
+			createWebhook := true
+			if args.CreateWebhook != nil {
+				createWebhook = *args.CreateWebhook
+			}
+
+			if createWebhook {
+				_, err := client.AddWebhook(ctx, args.OrgSlug, pipeline.Slug)
+				if err != nil {
+					result := map[string]any{
+						"pipeline": pipeline,
+						"webhook": map[string]any{
+							"created": false,
+							"error":   err.Error(),
+							"note":    "Pipeline created successfully, but webhook creation failed.",
+						},
+					}
+					return mcpTextResult(span, &result)
+				}
+
+				result := map[string]any{
+					"pipeline": pipeline,
+					"webhook": map[string]any{
+						"created": true,
+						"note":    "Pipeline and webhook created successfully.",
+					},
+				}
+				return mcpTextResult(span, &result)
 			}
 
 			return mcpTextResult(span, &pipeline)
