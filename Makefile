@@ -1,6 +1,7 @@
 # Variables
 BINARY_NAME := buildkite-mcp-server
-CMD_PATH := ./cmd/$(BINARY_NAME)
+CMD_PACKAGE := ./cmd/$(BINARY_NAME)
+DOCS_PACKAGE := ./cmd/update-docs
 COVERAGE_FILE := coverage.out
 
 # Default target
@@ -14,11 +15,11 @@ help: ## Show this help message
 
 .PHONY: build
 build: ## Build the binary
-	go build -o $(BINARY_NAME) $(CMD_PATH)/main.go
+	go build -o $(BINARY_NAME) $(CMD_PACKAGE)
 
 .PHONY: install
 install: ## Install the binary
-	go install ./cmd/...
+	go install $(CMD_PACKAGE)
 
 .PHONY: snapshot
 snapshot: ## Build snapshot with goreleaser
@@ -26,11 +27,11 @@ snapshot: ## Build snapshot with goreleaser
 
 .PHONY: update-docs
 update-docs: ## Update documentation
-	go run cmd/update-docs/main.go
+	go run $(DOCS_PACKAGE)
 
 .PHONY: run
 run: ## Run the application with stdio
-	go run $(CMD_PATH)/main.go stdio
+	go run $(CMD_PACKAGE) stdio
 
 .PHONY: test
 test: ## Run tests with coverage
