@@ -1,103 +1,63 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.buildkite/buildkite-mcp-server",
   "description": "MCP server exposing Buildkite API data (pipelines, builds, jobs, tests) to AI tooling and editors.",
-  "version": "0.6.1",
   "status": "active",
+  "version": "0.6.1",
   "repository": {
     "url": "https://github.com/buildkite/buildkite-mcp-server",
     "source": "github",
     "id": "962909011"
   },
-  "website_url": "https://buildkite.com/docs/apis/mcp-server",
-  "remotes": [
-    {
-      "type": "sse",
-      "url": "https://mcp.buildkite.com/mcp"
-    }
-  ],
   "packages": [
     {
-      "registry_type": "oci",
-      "identifier": "docker.io/buildkite/mcp-server:0.6.1",
+      "registryType": "oci",
+      "registryBaseUrl": "https://ghcr.io",
+      "identifier": "buildkite/buildkite-mcp-server",
       "version": "0.6.1",
       "transport": {
         "type": "stdio"
       },
-      "runtime_hint": "docker",
-      "runtime_arguments": [
+      "runtimeHint": "docker",
+      "runtimeArguments": [
         {
           "type": "positional",
-          "value": "run"
+          "value": "run",
+          "description": "The runtime command to execute"
+        },
+        {
+          "type": "named",
+          "name": "-i",
+          "description": "Run container in interactive mode"
+        },
+        {
+          "type": "named",
+          "name": "--rm",
+          "description": "Automatically remove the container when it exits"
+        },
+        {
+          "type": "named",
+          "name": "-e",
+          "description": "Set an environment variable in the runtime"
         },
         {
           "type": "positional",
-          "value": "--rm"
+          "value": "BUILDKITE_API_TOKEN",
+          "description": "Environment variable name"
         },
         {
           "type": "positional",
-          "value": "-i"
-        },
-        {
-          "type": "positional",
-          "value": "-e"
-        },
-        {
-          "type": "positional",
-          "value": "BUILDKITE_API_TOKEN"
-        },
-        {
-          "type": "positional",
-          "value": "docker.io/buildkite/mcp-server:0.6.1"
+          "value": "ghcr.io/buildkite/buildkite-mcp-server:0.6.1",
+          "description": "The container image to run"
         }
       ],
-      "environment_variables": [
+      "environmentVariables": [
         {
           "name": "BUILDKITE_API_TOKEN",
           "description": "Buildkite API token for authentication. Get one from https://buildkite.com/user/api-access-tokens",
-          "required": true
-        }
-      ]
-    },
-    {
-      "registry_type": "oci",
-      "identifier": "ghcr.io/buildkite/buildkite-mcp-server:0.6.1",
-      "version": "0.6.1",
-      "transport": {
-        "type": "stdio"
-      },
-      "runtime_hint": "docker",
-      "runtime_arguments": [
-        {
-          "type": "positional",
-          "value": "run"
-        },
-        {
-          "type": "positional",
-          "value": "--rm"
-        },
-        {
-          "type": "positional",
-          "value": "-i"
-        },
-        {
-          "type": "positional",
-          "value": "-e"
-        },
-        {
-          "type": "positional",
-          "value": "BUILDKITE_API_TOKEN"
-        },
-        {
-          "type": "positional",
-          "value": "ghcr.io/buildkite/buildkite-mcp-server:0.6.1"
-        }
-      ],
-      "environment_variables": [
-        {
-          "name": "BUILDKITE_API_TOKEN",
-          "description": "Buildkite API token for authentication. Get one from https://buildkite.com/user/api-access-tokens",
-          "required": true
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
         }
       ]
     }
