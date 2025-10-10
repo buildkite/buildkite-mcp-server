@@ -8,6 +8,7 @@ linters:
     - unused
     - gosec
     - gocritic
+    - testifylint
   exclusions:
     generated: lax
     presets:
@@ -34,6 +35,12 @@ formatters:
           replacement: "any"
         - pattern: "a[b:len(a)]"
           replacement: "a[b:]"
+    testifylint:
+      disable-all: true
+      enable:
+        - require-error
+        - useless-assert
+        - len
   exclusions:
     generated: lax
     paths:

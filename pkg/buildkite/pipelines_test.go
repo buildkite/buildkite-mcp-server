@@ -91,7 +91,7 @@ func TestListPipelines(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 
-	assert.Equal(`{"headers":{"Link":""},"items":[{"id":"123","name":"Test Pipeline","slug":"test-pipeline","repository":"","default_branch":"","web_url":"","visibility":"","created_at":"0001-01-01T00:00:00Z"}]}`, textContent.Text)
+	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"123","name":"Test Pipeline","slug":"test-pipeline","repository":"","default_branch":"","web_url":"","visibility":"","created_at":"0001-01-01T00:00:00Z"}]}`, textContent.Text)
 }
 
 func TestGetPipeline(t *testing.T) {
@@ -129,7 +129,7 @@ func TestGetPipeline(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 
-	assert.Equal(`{"id":"123","name":"Test Pipeline","slug":"test-pipeline","created_at":"0001-01-01T00:00:00Z","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider":{"id":"","webhook_url":"","settings":null}}`, textContent.Text)
+	assert.JSONEq(`{"id":"123","name":"Test Pipeline","slug":"test-pipeline","created_at":"0001-01-01T00:00:00Z","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider":{"id":"","webhook_url":"","settings":null}}`, textContent.Text)
 }
 
 func TestCreatePipeline(t *testing.T) {
@@ -417,5 +417,5 @@ steps:
 	result, err := handler(ctx, request, args)
 	assert.NoError(err)
 	textContent := getTextResult(t, result)
-	assert.Equal(`{"id":"123","name":"Test Pipeline","slug":"test-pipeline","created_at":"0001-01-01T00:00:00Z","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"cluster_id":"abc-123","tags":["tag1","tag2"],"provider":{"id":"","webhook_url":"","settings":null}}`, textContent.Text)
+	assert.JSONEq(`{"id":"123","name":"Test Pipeline","slug":"test-pipeline","created_at":"0001-01-01T00:00:00Z","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"cluster_id":"abc-123","tags":["tag1","tag2"],"provider":{"id":"","webhook_url":"","settings":null}}`, textContent.Text)
 }

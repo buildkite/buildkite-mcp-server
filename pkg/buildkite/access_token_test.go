@@ -63,5 +63,5 @@ func TestAccessToken(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 
-	assert.Equal(`{"uuid":"123","scopes":["read_build","read_pipeline"],"description":"Test token","created_at":"2023-01-01T00:00:00Z","user":{"name":"Test User","email":"test@example.com"}}`, textContent.Text)
+	assert.JSONEq(`{"uuid":"123","scopes":["read_build","read_pipeline"],"description":"Test token","created_at":"2023-01-01T00:00:00Z","user":{"name":"Test User","email":"test@example.com"}}`, textContent.Text)
 }

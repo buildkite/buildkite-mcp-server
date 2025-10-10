@@ -570,10 +570,10 @@ func TestCreateBuild(t *testing.T) {
 		CreateFunc: func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error) {
 
 			// Validate required fields
-			assert.Equal(org, "org")
-			assert.Equal(pipeline, "pipeline")
-			assert.Equal(b.Commit, "abc123")
-			assert.Equal(b.Message, "Test build")
+			assert.Equal("org", org)
+			assert.Equal("pipeline", pipeline)
+			assert.Equal("abc123", b.Commit)
+			assert.Equal("Test build", b.Message)
 
 			// Return created build
 			return buildkite.Build{
@@ -619,7 +619,7 @@ func TestCreateBuild(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.Equal(`{"id":"123","number":1,"state":"created","blocked":false,"author":{},"env":{"ENV_VAR":"value"},"created_at":"0001-01-01T00:00:00Z","meta_data":{"meta_key":"meta_value"},"creator":{"avatar_url":"","created_at":null,"email":"","id":"","name":""}}`, textContent.Text)
+	assert.JSONEq(`{"id":"123","number":1,"state":"created","blocked":false,"author":{},"env":{"ENV_VAR":"value"},"created_at":"0001-01-01T00:00:00Z","meta_data":{"meta_key":"meta_value"},"creator":{"avatar_url":"","created_at":null,"email":"","id":"","name":""}}`, textContent.Text)
 }
 
 func TestCalculatePercentage(t *testing.T) {
