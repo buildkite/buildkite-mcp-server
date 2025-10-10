@@ -63,10 +63,10 @@ type BuildWithSummary struct {
 type ListBuildsArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
-	Branch       string `json:"branch"`       // existing
-	State        string `json:"state"`        // NEW: running, passed, failed, etc.
-	Commit       string `json:"commit"`       // NEW: specific commit SHA
-	Creator      string `json:"creator"`      // NEW: filter by build creator
+	Branch       string `json:"branch"`
+	State        string `json:"state"`
+	Commit       string `json:"commit"`
+	Creator      string `json:"creator"`
 	DetailLevel  string `json:"detail_level"` // summary, detailed, full
 	Page         int    `json:"page"`
 	PerPage      int    `json:"per_page"`
@@ -478,6 +478,17 @@ func GetBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerF
 			case "full":
 				// Full level returns build with filtered jobs
 				buildCopy := build
+				buildCopy.Pipeline = nil // reduce size by excluding pipeline details
+
+				// Strip fields from jobs
+				for i := range jobs {
+					jobs[i].WebURL = ""       // not useful in MCP
+					jobs[i].RawLogsURL = ""   // provided by another tool
+					jobs[i].ArtifactsURL = "" // provided by another tool
+					jobs[i].LogsURL = ""      // deprecated
+					jobs[i].GraphQLID = ""    // random id not useful in the MCP
+				}
+
 				buildCopy.Jobs = jobs
 				result = buildCopy
 			default:
