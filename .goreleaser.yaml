@@ -52,6 +52,7 @@ kos:
       org.opencontainers.image.title: "{{.ProjectName}}"
       org.opencontainers.image.revision: "{{.FullCommit}}"
       org.opencontainers.image.version: "{{.Version}}"
+      io.modelcontextprotocol.server.name: "io.github.buildkite/buildkite-mcp-server"
     bare: true
     preserve_import_paths: false
     # FIXME: We use GOOS and -split in our pipeline which is causing issues with the ko integration
