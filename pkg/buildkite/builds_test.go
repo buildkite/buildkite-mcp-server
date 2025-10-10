@@ -645,3 +645,286 @@ func TestCalculatePercentage(t *testing.T) {
 	result = calculatePercentage(1, 0)
 	assert.Equal(100, result) // (1-0)*100/1 = 100%
 }
+func TestGetBuildWithJobStateFilter(t *testing.T) {
+	assert := require.New(t)
+	ctx := context.Background()
+
+	client := &MockBuildsClient{
+		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+					ID:     "123",
+					Number: 1,
+					State:  "failed",
+					Jobs: []buildkite.Job{
+						{ID: "job1", Name: "Test 1", State: "passed", Agent: buildkite.Agent{ID: "agent1", Name: "Agent 1"}},
+						{ID: "job2", Name: "Test 2", State: "failed", Agent: buildkite.Agent{ID: "agent2", Name: "Agent 2"}},
+						{ID: "job3", Name: "Test 3", State: "failed", Agent: buildkite.Agent{ID: "agent3", Name: "Agent 3"}},
+						{ID: "job4", Name: "Test 4", State: "broken", Agent: buildkite.Agent{ID: "agent4", Name: "Agent 4"}},
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+		},
+	}
+
+	tool, typedHandler, _ := GetBuild(client)
+	handler := mcp.NewTypedToolHandler(typedHandler)
+	assert.NotNil(tool)
+	assert.NotNil(handler)
+
+	t.Run("filter by single state", func(t *testing.T) {
+		request := mcp.CallToolRequest{
+			Params: struct {
+				Name      string    `json:"name"`
+				Arguments any       `json:"arguments,omitempty"`
+				Meta      *mcp.Meta `json:"_meta,omitempty"`
+			}{
+				Arguments: map[string]any{
+					"org_slug":      "org",
+					"pipeline_slug": "pipeline",
+					"build_number":  "1",
+					"detail_level":  "full",
+					"job_state":     "failed",
+				},
+			},
+		}
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"id":"job2"`)
+		assert.Contains(textContent.Text, `"id":"job3"`)
+		assert.NotContains(textContent.Text, `"id":"job1"`)
+		assert.NotContains(textContent.Text, `"id":"job4"`)
+	})
+
+	t.Run("filter by multiple states", func(t *testing.T) {
+		request := mcp.CallToolRequest{
+			Params: struct {
+				Name      string    `json:"name"`
+				Arguments any       `json:"arguments,omitempty"`
+				Meta      *mcp.Meta `json:"_meta,omitempty"`
+			}{
+				Arguments: map[string]any{
+					"org_slug":      "org",
+					"pipeline_slug": "pipeline",
+					"build_number":  "1",
+					"detail_level":  "full",
+					"job_state":     "failed,broken",
+				},
+			},
+		}
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"id":"job2"`)
+		assert.Contains(textContent.Text, `"id":"job3"`)
+		assert.Contains(textContent.Text, `"id":"job4"`)
+		assert.NotContains(textContent.Text, `"id":"job1"`)
+	})
+
+	t.Run("filter with whitespace handling", func(t *testing.T) {
+		request := mcp.CallToolRequest{
+			Params: struct {
+				Name      string    `json:"name"`
+				Arguments any       `json:"arguments,omitempty"`
+				Meta      *mcp.Meta `json:"_meta,omitempty"`
+			}{
+				Arguments: map[string]any{
+					"org_slug":      "org",
+					"pipeline_slug": "pipeline",
+					"build_number":  "1",
+					"detail_level":  "full",
+					"job_state":     "failed, broken",
+				},
+			},
+		}
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"id":"job2"`)
+		assert.Contains(textContent.Text, `"id":"job3"`)
+		assert.Contains(textContent.Text, `"id":"job4"`)
+	})
+}
+
+func TestGetBuildWithAgentStripping(t *testing.T) {
+	assert := require.New(t)
+	ctx := context.Background()
+
+	client := &MockBuildsClient{
+		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+					ID:     "123",
+					Number: 1,
+					State:  "passed",
+					Jobs: []buildkite.Job{
+						{ID: "job1", Name: "Test 1", State: "passed", Agent: buildkite.Agent{ID: "agent1", Name: "Agent 1", Hostname: "host1"}},
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+		},
+	}
+
+	tool, typedHandler, _ := GetBuild(client)
+	handler := mcp.NewTypedToolHandler(typedHandler)
+	assert.NotNil(tool)
+	assert.NotNil(handler)
+
+	t.Run("include_agent false strips details", func(t *testing.T) {
+		request := mcp.CallToolRequest{
+			Params: struct {
+				Name      string    `json:"name"`
+				Arguments any       `json:"arguments,omitempty"`
+				Meta      *mcp.Meta `json:"_meta,omitempty"`
+			}{
+				Arguments: map[string]any{
+					"org_slug":      "org",
+					"pipeline_slug": "pipeline",
+					"build_number":  "1",
+					"detail_level":  "full",
+					"include_agent": false,
+				},
+			},
+		}
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"agent1"`)
+		assert.NotContains(textContent.Text, `"Agent 1"`)
+		assert.NotContains(textContent.Text, `"host1"`)
+	})
+
+	t.Run("include_agent true keeps details", func(t *testing.T) {
+		request := mcp.CallToolRequest{
+			Params: struct {
+				Name      string    `json:"name"`
+				Arguments any       `json:"arguments,omitempty"`
+				Meta      *mcp.Meta `json:"_meta,omitempty"`
+			}{
+				Arguments: map[string]any{
+					"org_slug":      "org",
+					"pipeline_slug": "pipeline",
+					"build_number":  "1",
+					"detail_level":  "full",
+					"include_agent": true,
+				},
+			},
+		}
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"agent1"`)
+		assert.Contains(textContent.Text, `"Agent 1"`)
+		assert.Contains(textContent.Text, `"host1"`)
+	})
+}
+
+func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
+	assert := require.New(t)
+	ctx := context.Background()
+
+	client := &MockBuildsClient{
+		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+					ID:     "123",
+					Number: 1,
+					State:  "failed",
+					Jobs: []buildkite.Job{
+						{ID: "job1", Name: "Test 1", State: "passed"},
+						{ID: "job2", Name: "Test 2", State: "failed"},
+						{ID: "job3", Name: "Test 3", State: "failed"},
+						{ID: "job4", Name: "Test 4", State: "broken"},
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+		},
+	}
+
+	tool, typedHandler, _ := GetBuild(client)
+	handler := mcp.NewTypedToolHandler(typedHandler)
+	assert.NotNil(tool)
+	assert.NotNil(handler)
+
+	request := mcp.CallToolRequest{
+		Params: struct {
+			Name      string    `json:"name"`
+			Arguments any       `json:"arguments,omitempty"`
+			Meta      *mcp.Meta `json:"_meta,omitempty"`
+		}{
+			Arguments: map[string]any{
+				"org_slug":      "org",
+				"pipeline_slug": "pipeline",
+				"build_number":  "1",
+				"detail_level":  "detailed",
+				"job_state":     "failed",
+			},
+		},
+	}
+	result, err := handler(ctx, request)
+	assert.NoError(err)
+
+	textContent := getTextResult(t, result)
+	// jobs_total should reflect ALL jobs (4)
+	assert.Contains(textContent.Text, `"jobs_total":4`)
+	// job_summary.total should reflect filtered jobs (2)
+	assert.Contains(textContent.Text, `"total":2`)
+	// job_summary.by_state should only show failed count
+	assert.Contains(textContent.Text, `"failed":2`)
+}
+
+func TestGetBuildSummaryIgnoresJobFiltering(t *testing.T) {
+	assert := require.New(t)
+	ctx := context.Background()
+
+	client := &MockBuildsClient{
+		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+					ID:     "123",
+					Number: 1,
+					State:  "failed",
+					Jobs: []buildkite.Job{
+						{ID: "job1", Name: "Test 1", State: "passed"},
+						{ID: "job2", Name: "Test 2", State: "failed"},
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+		},
+	}
+
+	tool, typedHandler, _ := GetBuild(client)
+	handler := mcp.NewTypedToolHandler(typedHandler)
+	assert.NotNil(tool)
+	assert.NotNil(handler)
+
+	request := mcp.CallToolRequest{
+		Params: struct {
+			Name      string    `json:"name"`
+			Arguments any       `json:"arguments,omitempty"`
+			Meta      *mcp.Meta `json:"_meta,omitempty"`
+		}{
+			Arguments: map[string]any{
+				"org_slug":      "org",
+				"pipeline_slug": "pipeline",
+				"build_number":  "1",
+				"detail_level":  "summary",
+				"job_state":     "failed", // should be ignored
+			},
+		},
+	}
+	result, err := handler(ctx, request)
+	assert.NoError(err)
+
+	textContent := getTextResult(t, result)
+	// jobs_total should reflect ALL jobs (2)
+	assert.Contains(textContent.Text, `"jobs_total":2`)
+	// No job_summary in summary level
+	assert.NotContains(textContent.Text, `"job_summary"`)
+}

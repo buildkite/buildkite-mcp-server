@@ -334,10 +334,6 @@ func CreateBuiltinToolsets(client *gobuildkite.Client, buildkiteLogsClient *buil
 					return tool, mcp.NewTypedToolHandler(handler), scopes
 				}),
 				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.GetJobs(client.Builds)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
 					tool, handler, scopes := buildkite.UnblockJob(client.Jobs)
 					return tool, mcp.NewTypedToolHandler(handler), scopes
 				}),

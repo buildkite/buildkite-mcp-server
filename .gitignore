@@ -11,3 +11,4 @@ coverage.out
 
 # debugger binaries
 __debug_bin*
+/*.json
