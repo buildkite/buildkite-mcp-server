@@ -5,7 +5,7 @@ go 1.24.5
 require (
 	github.com/alecthomas/kong v1.12.1
 	github.com/buildkite/buildkite-logs v0.6.1
-	github.com/buildkite/go-buildkite/v4 v4.5.1
+	github.com/buildkite/go-buildkite/v4 v4.8.0
 	github.com/cenkalti/backoff/v5 v5.0.3
 	github.com/mark3labs/mcp-go v0.41.1
 	github.com/mattn/go-isatty v0.0.20
