@@ -3,7 +3,7 @@
   "name": "io.github.buildkite/buildkite-mcp-server",
   "description": "MCP server exposing Buildkite API data (pipelines, builds, jobs, tests) to AI tooling and editors.",
   "status": "active",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "repository": {
     "url": "https://github.com/buildkite/buildkite-mcp-server",
     "source": "github",
@@ -14,7 +14,7 @@
       "registryType": "oci",
       "registryBaseUrl": "https://ghcr.io",
       "identifier": "buildkite/buildkite-mcp-server",
-      "version": "0.6.1",
+      "version": "0.7.0",
       "transport": {
         "type": "stdio"
       },
@@ -47,7 +47,7 @@
         },
         {
           "type": "positional",
-          "value": "ghcr.io/buildkite/buildkite-mcp-server:0.6.1",
+          "value": "ghcr.io/buildkite/buildkite-mcp-server:0.7.0",
           "description": "The container image to run"
         }
       ],
