@@ -59,5 +59,5 @@ func TestListAnnotations(t *testing.T) {
 	assert.NoError(err)
 	textContent := getTextResult(t, result)
 
-	assert.Equal(`{"headers":{"Link":""},"items":[{"id":"1","body_html":"Test annotation 1"},{"id":"2","body_html":"Test annotation 2"}]}`, textContent.Text)
+	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"1","body_html":"Test annotation 1"},{"id":"2","body_html":"Test annotation 2"}]}`, textContent.Text)
 }

@@ -50,5 +50,5 @@ func TestCurrentUser(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 
-	assert.Equal(`{"id":"123","name":"Test User","email":"user@example.com","created_at":"0001-01-01T00:00:00Z"}`, textContent.Text)
+	assert.JSONEq(`{"id":"123","name":"Test User","email":"user@example.com","created_at":"0001-01-01T00:00:00Z"}`, textContent.Text)
 }

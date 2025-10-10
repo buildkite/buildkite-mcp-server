@@ -49,7 +49,7 @@ func TestUserTokenOrganization(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 
-	assert.Equal(`{"name":"Test Organization","slug":"test-org"}`, textContent.Text)
+	assert.JSONEq(`{"name":"Test Organization","slug":"test-org"}`, textContent.Text)
 }
 
 func TestUserTokenOrganizationError(t *testing.T) {
