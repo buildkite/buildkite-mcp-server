@@ -505,13 +505,14 @@ type Entry struct {
 }
 
 type CreateBuildArgs struct {
-	OrgSlug      string  `json:"org_slug"`
-	PipelineSlug string  `json:"pipeline_slug"`
-	Commit       string  `json:"commit"`
-	Branch       string  `json:"branch"`
-	Message      string  `json:"message"`
-	Environment  []Entry `json:"environment"`
-	MetaData     []Entry `json:"metadata"`
+	OrgSlug             string  `json:"org_slug"`
+	PipelineSlug        string  `json:"pipeline_slug"`
+	Commit              string  `json:"commit"`
+	Branch              string  `json:"branch"`
+	Message             string  `json:"message"`
+	IgnoreBranchFilters bool    `json:"ignore_branch_filters"`
+	Environment         []Entry `json:"environment"`
+	MetaData            []Entry `json:"metadata"`
 }
 
 func CreateBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[CreateBuildArgs], scopes []string) {
@@ -534,6 +535,10 @@ func CreateBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHandl
 			mcp.WithString("message",
 				mcp.Required(),
 				mcp.Description("The commit message for the build"),
+			),
+			mcp.WithBoolean("ignore_branch_filters",
+				mcp.Description("Whether to ignore branch filters when triggering the build"),
+				mcp.DefaultBool(false),
 			),
 			mcp.WithArray("environment",
 				mcp.Items(
@@ -581,16 +586,18 @@ func CreateBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHandl
 			defer span.End()
 
 			createBuild := buildkite.CreateBuild{
-				Commit:   args.Commit,
-				Branch:   args.Branch,
-				Message:  args.Message,
-				Env:      convertEntries(args.Environment),
-				MetaData: convertEntries(args.MetaData),
+				Commit:                      args.Commit,
+				Branch:                      args.Branch,
+				Message:                     args.Message,
+				Env:                         convertEntries(args.Environment),
+				MetaData:                    convertEntries(args.MetaData),
+				IgnorePipelineBranchFilters: args.IgnoreBranchFilters,
 			}
 
 			span.SetAttributes(
 				attribute.String("org", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.Bool("ignore_branch_filters", args.IgnoreBranchFilters),
 			)
 
 			build, _, err := client.Create(ctx, args.OrgSlug, args.PipelineSlug, createBuild)
