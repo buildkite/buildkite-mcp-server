@@ -574,6 +574,7 @@ func TestCreateBuild(t *testing.T) {
 			assert.Equal("pipeline", pipeline)
 			assert.Equal("abc123", b.Commit)
 			assert.Equal("Test build", b.Message)
+			assert.True(b.IgnorePipelineBranchFilters)
 
 			// Return created build
 			return buildkite.Build{
@@ -602,11 +603,12 @@ func TestCreateBuild(t *testing.T) {
 	request := createMCPRequest(t, map[string]any{})
 
 	args := CreateBuildArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-		Commit:       "abc123",
-		Message:      "Test build",
-		Branch:       "main",
+		OrgSlug:             "org",
+		PipelineSlug:        "pipeline",
+		Commit:              "abc123",
+		Message:             "Test build",
+		Branch:              "main",
+		IgnoreBranchFilters: true,
 		Environment: []Entry{
 			{Key: "ENV_VAR", Value: "value"},
 		},
