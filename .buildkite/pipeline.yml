@@ -61,3 +61,8 @@ steps:
           shell: false
           tty: true
           progress: plain
+  
+  # validate the docker file builds correctly as this is used by docker hub for publishing the mcp into their registry
+  - label: ":docker: build image"
+    depends_on: quality-checks
+    command: docker build -t buildkite-mcp-server:latest -f Dockerfile.local .

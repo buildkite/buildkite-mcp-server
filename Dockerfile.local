@@ -1,5 +1,5 @@
 # Build stage
-FROM public.ecr.aws/docker/library/golang:1.24.5 AS builder
+FROM cgr.dev/chainguard/go:latest AS builder
 
 WORKDIR /app
 
@@ -14,10 +14,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o buildkite-mcp-server ./cmd/buildkite-mcp-server/main.go
 
 # Final stage
-FROM alpine:3.22
-
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates
+FROM cgr.dev/chainguard/static:latest
 
 WORKDIR /app
 
