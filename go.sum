@@ -80,6 +80,10 @@ github.com/buildkite/buildkite-logs v0.6.1 h1:5SlAsAFYKy1rl3j7GNldgeOzBMbuKYSgdF
 github.com/buildkite/buildkite-logs v0.6.1/go.mod h1:ejxwp0IDk7Wd0yTH0Cvnw8GgRGnpboe6Up4k9SGmWTg=
 github.com/buildkite/go-buildkite/v4 v4.9.0 h1:/zfx4LiEzPtT/oSciSfRxuvKrPmIk+luv4m0oK0Dy1I=
 github.com/buildkite/go-buildkite/v4 v4.9.0/go.mod h1:DlebrRJqpZttXDjCW+MJ1QyW9AN++ZWt/UbPtKdbSSk=
+github.com/buildkite/go-buildkite/v4 v4.9.1-0.20251019231328-cbce06947c8d h1:J40fKUyAlDiYQIJ+06KwrvcOQyFSk+vroXGa8i0IAPA=
+github.com/buildkite/go-buildkite/v4 v4.9.1-0.20251019231328-cbce06947c8d/go.mod h1:DlebrRJqpZttXDjCW+MJ1QyW9AN++ZWt/UbPtKdbSSk=
+github.com/buildkite/go-buildkite/v4 v4.9.1 h1:dA32pinTsHMTCHO84awc9W9Y21knlPjd/ZOSntMPIb0=
+github.com/buildkite/go-buildkite/v4 v4.9.1/go.mod h1:DlebrRJqpZttXDjCW+MJ1QyW9AN++ZWt/UbPtKdbSSk=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=
 github.com/cenkalti/backoff v2.2.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=

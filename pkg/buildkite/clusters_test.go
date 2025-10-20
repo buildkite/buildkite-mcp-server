@@ -59,7 +59,7 @@ func TestListClusters(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"cluster-id","name":"cluster-name","created_by":{}}]}`, textContent.Text)
+	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"cluster-id","name":"cluster-name","created_by":{},"maintainers":{}}]}`, textContent.Text)
 }
 
 func TestGetCluster(t *testing.T) {
@@ -91,5 +91,5 @@ func TestGetCluster(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq("{\"id\":\"cluster-id\",\"name\":\"cluster-name\",\"created_by\":{}}", textContent.Text)
+	assert.JSONEq("{\"id\":\"cluster-id\",\"name\":\"cluster-name\",\"created_by\":{},\"maintainers\":{}}", textContent.Text)
 }
