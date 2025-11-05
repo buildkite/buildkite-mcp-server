@@ -55,27 +55,19 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 
 	mux.HandleFunc("/health", healthHandler)
 
+	// Build middleware chain
+	chain := middleware.NewChain().
+		Use(middleware.ClientIP(c.TrustProxy)).
+		Use(middleware.RequestLog()).
+		UseIf(c.AuthToken != "", middleware.Auth(c.AuthToken))
+
 	var handler http.Handler
 	if c.UseSSE {
-		handler = mcpserver.NewSSEServer(mcpServer)
-
-		// Apply middleware in order: ClientIP first (extracts IP into context), then Auth
-		handler = middleware.ClientIP(c.TrustProxy)(handler)
-		if c.AuthToken != "" {
-			handler = middleware.Auth(c.AuthToken)(handler)
-		}
-
+		handler = chain.Then(mcpserver.NewSSEServer(mcpServer))
 		mux.Handle("/sse", handler)
 		logEvent.Str("transport", "sse").Str("endpoint", fmt.Sprintf("http://%s/sse", listener.Addr())).Msg("Starting SSE HTTP server")
 	} else {
-		handler = mcpserver.NewStreamableHTTPServer(mcpServer)
-
-		// Apply middleware in order: ClientIP first (extracts IP into context), then Auth
-		handler = middleware.ClientIP(c.TrustProxy)(handler)
-		if c.AuthToken != "" {
-			handler = middleware.Auth(c.AuthToken)(handler)
-		}
-
+		handler = chain.Then(mcpserver.NewStreamableHTTPServer(mcpServer))
 		mux.Handle("/mcp", handler)
 		logEvent.Str("transport", "streamable-http").Str("endpoint", fmt.Sprintf("http://%s/mcp", listener.Addr())).Msg("Starting Streamable HTTP server")
 	}
