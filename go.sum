@@ -76,8 +76,8 @@ github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPn
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/buger/jsonparser v1.1.1 h1:2PnMjfWD7wBILjqQbt530v576A/cAbQvEW9gGIpYMUs=
 github.com/buger/jsonparser v1.1.1/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
-github.com/buildkite/buildkite-logs v0.6.1 h1:5SlAsAFYKy1rl3j7GNldgeOzBMbuKYSgdFlvNnVINEs=
-github.com/buildkite/buildkite-logs v0.6.1/go.mod h1:ejxwp0IDk7Wd0yTH0Cvnw8GgRGnpboe6Up4k9SGmWTg=
+github.com/buildkite/buildkite-logs v0.6.2 h1:6QyxaPh0Ydn2TkBinzODEmhh1l4W4hmRKMkW216JOY0=
+github.com/buildkite/buildkite-logs v0.6.2/go.mod h1:5kxG9E/GTERyOBpMitXNFi9Q0YyFL+niBUO25TkPQa8=
 github.com/buildkite/go-buildkite/v4 v4.9.1 h1:dA32pinTsHMTCHO84awc9W9Y21knlPjd/ZOSntMPIb0=
 github.com/buildkite/go-buildkite/v4 v4.9.1/go.mod h1:DlebrRJqpZttXDjCW+MJ1QyW9AN++ZWt/UbPtKdbSSk=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=
