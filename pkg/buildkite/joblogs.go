@@ -65,7 +65,6 @@ type TerseLogEntry struct {
 type SearchResult = buildkitelogs.SearchResult
 type FileInfo struct {
 	buildkitelogs.ParquetFileInfo
-	CacheFile string `json:"cache_file"`
 }
 
 type LogResponse struct {
@@ -82,18 +81,14 @@ type SearchOptions = buildkitelogs.SearchOptions
 
 // Real implementation using buildkite-logs-parquet library with injected client
 func newParquetReader(ctx context.Context, client BuildkiteLogsClient, params JobLogsBaseParams) (*buildkitelogs.ParquetReader, error) {
-	// Parse cache TTL
 	ttl := parseCacheTTL(params.CacheTTL)
 
-	// Download and cache the logs using injected client
 	cacheFilePath, err := client.DownloadAndCache(ctx, params.OrgSlug, params.PipelineSlug, params.BuildNumber, params.JobID, ttl, params.ForceRefresh)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download/cache logs: %w", err)
 	}
 
-	// Create parquet reader from cached file
-	reader := buildkitelogs.NewParquetReader(cacheFilePath)
-	return reader, nil
+	return buildkitelogs.NewParquetReader(cacheFilePath), nil
 }
 
 func parseCacheTTL(ttlStr string) time.Duration {
@@ -210,18 +205,15 @@ func SearchLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToo
 				attribute.Int("limit", params.Limit),
 			)
 
-			// Validate search pattern
 			if err := validateSearchPattern(params.Pattern); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			// Create parquet reader
 			reader, err := newParquetReader(ctx, client, params.JobLogsBaseParams)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil
 			}
 
-			// Build search options
 			opts := SearchOptions{
 				Pattern:       params.Pattern,
 				CaseSensitive: params.CaseSensitive,
@@ -232,7 +224,6 @@ func SearchLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToo
 				AfterContext:  params.AfterContext,
 			}
 
-			// Perform search using iterator
 			var results []SearchResult
 			count := 0
 			for result, err := range reader.SearchEntriesIter(opts) {
@@ -316,25 +307,18 @@ func TailLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolH
 				attribute.Int("tail", params.Tail),
 			)
 
-			// Create parquet reader
 			reader, err := newParquetReader(ctx, client, params.JobLogsBaseParams)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil
 			}
 
-			// Get file info first to calculate tail position
 			fileInfo, err := reader.GetFileInfo()
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to get file info: %v", err)), nil
 			}
 
-			// Calculate starting position for tail
-			startRow := fileInfo.RowCount - int64(params.Tail)
-			if startRow < 0 {
-				startRow = 0
-			}
+			startRow := max(fileInfo.RowCount-int64(params.Tail), 0)
 
-			// Get tail entries using SeekToRow
 			var entries []buildkitelogs.ParquetLogEntry
 			for entry, err := range reader.SeekToRow(startRow) {
 				if err != nil {
@@ -401,28 +385,18 @@ func GetLogsInfo(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedTo
 				attribute.String("job_id", params.JobID),
 			)
 
-			// Create parquet reader
 			reader, err := newParquetReader(ctx, client, params)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil
 			}
 
-			// Get file info
 			libFileInfo, err := reader.GetFileInfo()
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to get file info: %v", err)), nil
 			}
 
-			// Get cache file path
-			cacheFile, err := buildkitelogs.GetCacheFilePath(params.OrgSlug, params.PipelineSlug, params.BuildNumber, params.JobID)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to get cache file path: %v", err)), nil
-			}
-
-			// Create our response with additional cache file info
 			fileInfo := &FileInfo{
 				ParquetFileInfo: *libFileInfo,
-				CacheFile:       cacheFile,
 			}
 
 			queryTime := time.Since(startTime)
@@ -487,17 +461,14 @@ func ReadLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolH
 				attribute.Int("limit", params.Limit),
 			)
 
-			// Create parquet reader
 			reader, err := newParquetReader(ctx, client, params.JobLogsBaseParams)
 			if err != nil {
 				return mcp.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil
 			}
 
-			// Read entries with seek and limit
 			var entries []buildkitelogs.ParquetLogEntry
 			count := 0
 
-			// Choose iterator based on seek parameter
 			var entryIter iter.Seq2[buildkitelogs.ParquetLogEntry, error]
 			if params.Seek > 0 {
 				entryIter = reader.SeekToRow(int64(params.Seek))
