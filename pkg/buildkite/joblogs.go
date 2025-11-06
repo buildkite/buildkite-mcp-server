@@ -63,17 +63,13 @@ type TerseLogEntry struct {
 
 // Use the library's types
 type SearchResult = buildkitelogs.SearchResult
-type FileInfo struct {
-	buildkitelogs.ParquetFileInfo
-}
 
 type LogResponse struct {
-	Results     any       `json:"results,omitempty"`
-	Entries     any       `json:"entries,omitempty"`
-	FileInfo    *FileInfo `json:"file_info,omitempty"`
-	MatchCount  int       `json:"match_count,omitempty"`
-	TotalRows   int64     `json:"total_rows,omitempty"`
-	QueryTimeMS int64     `json:"query_time_ms"`
+	Results     any   `json:"results,omitempty"`
+	Entries     any   `json:"entries,omitempty"`
+	MatchCount  int   `json:"match_count,omitempty"`
+	TotalRows   int64 `json:"total_rows,omitempty"`
+	QueryTimeMS int64 `json:"query_time_ms"`
 }
 
 // Use the library's SearchOptions
@@ -339,71 +335,6 @@ func TailLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolH
 			span.SetAttributes(
 				attribute.Int("item_count", len(entries)),
 			)
-
-			return mcpTextResult(span, &response)
-		},
-		[]string{"read_build_logs"}
-}
-
-// GetLogsInfo implements the get_logs_info MCP tool
-func GetLogsInfo(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[JobLogsBaseParams], scopes []string) {
-	return mcp.NewTool("get_logs_info",
-			mcp.WithDescription("Get metadata and statistics about the Parquet log file. 📊 RECOMMENDED as first step - check file size before reading large logs to plan your approach efficiently."),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("build_number",
-				mcp.Required(),
-			),
-			mcp.WithString("job_id",
-				mcp.Required(),
-			),
-			mcp.WithString("cache_ttl",
-				mcp.Description(`Cache TTL for non-terminal jobs (default: "30s")`),
-			),
-			mcp.WithBoolean("force_refresh",
-				mcp.Description("Force refresh cached entry (default: false)"),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
-				Title:        "Get Logs Info",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest, params JobLogsBaseParams) (*mcp.CallToolResult, error) {
-			ctx, span := trace.Start(ctx, "buildkite.GetLogsInfo")
-			defer span.End()
-
-			startTime := time.Now()
-
-			span.SetAttributes(
-				attribute.String("org_slug", params.OrgSlug),
-				attribute.String("pipeline_slug", params.PipelineSlug),
-				attribute.String("build_number", params.BuildNumber),
-				attribute.String("job_id", params.JobID),
-			)
-
-			reader, err := newParquetReader(ctx, client, params)
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil
-			}
-
-			libFileInfo, err := reader.GetFileInfo()
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to get file info: %v", err)), nil
-			}
-
-			fileInfo := &FileInfo{
-				ParquetFileInfo: *libFileInfo,
-			}
-
-			queryTime := time.Since(startTime)
-			response := LogResponse{
-				FileInfo:    fileInfo,
-				QueryTimeMS: queryTime.Milliseconds(),
-			}
 
 			return mcpTextResult(span, &response)
 		},
