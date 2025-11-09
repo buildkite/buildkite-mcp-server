@@ -39,6 +39,8 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	mux := http.NewServeMux()
 	srv := newServerWithTimeouts(mux)
 
+	mux.HandleFunc("/health", healthHandler)
+
 	if c.UseSSE {
 		handler := mcpserver.NewSSEServer(mcpServer)
 		mux.Handle("/sse", handler)
@@ -60,4 +62,8 @@ func newServerWithTimeouts(mux *http.ServeMux) *http.Server {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+}
+
+func healthHandler(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
 }
