@@ -193,33 +193,6 @@ func TestTailLogsHandler(t *testing.T) {
 	})
 }
 
-func TestGetLogsInfoHandler(t *testing.T) {
-	assert := require.New(t)
-	ctx := context.Background()
-
-	mockClient := &MockBuildkiteLogsClient{
-		DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
-			return "/tmp/test.parquet", nil
-		},
-	}
-
-	_, handler, _ := GetLogsInfo(mockClient)
-
-	params := JobLogsBaseParams{
-		OrgSlug:      "test-org",
-		PipelineSlug: "test-pipeline",
-		BuildNumber:  "123",
-		JobID:        "job-456",
-	}
-
-	// This will fail due to the parquet file not existing, but we can test the flow
-	result, err := handler(ctx, mcp.CallToolRequest{}, params)
-	assert.NoError(err)
-	textContent, ok := result.Content[0].(mcp.TextContent)
-	assert.True(ok)
-	assert.Contains(textContent.Text, "Failed to get file info")
-}
-
 func TestReadLogsHandler(t *testing.T) {
 	assert := require.New(t)
 	ctx := context.Background()

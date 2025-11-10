@@ -372,10 +372,6 @@ func CreateBuiltinToolsets(client *gobuildkite.Client, buildkiteLogsClient *buil
 					return tool, mcp.NewTypedToolHandler(handler), scopes
 				}),
 				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.GetLogsInfo(buildkiteLogsClient)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
 					tool, handler, scopes := buildkite.ReadLogs(buildkiteLogsClient)
 					return tool, mcp.NewTypedToolHandler(handler), scopes
 				}),
