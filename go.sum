@@ -78,10 +78,6 @@ github.com/buger/jsonparser v1.1.1 h1:2PnMjfWD7wBILjqQbt530v576A/cAbQvEW9gGIpYMU
 github.com/buger/jsonparser v1.1.1/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
 github.com/buildkite/buildkite-logs v0.6.3 h1:wkH+3IBJg36BC44d7fIDlsn6Zpq99mle+SQPdcMoYeU=
 github.com/buildkite/buildkite-logs v0.6.3/go.mod h1:5kxG9E/GTERyOBpMitXNFi9Q0YyFL+niBUO25TkPQa8=
-github.com/buildkite/go-buildkite/v4 v4.11.0 h1:rEvvUwITrqv433W9JWf6mj+NkkcM45s+ObhNs6C17i4=
-github.com/buildkite/go-buildkite/v4 v4.11.0/go.mod h1:DlebrRJqpZttXDjCW+MJ1QyW9AN++ZWt/UbPtKdbSSk=
-github.com/buildkite/go-buildkite/v4 v4.13.0 h1:ZOngFPSNGWAvFjNSqslAx0WKbxRpOhIFxpKCB41ko7I=
-github.com/buildkite/go-buildkite/v4 v4.13.0/go.mod h1:DlebrRJqpZttXDjCW+MJ1QyW9AN++ZWt/UbPtKdbSSk=
 github.com/buildkite/go-buildkite/v4 v4.13.1 h1:3PhrShdQwlZ2+OIWy0QbxbbjP6M97NCvarlIB6Oye+k=
 github.com/buildkite/go-buildkite/v4 v4.13.1/go.mod h1:DlebrRJqpZttXDjCW+MJ1QyW9AN++ZWt/UbPtKdbSSk=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=
@@ -167,6 +163,8 @@ github.com/mailru/easyjson v0.7.7 h1:UGYAvKxe3sBsEDzO8ZeWOSlIQfWFlxbzLZe7hwFURr0
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
 github.com/mark3labs/mcp-go v0.43.2 h1:21PUSlWWiSbUPQwXIJ5WKlETixpFpq+WBpbMGDSVy/I=
 github.com/mark3labs/mcp-go v0.43.2/go.mod h1:YnJfOL382MIWDx1kMY+2zsRHU/q78dBg9aFb8W6Thdw=
+github.com/mark3labs/mcp-go v0.44.0-beta.2 h1:gfUT0m77E4odfgiHkqV/E+MQVaQ06rbutW7Ln0JRkBA=
+github.com/mark3labs/mcp-go v0.44.0-beta.2/go.mod h1:YnJfOL382MIWDx1kMY+2zsRHU/q78dBg9aFb8W6Thdw=
 github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=
 github.com/mattn/go-colorable v0.1.14 h1:9A9LHSqF/7dyVVX6g0U9cwm9pG3kP9gSzcuIPHPsaIE=
 github.com/mattn/go-colorable v0.1.14/go.mod h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=

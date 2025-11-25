@@ -19,6 +19,7 @@ type HTTPCmd struct {
 	UseSSE          bool     `help:"Use deprecated SSS transport instead of Streamable HTTP." default:"false"`
 	EnabledToolsets []string `help:"Comma-separated list of toolsets to enable (e.g., 'pipelines,builds,clusters'). Use 'all' to enable all toolsets." default:"all" env:"BUILDKITE_TOOLSETS"`
 	ReadOnly        bool     `help:"Enable read-only mode, which filters out write operations from all toolsets." default:"false" env:"BUILDKITE_READ_ONLY"`
+	DynamicToolsets bool     `help:"Enable dynamic tool loading via Tool Search Tool (reduces context usage with Claude API beta)." default:"false" env:"BUILDKITE_DYNAMIC_TOOLSETS"`
 }
 
 func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
@@ -28,7 +29,9 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 
 	mcpServer := server.NewMCPServer(globals.Version, globals.Client, globals.BuildkiteLogsClient,
-		server.WithReadOnly(c.ReadOnly), server.WithToolsets(c.EnabledToolsets...))
+		server.WithReadOnly(c.ReadOnly),
+		server.WithToolsets(c.EnabledToolsets...),
+		server.WithDynamicToolsets(c.DynamicToolsets))
 
 	listener, err := net.Listen("tcp", c.Listen)
 	if err != nil {
