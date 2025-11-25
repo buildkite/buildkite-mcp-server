@@ -18,6 +18,7 @@ type ToolsetOption func(*ToolsetConfig)
 type ToolsetConfig struct {
 	EnabledToolsets []string
 	ReadOnly        bool
+	DynamicToolsets bool // Enable/disable Tool Search Tool
 }
 
 // WithToolsets enables specific toolsets
@@ -31,6 +32,13 @@ func WithToolsets(toolsets ...string) ToolsetOption {
 func WithReadOnly(readOnly bool) ToolsetOption {
 	return func(cfg *ToolsetConfig) {
 		cfg.ReadOnly = readOnly
+	}
+}
+
+// WithDynamicToolsets enables dynamic tool loading via Tool Search Tool
+func WithDynamicToolsets(dynamicToolsets bool) ToolsetOption {
+	return func(cfg *ToolsetConfig) {
+		cfg.DynamicToolsets = dynamicToolsets
 	}
 }
 
@@ -61,7 +69,10 @@ func NewMCPServer(version string, client *gobuildkite.Client, buildkiteLogsClien
 	log.Info().Str("version", version).Msg("Starting Buildkite MCP server")
 
 	// Use toolset system with configuration
-	s.AddTools(BuildkiteTools(client, buildkiteLogsClient, WithReadOnly(cfg.ReadOnly), WithToolsets(cfg.EnabledToolsets...))...)
+	s.AddTools(BuildkiteTools(client, buildkiteLogsClient,
+		WithReadOnly(cfg.ReadOnly),
+		WithToolsets(cfg.EnabledToolsets...),
+		WithDynamicToolsets(cfg.DynamicToolsets))...)
 
 	s.AddPrompt(mcp.NewPrompt("user_token_organization_prompt",
 		mcp.WithPromptDescription("When asked for detail of a users pipelines start by looking up the user's token organization"),
@@ -93,12 +104,29 @@ func BuildkiteTools(client *gobuildkite.Client, buildkiteLogsClient *buildkitelo
 		toolsets.CreateBuiltinToolsets(client, buildkiteLogsClient),
 	)
 
+	var serverTools []server.ServerTool
+
+	// Add Tool Search Tool if dynamic toolsets are enabled
+	if cfg.DynamicToolsets {
+		searchTool, searchHandler, _ := toolsets.ToolSearch(registry)
+		serverTools = append(serverTools, server.ServerTool{
+			Tool:    searchTool,
+			Handler: searchHandler,
+		})
+	}
+
 	enabledTools := registry.GetEnabledTools(cfg.EnabledToolsets, cfg.ReadOnly)
 
-	var serverTools []server.ServerTool
 	for _, toolDef := range enabledTools {
+		tool := toolDef.Tool
+		if cfg.DynamicToolsets {
+			tool.DeferLoading = toolDef.DeferLoading
+		} else {
+			tool.DeferLoading = false
+		}
+
 		serverTools = append(serverTools, server.ServerTool{
-			Tool:    toolDef.Tool,
+			Tool:    tool,
 			Handler: toolDef.Handler,
 		})
 	}
@@ -108,6 +136,7 @@ func BuildkiteTools(client *gobuildkite.Client, buildkiteLogsClient *buildkitelo
 	log.Info().
 		Strs("enabled_toolsets", cfg.EnabledToolsets).
 		Bool("read_only", cfg.ReadOnly).
+		Bool("dynamic_toolsets", cfg.DynamicToolsets).
 		Int("tool_count", len(serverTools)).
 		Strs("required_scopes", scopes).
 		Msg("Registered tools from toolsets")
