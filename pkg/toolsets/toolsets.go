@@ -253,7 +253,6 @@ func IsValidToolset(name string) bool {
 
 // ValidateToolsets checks if all toolset names are valid
 func ValidateToolsets(names []string) error {
-
 	invalidToolsets := []string{}
 
 	for _, name := range names {
@@ -343,7 +342,12 @@ func CreateBuiltinToolsets(client *gobuildkite.Client, buildkiteLogsClient *buil
 			Name:        "Artifact Management",
 			Description: "Tools for managing build artifacts",
 			Tools: []ToolDefinition{
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.ListArtifacts(clientAdapter) }),
+				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
+					return buildkite.ListArtifactsForBuild(clientAdapter)
+				}),
+				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
+					return buildkite.ListArtifactsForJob(clientAdapter)
+				}),
 				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.GetArtifact(clientAdapter) }),
 			},
 		},

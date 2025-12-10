@@ -568,7 +568,6 @@ func TestCreateBuild(t *testing.T) {
 	ctx := context.Background()
 	client := &MockBuildsClient{
 		CreateFunc: func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error) {
-
 			// Validate required fields
 			assert.Equal("org", org)
 			assert.Equal("pipeline", pipeline)
@@ -647,6 +646,7 @@ func TestCalculatePercentage(t *testing.T) {
 	result = calculatePercentage(1, 0)
 	assert.Equal(100, result) // (1-0)*100/1 = 100%
 }
+
 func TestGetBuildWithJobStateFilter(t *testing.T) {
 	assert := require.New(t)
 	ctx := context.Background()

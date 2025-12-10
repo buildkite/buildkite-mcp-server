@@ -20,6 +20,7 @@ import (
 
 type ArtifactsClient interface {
 	ListByBuild(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error)
+	ListByJob(ctx context.Context, org, pipelineSlug, buildNumber string, jobID string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error)
 	DownloadArtifactByURL(ctx context.Context, url string, writer io.Writer) (*buildkite.Response, error)
 }
 
@@ -31,6 +32,10 @@ type BuildkiteClientAdapter struct {
 // ListByBuild implements ArtifactsClient
 func (a *BuildkiteClientAdapter) ListByBuild(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
 	return a.Artifacts.ListByBuild(ctx, org, pipelineSlug, buildNumber, opts)
+}
+
+func (a *BuildkiteClientAdapter) ListByJob(ctx context.Context, org, pipelineSlug, buildNumber string, jobID string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
+	return a.Artifacts.ListByJob(ctx, org, pipelineSlug, buildNumber, jobID, opts)
 }
 
 // DownloadArtifactByURL implements ArtifactsClient with URL rewriting support
@@ -73,8 +78,8 @@ func (a *BuildkiteClientAdapter) rewriteArtifactURL(inputURL string) string {
 	return parsedURL.String()
 }
 
-func ListArtifacts(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("list_artifacts",
+func ListArtifactsForBuild(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
+	return mcp.NewTool("list_artifacts_for_build",
 			mcp.WithDescription("List all artifacts for a build across all jobs, including file details, paths, sizes, MIME types, and download URLs"),
 			mcp.WithString("org_slug",
 				mcp.Required(),
@@ -86,12 +91,12 @@ func ListArtifacts(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHa
 				mcp.Required(),
 			),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
-				Title:        "Artifact List",
+				Title:        "Build Artifact List",
 				ReadOnlyHint: mcp.ToBoolPtr(true),
 			}),
 		),
 		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ListArtifacts")
+			ctx, span := trace.Start(ctx, "buildkite.ListArtifactsForBuild")
 			defer span.End()
 
 			orgSlug, err := request.RequireString("org_slug")
@@ -123,6 +128,92 @@ func ListArtifacts(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHa
 			)
 
 			artifacts, resp, err := client.ListByBuild(ctx, orgSlug, pipelineSlug, buildNumber, &buildkite.ArtifactListOptions{
+				ListOptions: paginationParams,
+			})
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			result := PaginatedResult[buildkite.Artifact]{
+				Items: artifacts,
+				Headers: map[string]string{
+					"Link": resp.Header.Get("Link"),
+				},
+			}
+
+			r, err := json.Marshal(result)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal artifacts: %w", err)
+			}
+
+			span.SetAttributes(
+				attribute.Int("item_count", len(artifacts)),
+				attribute.Int("estimated_tokens", tokens.EstimateTokens(string(r))),
+			)
+
+			return mcp.NewToolResultText(string(r)), nil
+		}, []string{"read_artifacts"}
+}
+
+func ListArtifactsForJob(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
+	return mcp.NewTool("list_artifacts_for_job",
+			mcp.WithDescription("List all artifacts for an individual job, including file details, paths, sizes, MIME types, and download URLs"),
+			mcp.WithString("org_slug",
+				mcp.Required(),
+			),
+			mcp.WithString("pipeline_slug",
+				mcp.Required(),
+			),
+			mcp.WithString("build_number",
+				mcp.Required(),
+			),
+			mcp.WithString("job_id",
+				mcp.Required(),
+			),
+			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+				Title:        "Job Artifact List",
+				ReadOnlyHint: mcp.ToBoolPtr(true),
+			}),
+		),
+		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			ctx, span := trace.Start(ctx, "buildkite.ListArtifactsForJob")
+			defer span.End()
+
+			orgSlug, err := request.RequireString("org_slug")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			pipelineSlug, err := request.RequireString("pipeline_slug")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			buildNumber, err := request.RequireString("build_number")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			jobID, err := request.RequireString("job_id")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			paginationParams, err := optionalPaginationParams(request)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+
+			span.SetAttributes(
+				attribute.String("org_slug", orgSlug),
+				attribute.String("pipeline_slug", pipelineSlug),
+				attribute.String("build_number", buildNumber),
+				attribute.String("job_id", jobID),
+				attribute.Int("page", paginationParams.Page),
+				attribute.Int("per_page", paginationParams.PerPage),
+			)
+
+			artifacts, resp, err := client.ListByJob(ctx, orgSlug, pipelineSlug, buildNumber, jobID, &buildkite.ArtifactListOptions{
 				ListOptions: paginationParams,
 			})
 			if err != nil {

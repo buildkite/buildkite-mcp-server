@@ -20,6 +20,7 @@ func (m *mockClusterQueuesClient) List(ctx context.Context, org, clusterID strin
 	}
 	return nil, nil, nil
 }
+
 func (m *mockClusterQueuesClient) Get(ctx context.Context, org, clusterID, queueID string) (buildkite.ClusterQueue, *buildkite.Response, error) {
 	if m.GetFunc != nil {
 		return m.GetFunc(ctx, org, clusterID, queueID)

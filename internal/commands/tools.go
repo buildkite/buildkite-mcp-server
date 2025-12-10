@@ -13,7 +13,6 @@ import (
 type ToolsCmd struct{}
 
 func (c *ToolsCmd) Run(ctx context.Context, globals *Globals) error {
-
 	client := &gobuildkite.Client{}
 
 	// Collect all tools (pass nil for ParquetClient since this is just for listing)
