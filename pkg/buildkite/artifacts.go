@@ -34,6 +34,7 @@ func (a *BuildkiteClientAdapter) ListByBuild(ctx context.Context, org, pipelineS
 	return a.Artifacts.ListByBuild(ctx, org, pipelineSlug, buildNumber, opts)
 }
 
+// ListByJob implements ArtifactsClient
 func (a *BuildkiteClientAdapter) ListByJob(ctx context.Context, org, pipelineSlug, buildNumber string, jobID string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
 	return a.Artifacts.ListByJob(ctx, org, pipelineSlug, buildNumber, jobID, opts)
 }

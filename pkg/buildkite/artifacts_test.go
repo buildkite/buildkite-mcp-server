@@ -226,6 +226,7 @@ func TestListArtifactsForJob_MissingParameters(t *testing.T) {
 	req = createMCPRequest(t, map[string]any{
 		"org_slug":     "test-org",
 		"build_number": "123",
+		"job_id":       "123456-abcdef-123abc-456def",
 	})
 	result, err = handler(ctx, req)
 	assert.NoError(err)
@@ -236,6 +237,7 @@ func TestListArtifactsForJob_MissingParameters(t *testing.T) {
 	req = createMCPRequest(t, map[string]any{
 		"org_slug":      "test-org",
 		"pipeline_slug": "test-pipeline",
+		"job_id":        "123456-abcdef-123abc-456def",
 	})
 	result, err = handler(ctx, req)
 	assert.NoError(err)
