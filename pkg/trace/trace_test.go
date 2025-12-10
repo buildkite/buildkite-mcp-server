@@ -22,5 +22,4 @@ func TestNewProvider(t *testing.T) {
 
 	_, err = NewProvider(context.Background(), "", "test", "1.2.3")
 	assert.NoError(err)
-
 }

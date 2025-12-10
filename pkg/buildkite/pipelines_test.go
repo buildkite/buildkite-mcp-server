@@ -150,7 +150,6 @@ steps:
 	webhookCalled := false
 	client := &MockPipelinesClient{
 		CreateFunc: func(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
-
 			// validate required fields
 			assert.Equal("org", org)
 			assert.Equal("cluster-123", p.ClusterID)
@@ -227,7 +226,6 @@ steps:
 	webhookCalled := false
 	client := &MockPipelinesClient{
 		CreateFunc: func(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
-
 			// validate required fields
 			assert.Equal("org", org)
 			assert.Equal("Test Pipeline", p.Name)
@@ -249,7 +247,6 @@ steps:
 				}, nil
 		},
 		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
-
 			// validate required fields
 			assert.Equal("org", org)
 			assert.Equal("test-pipeline", slug)
@@ -307,7 +304,6 @@ steps:
 	webhookCalled := false
 	client := &MockPipelinesClient{
 		CreateFunc: func(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
-
 			// validate required fields
 			assert.Equal("org", org)
 			assert.Equal("Test Pipeline", p.Name)
@@ -376,7 +372,6 @@ steps:
 	ctx := context.Background()
 	client := &MockPipelinesClient{
 		UpdateFunc: func(ctx context.Context, org string, pipeline string, p buildkite.UpdatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
-
 			// validate required fields
 			assert.Equal("org", org)
 			assert.Equal("test-pipeline", pipeline)

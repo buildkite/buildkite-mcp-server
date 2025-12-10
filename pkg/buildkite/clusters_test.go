@@ -22,6 +22,7 @@ func (m *mockClustersClient) List(ctx context.Context, org string, opts *buildki
 	}
 	return nil, nil, nil
 }
+
 func (m *mockClustersClient) Get(ctx context.Context, org, id string) (buildkite.Cluster, *buildkite.Response, error) {
 	if m.GetFunc != nil {
 		return m.GetFunc(ctx, org, id)
