@@ -293,6 +293,53 @@ func TestGetTestRunMissingRunID(t *testing.T) {
 	assert.Contains(result.Content[0].(mcp.TextContent).Text, "run_id")
 }
 
+func TestGetTestRunReturnsBuildID(t *testing.T) {
+	// This test documents the expected behavior that build_id should be returned
+	// from the GetTestRun endpoint, as per the Buildkite API documentation:
+	// https://buildkite.com/docs/apis/rest-api/test-engine/runs
+	//
+	// Currently fails because go-buildkite/v4 TestRun struct is missing the BuildID field.
+	// See: https://github.com/buildkite/go-buildkite/issues/XXX
+	assert := require.New(t)
+
+	ctx := context.Background()
+	testRun := buildkite.TestRun{
+		ID:        "run1",
+		URL:       "https://api.buildkite.com/v2/analytics/organizations/org/suites/suite1/runs/run1",
+		WebURL:    "https://buildkite.com/org/analytics/suites/suite1/runs/run1",
+		Branch:    "main",
+		CommitSHA: "abc123",
+		// BuildID: "89c02425-7712-4ee5-a694-c94b56b4d54c", // Cannot set - field doesn't exist in go-buildkite/v4
+	}
+
+	mockClient := &MockTestRunsClient{
+		GetFunc: func(ctx context.Context, org, slug, runID string) (buildkite.TestRun, *buildkite.Response, error) {
+			return testRun, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: http.StatusOK,
+				},
+			}, nil
+		},
+	}
+
+	_, handler, _ := GetTestRun(mockClient)
+
+	request := createMCPRequest(t, map[string]any{
+		"org_slug":        "org",
+		"test_suite_slug": "suite1",
+		"run_id":          "run1",
+	})
+
+	result, err := handler(ctx, request)
+	assert.NoError(err)
+	assert.NotNil(result)
+
+	textContent := result.Content[0].(mcp.TextContent)
+	// This assertion documents the expected behavior - build_id should be in the response
+	// Will fail until go-buildkite adds BuildID to TestRun struct
+	assert.Contains(textContent.Text, "build_id", "TestRun response should contain build_id field per Buildkite API spec")
+}
+
 func TestGetTestRunHTTPError(t *testing.T) {
 	assert := require.New(t)
 
