@@ -309,7 +309,7 @@ func TestGetTestRunReturnsBuildID(t *testing.T) {
 		WebURL:    "https://buildkite.com/org/analytics/suites/suite1/runs/run1",
 		Branch:    "main",
 		CommitSHA: "abc123",
-		// BuildID: "89c02425-7712-4ee5-a694-c94b56b4d54c", // Cannot set - field doesn't exist in go-buildkite/v4
+		BuildID:   "89c02425-7712-4ee5-a694-c94b56b4d54c", // Cannot set - field doesn't exist in go-buildkite/v4
 	}
 
 	mockClient := &MockTestRunsClient{
