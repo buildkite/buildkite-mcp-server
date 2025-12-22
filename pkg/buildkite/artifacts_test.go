@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v4"
@@ -412,4 +413,148 @@ func TestBuildkiteClientAdapter_URLRewritingEdgeCases(t *testing.T) {
 		result := adapter.rewriteArtifactURL("https://api.buildkite.com/v2/test")
 		assert.Equal("https://proxy.example.com/v2/test", result)
 	})
+}
+
+func TestListArtifactsPagination(t *testing.T) {
+	assert := require.New(t)
+
+	ctx := context.Background()
+
+	// Create test artifacts
+	allArtifacts := []buildkite.Artifact{
+		{ID: "artifact1", Filename: "file1.txt", State: "finished"},
+		{ID: "artifact2", Filename: "file2.txt", State: "finished"},
+		{ID: "artifact3", Filename: "file3.txt", State: "finished"},
+		{ID: "artifact4", Filename: "file4.txt", State: "finished"},
+		{ID: "artifact5", Filename: "file5.txt", State: "finished"},
+		{ID: "artifact6", Filename: "file6.txt", State: "finished"},
+	}
+
+	mockClient := &MockArtifactsClient{
+		ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
+			// Simulate pagination by returning a subset based on options
+			page := opts.ListOptions.Page
+			perPage := opts.ListOptions.PerPage
+
+			startIndex := (page - 1) * perPage
+			endIndex := startIndex + perPage
+
+			var artifacts []buildkite.Artifact
+			if startIndex < len(allArtifacts) {
+				if endIndex > len(allArtifacts) {
+					endIndex = len(allArtifacts)
+				}
+				artifacts = allArtifacts[startIndex:endIndex]
+			}
+
+			return artifacts, &buildkite.Response{
+				Response: &http.Response{StatusCode: 200},
+			}, nil
+		},
+	}
+
+	tool, handler, _ := ListArtifacts(mockClient)
+	assert.NotNil(tool)
+	assert.NotNil(handler)
+
+	t.Run("first page", func(t *testing.T) {
+		request := createMCPRequest(t, map[string]any{
+			"org_slug":      "test-org",
+			"pipeline_slug": "test-pipeline",
+			"build_number":  "123",
+			"page":          float64(1),
+			"perPage":       float64(2),
+		})
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"artifact1"`)
+		assert.Contains(textContent.Text, `"artifact2"`)
+		assert.NotContains(textContent.Text, `"artifact3"`)
+	})
+
+	t.Run("second page", func(t *testing.T) {
+		request := createMCPRequest(t, map[string]any{
+			"org_slug":      "test-org",
+			"pipeline_slug": "test-pipeline",
+			"build_number":  "123",
+			"page":          float64(2),
+			"perPage":       float64(2),
+		})
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"artifact3"`)
+		assert.Contains(textContent.Text, `"artifact4"`)
+		assert.NotContains(textContent.Text, `"artifact1"`)
+		assert.NotContains(textContent.Text, `"artifact5"`)
+	})
+
+	t.Run("last page", func(t *testing.T) {
+		request := createMCPRequest(t, map[string]any{
+			"org_slug":      "test-org",
+			"pipeline_slug": "test-pipeline",
+			"build_number":  "123",
+			"page":          float64(3),
+			"perPage":       float64(2),
+		})
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"artifact5"`)
+		assert.Contains(textContent.Text, `"artifact6"`)
+		assert.NotContains(textContent.Text, `"artifact4"`)
+	})
+
+	t.Run("page beyond available data", func(t *testing.T) {
+		request := createMCPRequest(t, map[string]any{
+			"org_slug":      "test-org",
+			"pipeline_slug": "test-pipeline",
+			"build_number":  "123",
+			"page":          float64(5),
+			"perPage":       float64(2),
+		})
+		result, err := handler(ctx, request)
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		// When no artifacts are found, the items array can be null or empty
+		assert.True(textContent.Text == `{"headers":{"Link":""},"items":null}` ||
+			strings.Contains(textContent.Text, `"items":[]`),
+			"Expected empty items array or null, got: %s", textContent.Text)
+	})
+}
+
+func TestListArtifactsPaginationDefaults(t *testing.T) {
+	assert := require.New(t)
+
+	ctx := context.Background()
+	mockClient := &MockArtifactsClient{
+		ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
+			// Verify default pagination parameters
+			assert.Equal(1, opts.ListOptions.Page, "Default page should be 1")
+			assert.Equal(1, opts.ListOptions.PerPage, "Default perPage should be 1")
+
+			return []buildkite.Artifact{
+					{ID: "artifact1", Filename: "file1.txt", State: "finished"},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+		},
+	}
+
+	_, handler, _ := ListArtifacts(mockClient)
+
+	// Test without pagination parameters (should use defaults)
+	request := createMCPRequest(t, map[string]any{
+		"org_slug":      "test-org",
+		"pipeline_slug": "test-pipeline",
+		"build_number":  "123",
+	})
+	result, err := handler(ctx, request)
+	assert.NoError(err)
+	assert.NotNil(result)
 }
