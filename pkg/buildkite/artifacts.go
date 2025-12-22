@@ -91,6 +91,7 @@ func ListArtifactsForBuild(client ArtifactsClient) (tool mcp.Tool, handler serve
 			mcp.WithString("build_number",
 				mcp.Required(),
 			),
+			withPagination(),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:        "Build Artifact List",
 				ReadOnlyHint: mcp.ToBoolPtr(true),
@@ -171,6 +172,7 @@ func ListArtifactsForJob(client ArtifactsClient) (tool mcp.Tool, handler server.
 			mcp.WithString("job_id",
 				mcp.Required(),
 			),
+			withPagination(),
 			mcp.WithToolAnnotation(mcp.ToolAnnotation{
 				Title:        "Job Artifact List",
 				ReadOnlyHint: mcp.ToBoolPtr(true),
