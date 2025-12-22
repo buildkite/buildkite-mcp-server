@@ -28,13 +28,13 @@ func Test_optionalPaginationParams(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name: "missing pagination parameters should use new defaults (1 per page)",
+			name: "missing pagination parameters should use new defaults (100 per page)",
 			args: map[string]any{
 				"name": "test-name",
 			},
 			expected: buildkite.ListOptions{
 				Page:    1,
-				PerPage: 1,
+				PerPage: 100,
 			},
 			expectErr: false,
 		},

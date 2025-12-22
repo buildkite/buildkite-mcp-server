@@ -18,7 +18,7 @@ type PaginatedResult[T any] struct {
 
 func optionalPaginationParams(r mcp.CallToolRequest) (buildkite.ListOptions, error) {
 	page := r.GetInt("page", 1)
-	perPage := r.GetInt("perPage", 1)
+	perPage := r.GetInt("perPage", 100)
 	return buildkite.ListOptions{
 		Page:    page,
 		PerPage: perPage,
