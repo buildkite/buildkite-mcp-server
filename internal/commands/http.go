@@ -72,6 +72,8 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		logEvent.Str("transport", "streamable-http").Str("endpoint", fmt.Sprintf("http://%s/mcp", listener.Addr())).Msg("Starting Streamable HTTP server")
 	}
 
+	log.Info().Str("address", c.Listen).Msg("starting HTTP server")
+
 	return srv.Serve(listener)
 }
 
