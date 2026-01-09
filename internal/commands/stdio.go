@@ -16,7 +16,7 @@ type StdioCmd struct {
 }
 
 func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
-	buildkiteClient, err := setupBuildkiteAPIClient(c.APIFlags, globals.Version)
+	buildkiteClient, err := setupBuildkiteAPIClient(ctx, c.APIFlags, globals.Version)
 	if err != nil {
 		return err
 	}

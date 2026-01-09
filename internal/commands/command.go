@@ -10,7 +10,6 @@ import (
 	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	gobuildkite "github.com/buildkite/go-buildkite/v4"
-	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -24,7 +23,6 @@ type APIFlags struct {
 
 type Globals struct {
 	Version string
-	Logger  zerolog.Logger
 }
 
 func UserAgent(version string) string {
@@ -34,7 +32,7 @@ func UserAgent(version string) string {
 	return fmt.Sprintf("buildkite-mcp-server/%s (%s; %s)", version, os, arch)
 }
 
-func ResolveAPIToken(token, tokenFrom1Password string) (string, error) {
+func ResolveAPIToken(ctx context.Context, token, tokenFrom1Password string) (string, error) {
 	if token != "" && tokenFrom1Password != "" {
 		return "", fmt.Errorf("cannot specify both --api-token and --api-token-from-1password")
 	}
@@ -46,16 +44,16 @@ func ResolveAPIToken(token, tokenFrom1Password string) (string, error) {
 	}
 
 	// Fetch the token from 1Password
-	opToken, err := fetchTokenFrom1Password(tokenFrom1Password)
+	opToken, err := fetchTokenFrom1Password(ctx, tokenFrom1Password)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch API token from 1Password: %w", err)
 	}
 	return opToken, nil
 }
 
-func fetchTokenFrom1Password(opID string) (string, error) {
+func fetchTokenFrom1Password(ctx context.Context, opID string) (string, error) {
 	// read the token using the 1Password CLI with `-n` to avoid a trailing newline
-	out, err := exec.Command("op", "read", "-n", opID).Output()
+	out, err := exec.CommandContext(ctx, "op", "read", "-n", opID).Output()
 	if err != nil {
 		return "", expandExecErr(err)
 	}
@@ -73,12 +71,12 @@ func expandExecErr(err error) error {
 	return err
 }
 
-func setupBuildkiteAPIClient(cli APIFlags, version string) (*gobuildkite.Client, error) {
+func setupBuildkiteAPIClient(ctx context.Context, cli APIFlags, version string) (*gobuildkite.Client, error) {
 	// Parse additional headers into a map
 	headers := ParseHeaders(cli.HTTPHeaders)
 
 	// resolve the api token from either the token or 1password flag
-	apiToken, err := ResolveAPIToken(cli.APIToken, cli.APITokenFrom1Password)
+	apiToken, err := ResolveAPIToken(ctx, cli.APIToken, cli.APITokenFrom1Password)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve Buildkite API token: %w", err)
 	}
@@ -105,5 +103,23 @@ func setupBuildkiteLogsClient(ctx context.Context, cli APIFlags, buildkiteClient
 	if err != nil {
 		return nil, fmt.Errorf("failed to create buildkite logs client: %w", err)
 	}
+
+	// Register debug logging hooks for observability
+	buildkiteLogsClient.Hooks().AddAfterCacheCheck(func(ctx context.Context, result *buildkitelogs.CacheCheckResult) {
+		log.Ctx(ctx).Debug().Str("org", result.Org).Str("pipeline", result.Pipeline).Str("build", result.Build).Str("job", result.Job).Dur("time_taken", result.Duration).Msg("Checked job logs cache")
+	})
+
+	buildkiteLogsClient.Hooks().AddAfterLogDownload(func(ctx context.Context, result *buildkitelogs.LogDownloadResult) {
+		log.Ctx(ctx).Debug().Str("org", result.Org).Str("pipeline", result.Pipeline).Str("build", result.Build).Str("job", result.Job).Dur("time_taken", result.Duration).Msg("Downloaded and cached job logs")
+	})
+
+	buildkiteLogsClient.Hooks().AddAfterLogParsing(func(ctx context.Context, result *buildkitelogs.LogParsingResult) {
+		log.Ctx(ctx).Debug().Str("org", result.Org).Str("pipeline", result.Pipeline).Str("build", result.Build).Str("job", result.Job).Dur("time_taken", result.Duration).Msg("Parsed logs to Parquet")
+	})
+
+	buildkiteLogsClient.Hooks().AddAfterBlobStorage(func(ctx context.Context, result *buildkitelogs.BlobStorageResult) {
+		log.Ctx(ctx).Debug().Str("org", result.Org).Str("pipeline", result.Pipeline).Str("build", result.Build).Str("job", result.Job).Dur("time_taken", result.Duration).Msg("Stored logs to blob storage")
+	})
+
 	return buildkiteLogsClient, nil
 }

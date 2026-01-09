@@ -55,7 +55,7 @@ func run(ctx context.Context, cmd *kong.Context) error {
 		_ = tp.Shutdown(ctx)
 	}()
 
-	return cmd.Run(&commands.Globals{Version: version, Logger: log.Logger})
+	return cmd.Run(&commands.Globals{Version: version})
 }
 
 func setupLogger(debug bool) zerolog.Logger {
