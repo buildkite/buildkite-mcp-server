@@ -75,8 +75,13 @@ func getClientIP(r *http.Request, trustProxy bool) string {
 			if header == "X-Forwarded-For" {
 				ips := strings.Split(ip, ",")
 				if len(ips) > 0 {
-					return strings.TrimSpace(ips[0])
+					firstIP := strings.TrimSpace(ips[0])
+					if firstIP != "" {
+						return firstIP
+					}
 				}
+				// Empty or malformed X-Forwarded-For, continue checking other headers
+				continue
 			}
 			return ip
 		}

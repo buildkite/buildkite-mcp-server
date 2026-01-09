@@ -290,18 +290,18 @@ func TestGetClientIP_EdgeCases(t *testing.T) {
 			expectedIP: "192.168.1.1:1234",
 		},
 		{
-			name:       "X-Forwarded-For with only commas",
+			name:       "X-Forwarded-For with only commas falls back to RemoteAddr",
 			remoteAddr: "192.168.1.1:1234",
 			headers:    map[string]string{"X-Forwarded-For": ",,,"},
 			trustProxy: true,
-			expectedIP: "",
+			expectedIP: "192.168.1.1:1234",
 		},
 		{
-			name:       "X-Forwarded-For with whitespace only",
+			name:       "X-Forwarded-For with whitespace only falls back to RemoteAddr",
 			remoteAddr: "192.168.1.1:1234",
 			headers:    map[string]string{"X-Forwarded-For": "   "},
 			trustProxy: true,
-			expectedIP: "",
+			expectedIP: "192.168.1.1:1234",
 		},
 	}
 

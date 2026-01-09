@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/server"
 	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
@@ -18,12 +19,12 @@ type StdioCmd struct {
 func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 	buildkiteClient, err := setupBuildkiteAPIClient(ctx, c.APIFlags, globals.Version)
 	if err != nil {
-		return err
+		return fmt.Errorf("stdio server setup: %w", err)
 	}
 
 	buildkiteLogsClient, err := setupBuildkiteLogsClient(ctx, c.APIFlags, buildkiteClient)
 	if err != nil {
-		return err
+		return fmt.Errorf("stdio server setup: %w", err)
 	}
 
 	// Validate the enabled toolsets
