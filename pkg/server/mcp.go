@@ -106,13 +106,14 @@ func BuildkiteTools(client *gobuildkite.Client, buildkiteLogsClient *buildkitelo
 
 	var serverTools []server.ServerTool
 
-	// Add Tool Search Tool if dynamic toolsets are enabled
+	// Add discovery tools if dynamic toolsets are enabled
 	if cfg.DynamicToolsets {
 		searchTool, searchHandler, _ := toolsets.ToolSearch(registry)
-		serverTools = append(serverTools, server.ServerTool{
-			Tool:    searchTool,
-			Handler: searchHandler,
-		})
+		listTool, listHandler, _ := toolsets.ListToolsets(registry)
+		serverTools = append(serverTools,
+			server.ServerTool{Tool: searchTool, Handler: searchHandler},
+			server.ServerTool{Tool: listTool, Handler: listHandler},
+		)
 	}
 
 	enabledTools := registry.GetEnabledTools(cfg.EnabledToolsets, cfg.ReadOnly)

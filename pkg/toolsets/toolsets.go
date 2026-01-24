@@ -167,6 +167,59 @@ func (tr *ToolsetRegistry) SearchTools(query string, limit int) []ToolDefinition
 	return results
 }
 
+// SearchResult contains rich metadata about a tool search match
+type SearchResult struct {
+	Tool           mcp.Tool
+	ToolsetName    string
+	MatchedIn      string // "name", "description", or "both"
+	RequiredScopes []string
+	ReadOnly       bool
+}
+
+// SearchToolsWithMetadata searches for tools matching the query across all toolsets
+// Returns results with additional metadata including toolset name and match location
+func (tr *ToolsetRegistry) SearchToolsWithMetadata(query string, limit int) []SearchResult {
+	var results []SearchResult
+	queryLower := strings.ToLower(query)
+
+	for toolsetName, toolset := range tr.toolsets {
+		for _, toolDef := range toolset.Tools {
+			nameMatch := strings.Contains(strings.ToLower(toolDef.Tool.Name), queryLower)
+			descMatch := strings.Contains(strings.ToLower(toolDef.Tool.Description), queryLower)
+
+			if nameMatch || descMatch {
+				matchedIn := "description"
+				if nameMatch && descMatch {
+					matchedIn = "both"
+				} else if nameMatch {
+					matchedIn = "name"
+				}
+
+				results = append(results, SearchResult{
+					Tool:           toolDef.Tool,
+					ToolsetName:    toolsetName,
+					MatchedIn:      matchedIn,
+					RequiredScopes: toolDef.RequiredScopes,
+					ReadOnly:       toolDef.IsReadOnly(),
+				})
+				if len(results) >= limit {
+					break
+				}
+			}
+		}
+		if len(results) >= limit {
+			break
+		}
+	}
+
+	// Sort results alphabetically by tool name for deterministic output
+	slices.SortFunc(results, func(a, b SearchResult) int {
+		return strings.Compare(a.Tool.Name, b.Tool.Name)
+	})
+
+	return results
+}
+
 // GetAllTools returns all tools across all toolsets with defer_loading metadata
 func (tr *ToolsetRegistry) GetAllTools() []ToolDefinition {
 	var tools []ToolDefinition
@@ -385,7 +438,7 @@ func CreateBuiltinToolsets(client *gobuildkite.Client, buildkiteLogsClient *buil
 				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
 					return buildkite.ListArtifactsForBuild(clientAdapter)
 				}),
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
+				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
 					return buildkite.ListArtifactsForJob(clientAdapter)
 				}),
 				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.GetArtifact(clientAdapter) }),
@@ -407,15 +460,15 @@ func CreateBuiltinToolsets(client *gobuildkite.Client, buildkiteLogsClient *buil
 			Name:        "Log Management",
 			Description: "Tools for searching, reading, and analyzing job logs",
 			Tools: []ToolDefinition{
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
+				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
 					tool, handler, scopes := buildkite.SearchLogs(buildkiteLogsClient)
 					return tool, mcp.NewTypedToolHandler(handler), scopes
 				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
+				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
 					tool, handler, scopes := buildkite.TailLogs(buildkiteLogsClient)
 					return tool, mcp.NewTypedToolHandler(handler), scopes
 				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
+				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
 					tool, handler, scopes := buildkite.ReadLogs(buildkiteLogsClient)
 					return tool, mcp.NewTypedToolHandler(handler), scopes
 				}),

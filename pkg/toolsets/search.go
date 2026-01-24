@@ -3,6 +3,7 @@ package toolsets
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -23,41 +24,42 @@ func ToolSearch(registry *ToolsetRegistry) (mcp.Tool, server.ToolHandlerFunc, []
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest, args ToolSearchArgs) (*mcp.CallToolResult, error) {
-		// Search for matching tools
-		results := registry.SearchTools(args.Query, 10) // Limit to 10 results
+		// Search for matching tools with metadata
+		results := registry.SearchToolsWithMetadata(args.Query, 10) // Limit to 10 results
+
+		if len(results) == 0 {
+			return mcp.NewToolResultText(`{"results":[],"message":"No tools found. Try: 'build', 'pipeline', 'artifact', 'log', 'test', 'cluster'"}`), nil
+		}
 
 		type searchResult struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			Toolset     string `json:"toolset"`
-			ReadOnly    bool   `json:"read_only"`
+			Name           string   `json:"name"`
+			Description    string   `json:"description"`
+			Toolset        string   `json:"toolset"`
+			ReadOnly       bool     `json:"read_only"`
+			MatchedIn      string   `json:"matched_in"`
+			RequiredScopes []string `json:"required_scopes"`
 		}
 
 		var output []searchResult
-		for _, tool := range results {
-			// Find toolset name
-			toolsetName := "unknown"
-			for name, ts := range registry.toolsets {
-				for _, t := range ts.Tools {
-					if t.Tool.Name == tool.Tool.Name {
-						toolsetName = name
-						break
-					}
-				}
-				if toolsetName != "unknown" {
-					break
-				}
+		for _, result := range results {
+			scopes := result.RequiredScopes
+			if scopes == nil {
+				scopes = []string{}
 			}
-
 			output = append(output, searchResult{
-				Name:        tool.Tool.Name,
-				Description: tool.Tool.Description,
-				Toolset:     toolsetName,
-				ReadOnly:    tool.IsReadOnly(),
+				Name:           result.Tool.Name,
+				Description:    result.Tool.Description,
+				Toolset:        result.ToolsetName,
+				ReadOnly:       result.ReadOnly,
+				MatchedIn:      result.MatchedIn,
+				RequiredScopes: scopes,
 			})
 		}
 
-		data, _ := json.Marshal(output)
+		data, err := json.Marshal(output)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to marshal search results: %v", err)), nil
+		}
 		return mcp.NewToolResultText(string(data)), nil
 	}
 
