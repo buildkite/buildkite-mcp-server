@@ -8,6 +8,28 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Experimental: Tool Search
+
+When using many MCP tools, context usage can become significant. The `--dynamic-toolsets` flag enables [Anthropic's Tool Search pattern](https://www.anthropic.com/engineering/mcp-toolsearch) which marks most tools for on-demand loading.
+
+To use this feature:
+
+1. Start the server with the `--dynamic-toolsets` flag:
+   ```bash
+   buildkite-mcp-server stdio --dynamic-toolsets
+   ```
+
+2. Enable tool search in Claude Code by setting the environment variable:
+   ```bash
+   export ENABLE_TOOL_SEARCH=true
+   ```
+
+With both enabled, tools will be loaded on-demand rather than all at once, significantly reducing context usage. Use the `list_toolsets` tool to browse available categories and `search_tools` to discover specific tools.
+
+**Note:** This feature requires Claude Code support for the `defer_loading` hint. See [claude-code#12836](https://github.com/anthropics/claude-code/issues/12836) for details.
+
+---
+
 ## Library Usage
 
 The exported Go API of this module should be considered unstable, and subject to breaking changes as we evolve this project.
