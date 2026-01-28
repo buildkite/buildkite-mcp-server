@@ -2,6 +2,7 @@ package toolsets
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -68,7 +69,10 @@ func (ts Toolset) GetRequiredScopes() []string {
 	return scopes
 }
 
-// ToolsetRegistry manages the registration and discovery of toolsets
+// ToolsetRegistry manages the registration and discovery of toolsets.
+// It is safe for concurrent reads after initialization, but concurrent
+// writes are not supported. In typical usage, the registry is populated
+// once at server startup via RegisterToolsets and then only read.
 type ToolsetRegistry struct {
 	toolsets map[string]Toolset
 }
@@ -146,27 +150,6 @@ func (tr *ToolsetRegistry) GetEnabledTools(enabledToolsets []string, readOnlyMod
 	return tools
 }
 
-// SearchTools searches for tools matching the query across all toolsets
-// Returns matching tools with defer_loading metadata
-func (tr *ToolsetRegistry) SearchTools(query string, limit int) []ToolDefinition {
-	var results []ToolDefinition
-	queryLower := strings.ToLower(query)
-
-	for _, toolset := range tr.toolsets {
-		for _, toolDef := range toolset.Tools {
-			if strings.Contains(strings.ToLower(toolDef.Tool.Name), queryLower) ||
-				strings.Contains(strings.ToLower(toolDef.Tool.Description), queryLower) {
-				results = append(results, toolDef)
-				if len(results) >= limit {
-					return results
-				}
-			}
-		}
-	}
-
-	return results
-}
-
 // SearchResult contains rich metadata about a tool search match
 type SearchResult struct {
 	Tool           mcp.Tool
@@ -177,12 +160,17 @@ type SearchResult struct {
 }
 
 // SearchToolsWithMetadata searches for tools matching the query across all toolsets
-// Returns results with additional metadata including toolset name and match location
+// Returns results with additional metadata including toolset name and match location.
+// Toolsets are iterated in sorted order to ensure deterministic results.
 func (tr *ToolsetRegistry) SearchToolsWithMetadata(query string, limit int) []SearchResult {
 	var results []SearchResult
 	queryLower := strings.ToLower(query)
 
-	for toolsetName, toolset := range tr.toolsets {
+	// Sort toolset names for deterministic iteration order
+	toolsetNames := slices.Sorted(maps.Keys(tr.toolsets))
+
+	for _, toolsetName := range toolsetNames {
+		toolset := tr.toolsets[toolsetName]
 		for _, toolDef := range toolset.Tools {
 			nameMatch := strings.Contains(strings.ToLower(toolDef.Tool.Name), queryLower)
 			descMatch := strings.Contains(strings.ToLower(toolDef.Tool.Description), queryLower)

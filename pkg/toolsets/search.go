@@ -9,6 +9,9 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// DefaultSearchLimit is the maximum number of results returned by tool search
+const DefaultSearchLimit = 10
+
 type ToolSearchArgs struct {
 	Query string `json:"query"`
 }
@@ -25,7 +28,7 @@ func ToolSearch(registry *ToolsetRegistry) (mcp.Tool, server.ToolHandlerFunc, []
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest, args ToolSearchArgs) (*mcp.CallToolResult, error) {
 		// Search for matching tools with metadata
-		results := registry.SearchToolsWithMetadata(args.Query, 10) // Limit to 10 results
+		results := registry.SearchToolsWithMetadata(args.Query, DefaultSearchLimit)
 
 		if len(results) == 0 {
 			return mcp.NewToolResultText(`{"results":[],"message":"No tools found. Try: 'build', 'pipeline', 'artifact', 'log', 'test', 'cluster'"}`), nil
