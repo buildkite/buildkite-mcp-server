@@ -1,16 +1,6 @@
 version: "3.5"
 
 services:
-  golangci-lint:
-    image: golangci/golangci-lint:v2.0.2
-    working_dir: /app
-    volumes:
-      - ..:/app:cached
-      - ~/gocache:/gocache
-      - ~/gomodcache:/gomodcache
-    environment:
-      - GOCACHE=/gocache
-      - GOMODCACHE=/gomodcache
   goreleaser:
     build:
       context: .
