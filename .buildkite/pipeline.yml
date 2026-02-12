@@ -17,7 +17,7 @@ steps:
       plugins:
         - docker-compose#v5.10.0:
             config: .buildkite/docker-compose.yaml
-            run: golangci-lint
+            run: goreleaser
             tty: true
             progress: plain
 
@@ -31,7 +31,7 @@ steps:
       plugins:
         - docker-compose#v5.10.0:
             config: .buildkite/docker-compose.yaml
-            run: golangci-lint
+            run: goreleaser
             tty: true
             mount-buildkite-agent: true
             progress: plain
