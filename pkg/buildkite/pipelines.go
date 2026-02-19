@@ -2,7 +2,6 @@ package buildkite
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 
@@ -97,14 +96,7 @@ func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedTool
 				Repository: args.Repository,
 			})
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			headers := map[string]string{"Link": resp.Header.Get("Link")}
@@ -174,14 +166,7 @@ func GetPipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToolHa
 
 			pipeline, _, err := client.Get(ctx, args.OrgSlug, args.PipelineSlug)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			var result any
@@ -392,14 +377,7 @@ func CreatePipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToo
 
 			pipeline, _, err := client.Create(ctx, args.OrgSlug, create)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			if args.CreateWebhook {
@@ -524,14 +502,7 @@ func UpdatePipeline(client PipelinesClient) (mcp.Tool, mcp.TypedToolHandlerFunc[
 
 			pipeline, _, err := client.Update(ctx, args.OrgSlug, args.PipelineSlug, update)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			return mcpTextResult(span, &pipeline)

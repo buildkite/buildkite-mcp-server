@@ -26,7 +26,7 @@ func UserTokenOrganization(client OrganizationsClient) (tool mcp.Tool, handler s
 
 			orgs, _, err := client.List(ctx, &buildkite.OrganizationListOptions{})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			if len(orgs) == 0 {

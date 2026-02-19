@@ -103,22 +103,22 @@ func ListArtifactsForBuild(client ArtifactsClient) (tool mcp.Tool, handler serve
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			pipelineSlug, err := request.RequireString("pipeline_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			buildNumber, err := request.RequireString("build_number")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			paginationParams, err := optionalPaginationParams(request)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			span.SetAttributes(
@@ -133,7 +133,7 @@ func ListArtifactsForBuild(client ArtifactsClient) (tool mcp.Tool, handler serve
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			result := PaginatedResult[buildkite.Artifact]{
@@ -184,27 +184,27 @@ func ListArtifactsForJob(client ArtifactsClient) (tool mcp.Tool, handler server.
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			pipelineSlug, err := request.RequireString("pipeline_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			buildNumber, err := request.RequireString("build_number")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			jobID, err := request.RequireString("job_id")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			paginationParams, err := optionalPaginationParams(request)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			span.SetAttributes(
@@ -220,7 +220,7 @@ func ListArtifactsForJob(client ArtifactsClient) (tool mcp.Tool, handler server.
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			result := PaginatedResult[buildkite.Artifact]{
@@ -261,7 +261,7 @@ func GetArtifact(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHand
 
 			artifactURL, err := request.RequireString("url")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			// Validate the URL format
@@ -275,7 +275,7 @@ func GetArtifact(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHand
 			var buffer bytes.Buffer
 			resp, err := client.DownloadArtifactByURL(ctx, artifactURL, &buffer)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("response failed with error %s", err.Error())), nil
+				return handleAPIError(err), nil
 			}
 
 			// Create a response with the artifact data encoded safely for JSON

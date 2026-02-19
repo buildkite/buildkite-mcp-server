@@ -27,7 +27,7 @@ func CurrentUser(client UserClient) (tool mcp.Tool, handler server.ToolHandlerFu
 
 		user, _, err := client.CurrentUser(ctx)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return handleAPIError(err), nil
 		}
 
 		return mcpTextResult(span, &user)

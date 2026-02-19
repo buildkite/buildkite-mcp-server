@@ -26,7 +26,7 @@ func AccessToken(client AccessTokenClient) (tool mcp.Tool, handler server.ToolHa
 
 			token, _, err := client.Get(ctx)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			return mcpTextResult(span, &token)
