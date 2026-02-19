@@ -41,17 +41,17 @@ func GetFailedTestExecutions(client TestExecutionsClient) (tool mcp.Tool, handle
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			testSuiteSlug, err := request.RequireString("test_suite_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			runID, err := request.RequireString("run_id")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			includeFailureExpanded := request.GetBool("include_failure_expanded", false)
@@ -74,7 +74,7 @@ func GetFailedTestExecutions(client TestExecutionsClient) (tool mcp.Tool, handle
 
 			failedExecutions, _, err := client.GetFailedExecutions(ctx, orgSlug, testSuiteSlug, runID, options)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			// Always apply client-side pagination

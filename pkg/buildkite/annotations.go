@@ -39,22 +39,22 @@ func ListAnnotations(client AnnotationsClient) (tool mcp.Tool, handler server.To
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			pipelineSlug, err := request.RequireString("pipeline_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			buildNumber, err := request.RequireString("build_number")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			paginationParams, err := optionalPaginationParams(request)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			span.SetAttributes(
@@ -69,7 +69,7 @@ func ListAnnotations(client AnnotationsClient) (tool mcp.Tool, handler server.To
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			result := PaginatedResult[buildkite.Annotation]{

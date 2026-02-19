@@ -42,17 +42,17 @@ func ListTestRuns(client TestRunsClient) (tool mcp.Tool, handler server.ToolHand
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			testSuiteSlug, err := request.RequireString("test_suite_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			paginationParams, err := optionalPaginationParams(request)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			span.SetAttributes(
@@ -68,7 +68,7 @@ func ListTestRuns(client TestRunsClient) (tool mcp.Tool, handler server.ToolHand
 
 			testRuns, resp, err := client.List(ctx, orgSlug, testSuiteSlug, options)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			result := PaginatedResult[buildkite.TestRun]{
@@ -115,17 +115,17 @@ func GetTestRun(client TestRunsClient) (tool mcp.Tool, handler server.ToolHandle
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			testSuiteSlug, err := request.RequireString("test_suite_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			runID, err := request.RequireString("run_id")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			span.SetAttributes(
@@ -136,7 +136,7 @@ func GetTestRun(client TestRunsClient) (tool mcp.Tool, handler server.ToolHandle
 
 			testRun, resp, err := client.Get(ctx, orgSlug, testSuiteSlug, runID)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			if resp.StatusCode != http.StatusOK {

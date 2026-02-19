@@ -37,17 +37,17 @@ func GetTest(client TestsClient) (tool mcp.Tool, handler server.ToolHandlerFunc,
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			testSuiteSlug, err := request.RequireString("test_suite_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			testID, err := request.RequireString("test_id")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			span.SetAttributes(
@@ -58,7 +58,7 @@ func GetTest(client TestsClient) (tool mcp.Tool, handler server.ToolHandlerFunc,
 
 			test, _, err := client.Get(ctx, orgSlug, testSuiteSlug, testID)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			return mcpTextResult(span, &test)

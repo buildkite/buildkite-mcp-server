@@ -32,12 +32,12 @@ func ListClusters(client ClustersClient) (tool mcp.Tool, handler server.ToolHand
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			paginationParams, err := optionalPaginationParams(request)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 			span.SetAttributes(
 				attribute.String("org_slug", orgSlug),
@@ -49,7 +49,7 @@ func ListClusters(client ClustersClient) (tool mcp.Tool, handler server.ToolHand
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			if len(clusters) == 0 {
@@ -90,12 +90,12 @@ func GetCluster(client ClustersClient) (tool mcp.Tool, handler server.ToolHandle
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			clusterID, err := request.RequireString("cluster_id")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 			span.SetAttributes(
 				attribute.String("org_slug", orgSlug),
@@ -104,7 +104,7 @@ func GetCluster(client ClustersClient) (tool mcp.Tool, handler server.ToolHandle
 
 			cluster, _, err := client.Get(ctx, orgSlug, clusterID)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			return mcpTextResult(span, &cluster)
