@@ -724,17 +724,14 @@ func WaitForBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHand
 							b.Reset()
 						}
 
+						completed := total - remaining
 						err := server.SendNotificationToClient(
 							ctx,
 							"notifications/progress",
 							map[string]any{
-								"build_number":        build.Number,
-								"status":              build.State,
-								"total_job_count":     total,
-								"remaining_job_count": remaining,
-								"percentage_complete": calculatePercentage(total, remaining),
-								"created_at":          getTimestampStringOrNil(build.CreatedAt),
-								"started_at":          getTimestampStringOrNil(build.StartedAt),
+								"progressToken": progressToken,
+								"progress":      completed,
+								"total":         total,
 							},
 						)
 						if err != nil {
@@ -766,14 +763,6 @@ func convertEntries(entries []Entry) map[string]string {
 		result[entry.Key] = entry.Value
 	}
 	return result
-}
-
-func getTimestampStringOrNil(ts *buildkite.Timestamp) *string {
-	if ts == nil {
-		return nil
-	}
-	str := ts.Format(time.RFC3339)
-	return &str
 }
 
 // see https://buildkite.com/docs/pipelines/configure/notifications#build-states
