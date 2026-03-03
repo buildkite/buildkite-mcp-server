@@ -58,6 +58,19 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 	// Register tools
 	RegisterTools(s, cfg)
 
+	// Register prompt
+	s.AddPrompt(&mcp.Prompt{
+		Name:        "user_token_organization_prompt",
+		Description: "When asked for detail of a users pipelines start by looking up the user's token organization",
+	}, buildkite.HandleUserTokenOrganizationPrompt)
+
+	// Register resource
+	s.AddResource(&mcp.Resource{
+		URI:         "buildkite://debug-logs-guide",
+		Name:        "Debug Logs Guide",
+		Description: "Comprehensive guide for debugging Buildkite build failures using logs",
+	}, buildkite.HandleDebugLogsGuideResource)
+
 	return s
 }
 
