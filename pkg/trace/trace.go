@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -126,67 +125,27 @@ func newExporter(ctx context.Context, exporter string) (sdktrace.SpanExporter, e
 	}
 }
 
-func NewHooks() *server.Hooks {
-	hooks := &server.Hooks{}
+func NewMiddleware() mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			ctx, span := Start(ctx, fmt.Sprintf("mcp.%s", method))
+			defer span.End()
 
-	hooks.AddOnRegisterSession(func(ctx context.Context, session server.ClientSession) {
-		span := trace.SpanFromContext(ctx)
-		if span != nil {
-			span.SetAttributes(attribute.String("mcp.session.id", session.SessionID()))
+			span.SetAttributes(attribute.String("mcp.method", method))
+
+			log.Debug().Str("mcp.method", method).Msg("Handling MCP request")
+
+			res, err := next(ctx, method, req)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				log.Error().Err(err).Str("mcp.method", method).Msg("Error in MCP request")
+			} else {
+				span.SetStatus(codes.Ok, "OK")
+				log.Debug().Str("mcp.method", method).Msg("Completed MCP request successfully")
+			}
+
+			return res, err
 		}
-	})
-
-	return hooks
-}
-
-func ToolHandlerFunc(thf server.ToolHandlerFunc) server.ToolHandlerFunc {
-	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ctx, span := Start(ctx, "mcp.ToolHandler")
-		defer span.End()
-
-		span.SetAttributes(
-			attribute.String("mcp.method.name", request.Method),
-			attribute.String("mcp.tool.name", request.Params.Name),
-		)
-
-		log.Debug().Str("mcp.tool.name", request.Params.Name).Msg("Handling MCP tool call")
-
-		res, err := thf(ctx, request)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Error().Err(err).Str("mcp.tool.name", request.Params.Name).Msg("Error in MCP tool call")
-		} else {
-			span.SetStatus(codes.Ok, "OK")
-			log.Debug().Str("mcp.tool.name", request.Params.Name).Msg("Completed MCP tool call successfully")
-		}
-
-		return res, err
-	}
-}
-
-func WithResourceHandlerFunc(rhf server.ResourceHandlerFunc) server.ResourceHandlerFunc {
-	return func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-		ctx, span := Start(ctx, "mcp.ResourceHandler")
-		defer span.End()
-
-		span.SetAttributes(
-			attribute.String("mcp.method.name", request.Method),
-			attribute.String("mcp.resource.uri", request.Params.URI),
-		)
-
-		log.Debug().Str("mcp.resource.uri", request.Params.URI).Str("mcp.method.name", request.Method).Msg("Handling MCP resource call")
-
-		res, err := rhf(ctx, request)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			log.Error().Err(err).Str("mcp.resource.uri", request.Params.URI).Msg("Error in MCP resource call")
-		} else {
-			span.SetStatus(codes.Ok, "OK")
-			log.Debug().Str("mcp.resource.uri", request.Params.URI).Msg("Completed MCP resource call successfully")
-		}
-
-		return res, err
 	}
 }

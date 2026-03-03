@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,7 +29,6 @@ var _ TestExecutionsClient = (*MockTestExecutionsClient)(nil)
 func TestGetFailedExecutions(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	failedExecutions := []buildkite.FailedExecution{
 		{
 			ExecutionID:   "exec-1",
@@ -59,29 +58,28 @@ func TestGetFailedExecutions(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetFailedTestExecutions(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
+
+	tool, handler, _ := GetFailedTestExecutions()
 
 	// Test tool properties
 	assert.Equal("get_failed_executions", tool.Name)
 	assert.Equal("Get failed test executions for a specific test run in Buildkite Test Engine. Optionally get the expanded failure details such as full error messages and stack traces.", tool.Description)
-	if tool.Annotations.ReadOnlyHint != nil {
-		assert.True(*tool.Annotations.ReadOnlyHint)
-	}
+	assert.True(tool.Annotations.ReadOnlyHint)
 
 	// Test successful request
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":                 "org",
-		"test_suite_slug":          "suite1",
-		"run_id":                   "run1",
-		"include_failure_expanded": true,
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
+		OrgSlug:                "org",
+		TestSuiteSlug:          "suite1",
+		RunID:                  "run1",
+		IncludeFailureExpanded: true,
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.NotNil(result)
 
 	// Check the result contains failed execution data
-	textContent := result.Content[0].(mcp.TextContent)
+	textContent := result.Content[0].(*mcp.TextContent)
 	assert.Contains(textContent.Text, "exec-1")
 	assert.Contains(textContent.Text, "exec-2")
 	assert.Contains(textContent.Text, "Test Case 1")
@@ -96,88 +94,87 @@ func TestGetFailedExecutions(t *testing.T) {
 func TestGetFailedExecutionsMissingOrg(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestExecutionsClient{}
 
-	_, handler, _ := GetFailedTestExecutions(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
+	_, handler, _ := GetFailedTestExecutions()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "org")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org")
 }
 
 func TestGetFailedExecutionsMissingTestSuiteSlug(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestExecutionsClient{}
 
-	_, handler, _ := GetFailedTestExecutions(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug": "org",
-		"run_id":   "run1",
+	_, handler, _ := GetFailedTestExecutions()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
+		OrgSlug: "org",
+		RunID:   "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "test_suite_slug")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "test_suite_slug")
 }
 
 func TestGetFailedExecutionsMissingRunID(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestExecutionsClient{}
 
-	_, handler, _ := GetFailedTestExecutions(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
+	_, handler, _ := GetFailedTestExecutions()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "run_id")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "run_id")
 }
 
 func TestGetFailedExecutionsWithError(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestExecutionsClient{
 		GetFailedExecutionsFunc: func(ctx context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
 			return []buildkite.FailedExecution{}, &buildkite.Response{}, fmt.Errorf("API error")
 		},
 	}
 
-	_, handler, _ := GetFailedTestExecutions(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
+	_, handler, _ := GetFailedTestExecutions()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "API error")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
 }
 
 func TestGetFailedExecutionsHTTPError(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestExecutionsClient{
 		GetFailedExecutionsFunc: func(ctx context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
 			resp := &http.Response{
@@ -195,24 +192,24 @@ func TestGetFailedExecutionsHTTPError(t *testing.T) {
 		},
 	}
 
-	_, handler, _ := GetFailedTestExecutions(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
+	_, handler, _ := GetFailedTestExecutions()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "Failed executions not found")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "Failed executions not found")
 }
 
 func TestGetFailedExecutionsPagination(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	// Create 6 failed executions to test pagination
 	failedExecutions := []buildkite.FailedExecution{
 		{
@@ -275,22 +272,23 @@ func TestGetFailedExecutionsPagination(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetFailedTestExecutions(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
+
+	tool, handler, _ := GetFailedTestExecutions()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test first page with page size of 2
-	requestFirstPage := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
-		"page":            float64(1),
-		"perPage":         float64(2),
+	resultFirstPage, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetFailedTestExecutionsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
+		Page:          1,
+		PerPage:       2,
 	})
-	resultFirstPage, err := handler(ctx, requestFirstPage)
 	assert.NoError(err)
 
-	textContentFirstPage := resultFirstPage.Content[0].(mcp.TextContent)
+	textContentFirstPage := resultFirstPage.Content[0].(*mcp.TextContent)
 	// Should contain first 2 executions
 	assert.Contains(textContentFirstPage.Text, "exec-1")
 	assert.Contains(textContentFirstPage.Text, "exec-2")
@@ -304,17 +302,16 @@ func TestGetFailedExecutionsPagination(t *testing.T) {
 	assert.Contains(textContentFirstPage.Text, `"has_prev":false`)
 
 	// Test second page with page size of 2
-	requestSecondPage := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
-		"page":            float64(2),
-		"perPage":         float64(2),
+	resultSecondPage, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetFailedTestExecutionsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
+		Page:          2,
+		PerPage:       2,
 	})
-	resultSecondPage, err := handler(ctx, requestSecondPage)
 	assert.NoError(err)
 
-	textContentSecondPage := resultSecondPage.Content[0].(mcp.TextContent)
+	textContentSecondPage := resultSecondPage.Content[0].(*mcp.TextContent)
 	// Should contain next 2 executions
 	assert.NotContains(textContentSecondPage.Text, "exec-1")
 	assert.NotContains(textContentSecondPage.Text, "exec-2")
@@ -328,17 +325,16 @@ func TestGetFailedExecutionsPagination(t *testing.T) {
 	assert.Contains(textContentSecondPage.Text, `"has_prev":true`)
 
 	// Test last page
-	requestLastPage := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
-		"page":            float64(3),
-		"perPage":         float64(2),
+	resultLastPage, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetFailedTestExecutionsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
+		Page:          3,
+		PerPage:       2,
 	})
-	resultLastPage, err := handler(ctx, requestLastPage)
 	assert.NoError(err)
 
-	textContentLastPage := resultLastPage.Content[0].(mcp.TextContent)
+	textContentLastPage := resultLastPage.Content[0].(*mcp.TextContent)
 	// Should contain last 2 executions
 	assert.Contains(textContentLastPage.Text, "exec-5")
 	assert.Contains(textContentLastPage.Text, "exec-6")
@@ -350,17 +346,16 @@ func TestGetFailedExecutionsPagination(t *testing.T) {
 	assert.Contains(textContentLastPage.Text, `"has_prev":true`)
 
 	// Test page beyond available data
-	requestBeyond := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
-		"page":            float64(5),
-		"perPage":         float64(2),
+	resultBeyond, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetFailedTestExecutionsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
+		Page:          5,
+		PerPage:       2,
 	})
-	resultBeyond, err := handler(ctx, requestBeyond)
 	assert.NoError(err)
 
-	textContentBeyond := resultBeyond.Content[0].(mcp.TextContent)
+	textContentBeyond := resultBeyond.Content[0].(*mcp.TextContent)
 	// Should contain empty items array
 	assert.Contains(textContentBeyond.Text, `"items":[]`)
 }
@@ -368,7 +363,6 @@ func TestGetFailedExecutionsPagination(t *testing.T) {
 func TestGetFailedExecutionsLargePage(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	failedExecutions := []buildkite.FailedExecution{
 		{
 			ExecutionID:   "exec-1",
@@ -398,22 +392,23 @@ func TestGetFailedExecutionsLargePage(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetFailedTestExecutions(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
+
+	tool, handler, _ := GetFailedTestExecutions()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test with page size larger than available data
-	requestLargePage := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
-		"page":            float64(1),
-		"perPage":         float64(10),
+	resultLargePage, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetFailedTestExecutionsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
+		Page:          1,
+		PerPage:       10,
 	})
-	resultLargePage, err := handler(ctx, requestLargePage)
 	assert.NoError(err)
 
-	textContentLargePage := resultLargePage.Content[0].(mcp.TextContent)
+	textContentLargePage := resultLargePage.Content[0].(*mcp.TextContent)
 	// Should contain all executions
 	assert.Contains(textContentLargePage.Text, "exec-1")
 	assert.Contains(textContentLargePage.Text, "exec-2")

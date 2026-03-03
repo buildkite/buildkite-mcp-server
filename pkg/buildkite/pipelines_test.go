@@ -58,7 +58,6 @@ var _ PipelinesClient = (*MockPipelinesClient)(nil)
 func TestListPipelines(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockPipelinesClient{
 		ListFunc: func(ctx context.Context, org string, opt *buildkite.PipelineListOptions) ([]buildkite.Pipeline, *buildkite.Response, error) {
 			return []buildkite.Pipeline{
@@ -76,7 +75,9 @@ func TestListPipelines(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := ListPipelines(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+
+	tool, handler, _ := ListPipelines()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
@@ -86,7 +87,7 @@ func TestListPipelines(t *testing.T) {
 		OrgSlug: "org",
 	}
 
-	result, err := handler(ctx, request, args)
+	result, _, err := handler(ctx, request, args)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -97,7 +98,6 @@ func TestListPipelines(t *testing.T) {
 func TestGetPipeline(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockPipelinesClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string) (buildkite.Pipeline, *buildkite.Response, error) {
 			return buildkite.Pipeline{
@@ -113,7 +113,9 @@ func TestGetPipeline(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetPipeline(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+
+	tool, handler, _ := GetPipeline()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
@@ -124,7 +126,7 @@ func TestGetPipeline(t *testing.T) {
 		PipelineSlug: "pipeline",
 	}
 
-	result, err := handler(ctx, request, args)
+	result, _, err := handler(ctx, request, args)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -146,7 +148,6 @@ steps:
     label: "Hello Step"
 `
 
-	ctx := context.Background()
 	webhookCalled := false
 	client := &MockPipelinesClient{
 		CreateFunc: func(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
@@ -182,7 +183,9 @@ steps:
 		},
 	}
 
-	tool, handler, _ := CreatePipeline(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+
+	tool, handler, _ := CreatePipeline()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
@@ -199,7 +202,7 @@ steps:
 		CreateWebhook: true, // should create webhook by default
 	}
 
-	result, err := handler(ctx, request, args)
+	result, _, err := handler(ctx, request, args)
 	assert.NoError(err)
 	assert.True(webhookCalled, "AddWebhook should have been called when CreateWebhook is true")
 
@@ -222,7 +225,6 @@ steps:
     label: "Hello Step"
 `
 
-	ctx := context.Background()
 	webhookCalled := false
 	client := &MockPipelinesClient{
 		CreateFunc: func(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
@@ -260,7 +262,9 @@ steps:
 		},
 	}
 
-	tool, handler, _ := CreatePipeline(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+
+	tool, handler, _ := CreatePipeline()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
@@ -277,7 +281,7 @@ steps:
 		CreateWebhook: true,
 	}
 
-	result, err := handler(ctx, request, args)
+	result, _, err := handler(ctx, request, args)
 	assert.NoError(err)
 	assert.True(webhookCalled, "AddWebhook should have been called")
 
@@ -300,7 +304,6 @@ steps:
     label: "Hello Step"
 `
 
-	ctx := context.Background()
 	webhookCalled := false
 	client := &MockPipelinesClient{
 		CreateFunc: func(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
@@ -330,7 +333,9 @@ steps:
 		},
 	}
 
-	tool, handler, _ := CreatePipeline(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+
+	tool, handler, _ := CreatePipeline()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
@@ -347,7 +352,7 @@ steps:
 		CreateWebhook: true,
 	}
 
-	result, err := handler(ctx, request, args)
+	result, _, err := handler(ctx, request, args)
 	assert.NoError(err)
 	assert.True(webhookCalled, "AddWebhook should have been called")
 
@@ -369,7 +374,6 @@ steps:
 	key: "hello_step"
 	label: "Hello Step"
 `
-	ctx := context.Background()
 	client := &MockPipelinesClient{
 		UpdateFunc: func(ctx context.Context, org string, pipeline string, p buildkite.UpdatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
 			// validate required fields
@@ -393,7 +397,9 @@ steps:
 		},
 	}
 
-	tool, handler, _ := UpdatePipeline(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+
+	tool, handler, _ := UpdatePipeline()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
@@ -409,7 +415,7 @@ steps:
 		RepositoryURL: "https://example.com/repo.git",
 		Tags:          []string{"tag1", "tag2"},
 	}
-	result, err := handler(ctx, request, args)
+	result, _, err := handler(ctx, request, args)
 	assert.NoError(err)
 	textContent := getTextResult(t, result)
 	assert.JSONEq(`{"id":"123","name":"Test Pipeline","slug":"test-pipeline","created_at":"0001-01-01T00:00:00Z","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"cluster_id":"abc-123","tags":["tag1","tag2"],"provider":{"id":"","webhook_url":"","settings":null}}`, textContent.Text)

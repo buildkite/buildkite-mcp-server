@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -15,61 +15,55 @@ type AnnotationsClient interface {
 	ListByBuild(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error)
 }
 
+type ListAnnotationsArgs struct {
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
+	Page         int    `json:"page"`
+	PerPage      int    `json:"perPage"`
+}
+
 // ListAnnotations returns an MCP tool + handler pair that lists annotations for a build.
-func ListAnnotations(client AnnotationsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("list_annotations",
-			mcp.WithDescription("List all annotations for a build, including their context, style (success/info/warning/error), rendered HTML content, and creation timestamps"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("build_number",
-				mcp.Required(),
-			),
-			withPagination(),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "list_annotations",
+			Description: "List all annotations for a build, including their context, style (success/info/warning/error), rendered HTML content, and creation timestamps",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Annotations",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListAnnotationsArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.ListAnnotations")
 			defer span.End()
 
-			orgSlug, err := request.RequireString("org_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.OrgSlug == "" {
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 
-			pipelineSlug, err := request.RequireString("pipeline_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.PipelineSlug == "" {
+				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
 			}
 
-			buildNumber, err := request.RequireString("build_number")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.BuildNumber == "" {
+				return utils.NewToolResultError("build_number is required"), nil, nil
 			}
 
-			paginationParams, err := optionalPaginationParams(request)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
+			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(
-				attribute.String("org_slug", orgSlug),
-				attribute.String("pipeline_slug", pipelineSlug),
-				attribute.String("build_number", buildNumber),
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("build_number", args.BuildNumber),
 				attribute.Int("page", paginationParams.Page),
 				attribute.Int("per_page", paginationParams.PerPage),
 			)
 
-			annotations, resp, err := client.ListByBuild(ctx, orgSlug, pipelineSlug, buildNumber, &buildkite.AnnotationListOptions{
+			deps := DepsFromContext(ctx)
+			annotations, resp, err := deps.AnnotationsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			result := PaginatedResult[buildkite.Annotation]{

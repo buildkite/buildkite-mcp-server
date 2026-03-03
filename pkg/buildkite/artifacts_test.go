@@ -44,7 +44,6 @@ var _ ArtifactsClient = (*MockArtifactsClient)(nil)
 func TestListArtifactsForBuild(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockArtifactsClient := &MockArtifactsClient{
 		ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
 			return []buildkite.Artifact{
@@ -62,16 +61,18 @@ func TestListArtifactsForBuild(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := ListArtifactsForBuild(mockArtifactsClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: mockArtifactsClient})
+
+	tool, handler, _ := ListArtifactsForBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "test-org",
-		"pipeline_slug": "test-pipeline",
-		"build_number":  "123",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListArtifactsForBuildArgs{
+		OrgSlug:      "test-org",
+		PipelineSlug: "test-pipeline",
+		BuildNumber:  "123",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -84,7 +85,6 @@ func TestListArtifactsForBuild(t *testing.T) {
 func TestListArtifactsForJob(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockArtifactsClient := &MockArtifactsClient{
 		ListByJobFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, jobID string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
 			return []buildkite.Artifact{
@@ -102,17 +102,19 @@ func TestListArtifactsForJob(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := ListArtifactsForJob(mockArtifactsClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: mockArtifactsClient})
+
+	tool, handler, _ := ListArtifactsForJob()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "test-org",
-		"pipeline_slug": "test-pipeline",
-		"build_number":  "123",
-		"job_id":        "123456-abcdef-123abc-456def",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListArtifactsForJobArgs{
+		OrgSlug:      "test-org",
+		PipelineSlug: "test-pipeline",
+		BuildNumber:  "123",
+		JobID:        "123456-abcdef-123abc-456def",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -125,7 +127,6 @@ func TestListArtifactsForJob(t *testing.T) {
 func TestGetArtifact(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockArtifactsClient{
 		DownloadArtifactByURLFunc: func(ctx context.Context, url string, writer io.Writer) (*buildkite.Response, error) {
 			// Simulate writing artifact content to the provided writer
@@ -143,14 +144,16 @@ func TestGetArtifact(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetArtifact(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: client})
+
+	tool, handler, _ := GetArtifact()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"url": "https://example.com/artifact",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetArtifactArgs{
+		URL: "https://example.com/artifact",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -167,115 +170,106 @@ func TestGetArtifact(t *testing.T) {
 func TestListArtifactsForBuild_MissingParameters(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
-	client := &MockArtifactsClient{}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: &MockArtifactsClient{}})
 
-	_, handler, _ := ListArtifactsForBuild(client)
+	_, handler, _ := ListArtifactsForBuild()
 
 	// Test missing org parameter
-	req := createMCPRequest(t, map[string]any{
-		"pipeline_slug": "test-pipeline",
-		"build_number":  "123",
+	req := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, req, ListArtifactsForBuildArgs{
+		PipelineSlug: "test-pipeline",
+		BuildNumber:  "123",
 	})
-	result, err := handler(ctx, req)
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Contains(getTextResult(t, result).Text, "required argument \"org_slug\" not found")
+	assert.Contains(getTextResult(t, result).Text, "org_slug is required")
 
 	// Test missing pipeline_slug parameter
-	req = createMCPRequest(t, map[string]any{
-		"org_slug":     "test-org",
-		"build_number": "123",
+	result, _, err = handler(ctx, req, ListArtifactsForBuildArgs{
+		OrgSlug:     "test-org",
+		BuildNumber: "123",
 	})
-	result, err = handler(ctx, req)
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Contains(getTextResult(t, result).Text, "required argument \"pipeline_slug\" not found")
+	assert.Contains(getTextResult(t, result).Text, "pipeline_slug is required")
 
 	// Test missing build_number parameter
-	req = createMCPRequest(t, map[string]any{
-		"org_slug":      "test-org",
-		"pipeline_slug": "test-pipeline",
+	result, _, err = handler(ctx, req, ListArtifactsForBuildArgs{
+		OrgSlug:      "test-org",
+		PipelineSlug: "test-pipeline",
 	})
-	result, err = handler(ctx, req)
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Contains(getTextResult(t, result).Text, "required argument \"build_number\" not found")
+	assert.Contains(getTextResult(t, result).Text, "build_number is required")
 }
 
 func TestListArtifactsForJob_MissingParameters(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
-	client := &MockArtifactsClient{}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: &MockArtifactsClient{}})
 
-	_, handler, _ := ListArtifactsForJob(client)
+	_, handler, _ := ListArtifactsForJob()
 
 	// Test missing org parameter
-	req := createMCPRequest(t, map[string]any{
-		"pipeline_slug": "test-pipeline",
-		"build_number":  "123",
-		"job_id":        "123456-abcdef-123abc-456def",
+	req := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, req, ListArtifactsForJobArgs{
+		PipelineSlug: "test-pipeline",
+		BuildNumber:  "123",
+		JobID:        "123456-abcdef-123abc-456def",
 	})
-	result, err := handler(ctx, req)
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Contains(getTextResult(t, result).Text, "required argument \"org_slug\" not found")
+	assert.Contains(getTextResult(t, result).Text, "org_slug is required")
 
 	// Test missing pipeline_slug parameter
-	req = createMCPRequest(t, map[string]any{
-		"org_slug":     "test-org",
-		"build_number": "123",
-		"job_id":       "123456-abcdef-123abc-456def",
+	result, _, err = handler(ctx, req, ListArtifactsForJobArgs{
+		OrgSlug:     "test-org",
+		BuildNumber: "123",
+		JobID:       "123456-abcdef-123abc-456def",
 	})
-	result, err = handler(ctx, req)
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Contains(getTextResult(t, result).Text, "required argument \"pipeline_slug\" not found")
+	assert.Contains(getTextResult(t, result).Text, "pipeline_slug is required")
 
 	// Test missing build_number parameter
-	req = createMCPRequest(t, map[string]any{
-		"org_slug":      "test-org",
-		"pipeline_slug": "test-pipeline",
-		"job_id":        "123456-abcdef-123abc-456def",
+	result, _, err = handler(ctx, req, ListArtifactsForJobArgs{
+		OrgSlug:      "test-org",
+		PipelineSlug: "test-pipeline",
+		JobID:        "123456-abcdef-123abc-456def",
 	})
-	result, err = handler(ctx, req)
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Contains(getTextResult(t, result).Text, "required argument \"build_number\" not found")
+	assert.Contains(getTextResult(t, result).Text, "build_number is required")
 
 	// Test missing job_id parameter
-	req = createMCPRequest(t, map[string]any{
-		"org_slug":      "test-org",
-		"pipeline_slug": "test-pipeline",
-		"build_number":  "123",
+	result, _, err = handler(ctx, req, ListArtifactsForJobArgs{
+		OrgSlug:      "test-org",
+		PipelineSlug: "test-pipeline",
+		BuildNumber:  "123",
 	})
-	result, err = handler(ctx, req)
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Contains(getTextResult(t, result).Text, "required argument \"job_id\" not found")
+	assert.Contains(getTextResult(t, result).Text, "job_id is required")
 }
 
 func TestGetArtifact_MissingParameters(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
-	client := &MockArtifactsClient{}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: &MockArtifactsClient{}})
 
-	_, handler, _ := GetArtifact(client)
+	_, handler, _ := GetArtifact()
 
 	// Test missing url parameter
 	req := createMCPRequest(t, map[string]any{})
-	result, err := handler(ctx, req)
+	result, _, err := handler(ctx, req, GetArtifactArgs{})
 	assert.NoError(err)
 	assert.NotNil(result)
-	assert.Contains(getTextResult(t, result).Text, "required argument \"url\" not found")
+	assert.Contains(getTextResult(t, result).Text, "url is required")
 }
 
 func TestGetArtifact_ErrorResponse(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockArtifactsClient{
 		DownloadArtifactByURLFunc: func(ctx context.Context, url string, writer io.Writer) (*buildkite.Response, error) {
 			resp := &http.Response{
@@ -290,12 +284,14 @@ func TestGetArtifact_ErrorResponse(t *testing.T) {
 		},
 	}
 
-	_, handler, _ := GetArtifact(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: client})
 
-	req := createMCPRequest(t, map[string]any{
-		"url": "https://example.com/nonexistent-artifact",
+	_, handler, _ := GetArtifact()
+
+	req := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, req, GetArtifactArgs{
+		URL: "https://example.com/nonexistent-artifact",
 	})
-	result, err := handler(ctx, req)
 	assert.NoError(err)
 	assert.NotNil(result)
 	assert.Contains(getTextResult(t, result).Text, `{"message":"Artifact not found"}`)

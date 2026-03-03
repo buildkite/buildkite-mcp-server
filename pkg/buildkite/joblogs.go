@@ -9,7 +9,8 @@ import (
 
 	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -122,67 +123,16 @@ func formatLogEntries(entries []buildkitelogs.ParquetLogEntry) any {
 }
 
 // SearchLogs implements the search_logs MCP tool
-func SearchLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[SearchLogsParams], scopes []string) {
-	return mcp.NewTool("search_logs",
-			mcp.WithDescription("Search log entries using regex patterns with optional context lines. 💡 For recent failures, try 'tail_logs' first, then use search_logs with patterns like 'error|failed|exception' and limit: 10-20. The json format: {ts: timestamp_ms, c: content, rn: row_number}."),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("build_number",
-				mcp.Required(),
-			),
-			mcp.WithString("job_id",
-				mcp.Required(),
-			),
-			mcp.WithString("pattern",
-				mcp.Required(),
-				mcp.Description("Regex pattern to search for"),
-			),
-			mcp.WithNumber("context",
-				mcp.Description("Show NUM lines before and after each match (default: 0)"),
-				mcp.Min(0),
-			),
-			mcp.WithNumber("before_context",
-				mcp.Description("Show NUM lines before each match (default: 0)"),
-				mcp.Min(0),
-			),
-			mcp.WithNumber("after_context",
-				mcp.Description("Show NUM lines after each match (default: 0)"),
-				mcp.Min(0),
-			),
-			mcp.WithBoolean("case_sensitive",
-				mcp.Description("Case-sensitive search (default: false)"),
-			),
-			mcp.WithBoolean("invert_match",
-				mcp.Description("Show non-matching lines (default: false)"),
-			),
-			mcp.WithBoolean("reverse",
-				mcp.Description("Search backwards from end/seek position (default: false)"),
-			),
-			mcp.WithNumber("seek_start",
-				mcp.Description("Start search from this row number (0-based, useful with reverse: true)"),
-				mcp.Min(0),
-			),
-			mcp.WithNumber("limit",
-				mcp.Description("Limit number of matches returned (default: 100, 0 = no limit)"),
-				mcp.Min(0),
-				mcp.DefaultNumber(100),
-			),
-			mcp.WithString("cache_ttl",
-				mcp.Description(`Cache TTL for non-terminal jobs (default: "30s")`),
-			),
-			mcp.WithBoolean("force_refresh",
-				mcp.Description("Force refresh cached entry (default: false)"),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func SearchLogs() (mcp.Tool, mcp.ToolHandlerFor[SearchLogsParams, any], []string) {
+	return mcp.Tool{
+			Name:        "search_logs",
+			Description: "Search log entries using regex patterns with optional context lines. For recent failures, try 'tail_logs' first, then use search_logs with patterns like 'error|failed|exception' and limit: 10-20. The json format: {ts: timestamp_ms, c: content, rn: row_number}.",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Search Logs",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest, params SearchLogsParams) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, params SearchLogsParams) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.SearchLogs")
 			defer span.End()
 
@@ -202,12 +152,13 @@ func SearchLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToo
 			)
 
 			if err := validateSearchPattern(params.Pattern); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
-			reader, err := newParquetReader(ctx, client, params.JobLogsBaseParams)
+			deps := DepsFromContext(ctx)
+			reader, err := newParquetReader(ctx, deps.BuildkiteLogsClient, params.JobLogsBaseParams)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil
+				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
 			}
 
 			opts := SearchOptions{
@@ -224,7 +175,7 @@ func SearchLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToo
 			count := 0
 			for result, err := range reader.SearchEntriesIter(opts) {
 				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Search error: %v", err)), nil
+					return utils.NewToolResultError(fmt.Sprintf("Search error: %v", err)), nil, nil
 				}
 
 				results = append(results, result)
@@ -253,38 +204,16 @@ func SearchLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToo
 }
 
 // TailLogs implements the tail_logs MCP tool
-func TailLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[TailLogsParams], scopes []string) {
-	return mcp.NewTool("tail_logs",
-			mcp.WithDescription("Show the last N entries from the log file. 🔥 RECOMMENDED for failure diagnosis - most build failures appear in the final log entries. More token-efficient than read_logs for recent issues. The json format: {ts: timestamp_ms, c: content, rn: row_number}."),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("build_number",
-				mcp.Required(),
-			),
-			mcp.WithString("job_id",
-				mcp.Required(),
-			),
-			mcp.WithNumber("tail",
-				mcp.Description("Number of lines to show from end (default: 10)"),
-				mcp.Min(1),
-				mcp.DefaultNumber(10),
-			),
-			mcp.WithString("cache_ttl",
-				mcp.Description(`Cache TTL for non-terminal jobs (default: "30s")`),
-			),
-			mcp.WithBoolean("force_refresh",
-				mcp.Description("Force refresh cached entry (default: false)"),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func TailLogs() (mcp.Tool, mcp.ToolHandlerFor[TailLogsParams, any], []string) {
+	return mcp.Tool{
+			Name:        "tail_logs",
+			Description: "Show the last N entries from the log file. RECOMMENDED for failure diagnosis - most build failures appear in the final log entries. More token-efficient than read_logs for recent issues. The json format: {ts: timestamp_ms, c: content, rn: row_number}.",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Tail Logs",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest, params TailLogsParams) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, params TailLogsParams) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.TailLogs")
 			defer span.End()
 
@@ -303,14 +232,15 @@ func TailLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolH
 				attribute.Int("tail", params.Tail),
 			)
 
-			reader, err := newParquetReader(ctx, client, params.JobLogsBaseParams)
+			deps := DepsFromContext(ctx)
+			reader, err := newParquetReader(ctx, deps.BuildkiteLogsClient, params.JobLogsBaseParams)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil
+				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
 			}
 
 			fileInfo, err := reader.GetFileInfo()
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to get file info: %v", err)), nil
+				return utils.NewToolResultError(fmt.Sprintf("Failed to get file info: %v", err)), nil, nil
 			}
 
 			startRow := max(fileInfo.RowCount-int64(params.Tail), 0)
@@ -318,7 +248,7 @@ func TailLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolH
 			var entries []buildkitelogs.ParquetLogEntry
 			for entry, err := range reader.SeekToRow(startRow) {
 				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Failed to read tail entries: %v", err)), nil
+					return utils.NewToolResultError(fmt.Sprintf("Failed to read tail entries: %v", err)), nil, nil
 				}
 				entries = append(entries, entry)
 			}
@@ -342,42 +272,16 @@ func TailLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolH
 }
 
 // ReadLogs implements the read_logs MCP tool
-func ReadLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[ReadLogsParams], scopes []string) {
-	return mcp.NewTool("read_logs",
-			mcp.WithDescription("Read log entries from the file, optionally starting from a specific row number. ⚠️ ALWAYS use 'limit' parameter to avoid excessive tokens. For recent failures, use 'tail_logs' instead. Recommended limits: investigation (100-500), exploration (use seek + small limits). The json format: {ts: timestamp_ms, c: content, rn: row_number}."),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("build_number",
-				mcp.Required(),
-			),
-			mcp.WithString("job_id",
-				mcp.Required(),
-			),
-			mcp.WithNumber("seek",
-				mcp.Description("Row number to start from (0-based, default: 0)"),
-				mcp.Min(0),
-			),
-			mcp.WithNumber("limit",
-				mcp.Description("Limit number of entries returned (default: 100, 0 = no limit)"),
-				mcp.Min(0),
-				mcp.DefaultNumber(100),
-			),
-			mcp.WithString("cache_ttl",
-				mcp.Description(`Cache TTL for non-terminal jobs (default: "30s")`),
-			),
-			mcp.WithBoolean("force_refresh",
-				mcp.Description("Force refresh cached entry (default: false)"),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func ReadLogs() (mcp.Tool, mcp.ToolHandlerFor[ReadLogsParams, any], []string) {
+	return mcp.Tool{
+			Name:        "read_logs",
+			Description: "Read log entries from the file, optionally starting from a specific row number. ALWAYS use 'limit' parameter to avoid excessive tokens. For recent failures, use 'tail_logs' instead. Recommended limits: investigation (100-500), exploration (use seek + small limits). The json format: {ts: timestamp_ms, c: content, rn: row_number}.",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Read Logs",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest, params ReadLogsParams) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, params ReadLogsParams) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.ReadLogs")
 			defer span.End()
 
@@ -392,9 +296,10 @@ func ReadLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolH
 				attribute.Int("limit", params.Limit),
 			)
 
-			reader, err := newParquetReader(ctx, client, params.JobLogsBaseParams)
+			deps := DepsFromContext(ctx)
+			reader, err := newParquetReader(ctx, deps.BuildkiteLogsClient, params.JobLogsBaseParams)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil
+				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
 			}
 
 			var entries []buildkitelogs.ParquetLogEntry
@@ -409,7 +314,7 @@ func ReadLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToolH
 
 			for entry, err := range entryIter {
 				if err != nil {
-					return mcp.NewToolResultError(fmt.Sprintf("Failed to read entries: %v", err)), nil
+					return utils.NewToolResultError(fmt.Sprintf("Failed to read entries: %v", err)), nil, nil
 				}
 
 				entries = append(entries, entry)

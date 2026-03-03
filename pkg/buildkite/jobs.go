@@ -5,8 +5,9 @@ import (
 	"errors"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -31,45 +32,30 @@ type UnblockJobArgs struct {
 	Fields       map[string]string `json:"fields,omitempty"`
 }
 
-func UnblockJob(client JobsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[UnblockJobArgs], scopes []string) {
-	return mcp.NewTool("unblock_job",
-			mcp.WithDescription("Unblock a blocked job in a Buildkite build to allow it to continue execution"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("build_number",
-				mcp.Required(),
-			),
-			mcp.WithString("job_id",
-				mcp.Required(),
-			),
-			mcp.WithObject("fields",
-				mcp.Description("JSON object containing string values for block step fields"),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
-				Title:        "Unblock Job",
-				ReadOnlyHint: mcp.ToBoolPtr(false),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest, args UnblockJobArgs) (*mcp.CallToolResult, error) {
+func UnblockJob() (mcp.Tool, mcp.ToolHandlerFor[UnblockJobArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "unblock_job",
+			Description: "Unblock a blocked job in a Buildkite build to allow it to continue execution",
+			Annotations: &mcp.ToolAnnotations{
+				Title: "Unblock Job",
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args UnblockJobArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.UnblockJob")
 			defer span.End()
 
 			// Validate required parameters
 			if args.OrgSlug == "" {
-				return mcp.NewToolResultError("org_slug parameter is required"), nil
+				return utils.NewToolResultError("org_slug parameter is required"), nil, nil
 			}
 			if args.PipelineSlug == "" {
-				return mcp.NewToolResultError("pipeline_slug parameter is required"), nil
+				return utils.NewToolResultError("pipeline_slug parameter is required"), nil, nil
 			}
 			if args.BuildNumber == "" {
-				return mcp.NewToolResultError("build_number parameter is required"), nil
+				return utils.NewToolResultError("build_number parameter is required"), nil, nil
 			}
 			if args.JobID == "" {
-				return mcp.NewToolResultError("job_id parameter is required"), nil
+				return utils.NewToolResultError("job_id parameter is required"), nil, nil
 			}
 
 			span.SetAttributes(
@@ -86,16 +72,17 @@ func UnblockJob(client JobsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerF
 			}
 
 			// Unblock the job
-			job, _, err := client.UnblockJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, &unblockOptions)
+			deps := DepsFromContext(ctx)
+			job, _, err := deps.JobsClient.UnblockJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, &unblockOptions)
 			if err != nil {
 				var errResp *buildkite.ErrorResponse
 				if errors.As(err, &errResp) {
 					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
+						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
 					}
 				}
 
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			return mcpTextResult(span, &job)

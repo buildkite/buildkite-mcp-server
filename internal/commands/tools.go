@@ -6,29 +6,26 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/buildkite/buildkite-mcp-server/pkg/server"
-	gobuildkite "github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
 )
 
 type ToolsCmd struct{}
 
 func (c *ToolsCmd) Run(ctx context.Context, globals *Globals) error {
-	client := &gobuildkite.Client{}
+	registry := toolsets.NewToolsetRegistry()
+	registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
 
-	// Collect all tools (pass nil for ParquetClient since this is just for listing)
-	tools := server.BuildkiteTools(client, nil, server.WithToolsets("all"))
+	tools := registry.GetEnabledTools([]string{"all"}, false)
 
-	for _, tool := range tools {
-
+	for _, toolDef := range tools {
 		buf := new(bytes.Buffer)
 
-		err := json.NewEncoder(buf).Encode(&tool.Tool)
+		err := json.NewEncoder(buf).Encode(&toolDef.Tool)
 		if err != nil {
 			return err
 		}
 
 		fmt.Print(buf.String())
-
 	}
 
 	return nil

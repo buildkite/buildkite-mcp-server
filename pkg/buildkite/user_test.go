@@ -23,7 +23,6 @@ func (m *MockUserClient) CurrentUser(ctx context.Context) (buildkite.User, *buil
 func TestCurrentUser(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockUserClient{
 		CurrentUserFunc: func(ctx context.Context) (buildkite.User, *buildkite.Response, error) {
 			return buildkite.User{
@@ -39,13 +38,15 @@ func TestCurrentUser(t *testing.T) {
 		},
 	}
 
-	tool, handler, scopes := CurrentUser(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{UserClient: client})
+
+	tool, handler, scopes := CurrentUser()
 	assert.Equal([]string{"read_user"}, scopes)
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	request := createMCPRequest(t, map[string]any{})
-	result, err := handler(ctx, request)
+	result, _, err := handler(ctx, request, CurrentUserArgs{})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)

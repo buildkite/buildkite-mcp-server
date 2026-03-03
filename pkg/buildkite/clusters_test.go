@@ -33,7 +33,6 @@ func (m *mockClustersClient) Get(ctx context.Context, org, id string) (buildkite
 func TestListClusters(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &mockClustersClient{
 		ListFunc: func(ctx context.Context, org string, opts *buildkite.ClustersListOptions) ([]buildkite.Cluster, *buildkite.Response, error) {
 			return []buildkite.Cluster{
@@ -49,14 +48,16 @@ func TestListClusters(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := ListClusters(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClustersClient: client})
+
+	tool, handler, _ := ListClusters()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug": "org",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListClustersArgs{
+		OrgSlug: "org",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -66,7 +67,6 @@ func TestListClusters(t *testing.T) {
 func TestGetCluster(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &mockClustersClient{
 		GetFunc: func(ctx context.Context, org, id string) (buildkite.Cluster, *buildkite.Response, error) {
 			return buildkite.Cluster{
@@ -80,15 +80,17 @@ func TestGetCluster(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetCluster(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClustersClient: client})
+
+	tool, handler, _ := GetCluster()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":   "org",
-		"cluster_id": "cluster-id",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetClusterArgs{
+		OrgSlug:   "org",
+		ClusterID: "cluster-id",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)

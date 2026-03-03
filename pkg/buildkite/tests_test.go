@@ -42,29 +42,28 @@ func TestGetTest(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetTest(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestsClient: client})
+
+	tool, handler, _ := GetTest()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	// Test the tool schema
+	// Test the tool definition
 	assert.Equal("get_test", tool.Name)
 	assert.Contains(tool.Description, "specific test")
+	assert.True(tool.Annotations.ReadOnlyHint)
 
-	// Test required parameters
-	params := tool.InputSchema.Properties
-	assert.Contains(params, "org_slug")
-	assert.Contains(params, "test_suite_slug")
-	assert.Contains(params, "test_id")
+	// Test successful request
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetTestArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		TestID:        "test-123",
+	})
+	assert.NoError(err)
+	assert.NotNil(result)
 
-	// Verify org is required
-	orgParam := params["org_slug"].(map[string]any)
-	assert.Equal("string", orgParam["type"])
-
-	// Verify test_suite_slug is required
-	testSuiteParam := params["test_suite_slug"].(map[string]any)
-	assert.Equal("string", testSuiteParam["type"])
-
-	// Verify test_id is required
-	testIDParam := params["test_id"].(map[string]any)
-	assert.Equal("string", testIDParam["type"])
+	textContent := getTextResult(t, result)
+	assert.Contains(textContent.Text, "test-123")
+	assert.Contains(textContent.Text, "Example Test")
 }

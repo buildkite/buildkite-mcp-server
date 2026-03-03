@@ -6,27 +6,23 @@ import (
 	"slices"
 	"strings"
 
-	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
-	gobuildkite "github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ToolDefinition wraps an MCP tool with additional metadata
 type ToolDefinition struct {
 	Tool           mcp.Tool
-	Handler        server.ToolHandlerFunc
-	RequiredScopes []string // Buildkite API token scopes required for this tool
-	DeferLoading   bool     // Mark tool for deferred loading
+	Register       func(s *mcp.Server) // registers this tool on the server
+	RequiredScopes []string            // Buildkite API token scopes required for this tool
 }
 
 // IsReadOnly returns true if the tool is read-only
 func (td ToolDefinition) IsReadOnly() bool {
-	if td.Tool.Annotations.ReadOnlyHint == nil {
+	if td.Tool.Annotations == nil {
 		return false
 	}
-	return *td.Tool.Annotations.ReadOnlyHint
+	return td.Tool.Annotations.ReadOnlyHint
 }
 
 // Toolset represents a logical grouping of related tools
@@ -208,7 +204,7 @@ func (tr *ToolsetRegistry) SearchToolsWithMetadata(query string, limit int) []Se
 	return results
 }
 
-// GetAllTools returns all tools across all toolsets with defer_loading metadata
+// GetAllTools returns all tools across all toolsets
 func (tr *ToolsetRegistry) GetAllTools() []ToolDefinition {
 	var tools []ToolDefinition
 	for _, toolset := range tr.toolsets {
@@ -286,21 +282,13 @@ func (tr *ToolsetRegistry) GetRequiredScopes(enabledToolsets []string, readOnlyM
 	return scopes
 }
 
-// NewTool creates a new tool definition with annotations based on access level
-func NewTool(tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) ToolDefinition {
+// NewTool creates a new tool definition
+func NewTool(tool mcp.Tool, register func(s *mcp.Server), scopes []string) ToolDefinition {
 	return ToolDefinition{
 		Tool:           tool,
-		Handler:        handler,
+		Register:       register,
 		RequiredScopes: scopes,
-		DeferLoading:   false, // Default: load immediately
 	}
-}
-
-// NewDeferredTool creates a new tool definition that is loaded lazily
-func NewDeferredTool(tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) ToolDefinition {
-	td := NewTool(tool, handler, scopes)
-	td.DeferLoading = true
-	return td
 }
 
 const (
@@ -347,152 +335,98 @@ func ValidateToolsets(names []string) error {
 	return nil
 }
 
-// CreateBuiltinToolsets creates the default toolsets with all available tools
-func CreateBuiltinToolsets(client *gobuildkite.Client, buildkiteLogsClient *buildkitelogs.Client) map[string]Toolset {
-	// Create a client adapter for artifact tools
-	clientAdapter := &buildkite.BuildkiteClientAdapter{Client: client}
+// newToolDef creates a ToolDefinition from a zero-arg function returning (tool, handler, scopes).
+// The generic parameters In and Out match the typed handler signature.
+func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, Out], []string)) ToolDefinition {
+	tool, handler, scopes := toolFunc()
+	return ToolDefinition{
+		Tool: tool,
+		Register: func(s *mcp.Server) {
+			mcp.AddTool(s, &tool, handler)
+		},
+		RequiredScopes: scopes,
+	}
+}
 
+// CreateBuiltinToolsets creates the default toolsets with all available tools.
+// Tool functions retrieve their dependencies from the request context at call time.
+func CreateBuiltinToolsets() map[string]Toolset {
 	return map[string]Toolset{
 		ToolsetClusters: {
 			Name:        "Cluster Management",
 			Description: "Tools for managing Buildkite clusters and cluster queues",
 			Tools: []ToolDefinition{
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.GetCluster(client.Clusters) }),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.ListClusters(client.Clusters) }),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					return buildkite.GetClusterQueue(client.ClusterQueues)
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					return buildkite.ListClusterQueues(client.ClusterQueues)
-				}),
+				newToolDef(buildkite.GetCluster),
+				newToolDef(buildkite.ListClusters),
+				newToolDef(buildkite.GetClusterQueue),
+				newToolDef(buildkite.ListClusterQueues),
 			},
 		},
 		ToolsetPipelines: {
 			Name:        "Pipeline Management",
 			Description: "Tools for managing Buildkite pipelines",
 			Tools: []ToolDefinition{
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.GetPipeline(client.Pipelines)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.ListPipelines(client.Pipelines)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.CreatePipeline(client.Pipelines)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.UpdatePipeline(client.Pipelines)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
+				newToolDef(buildkite.GetPipeline),
+				newToolDef(buildkite.ListPipelines),
+				newToolDef(buildkite.CreatePipeline),
+				newToolDef(buildkite.UpdatePipeline),
 			},
 		},
 		ToolsetBuilds: {
 			Name:        "Build Operations",
 			Description: "Tools for managing builds and jobs",
 			Tools: []ToolDefinition{
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.ListBuilds(client.Builds)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.GetBuild(client.Builds)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.GetBuildTestEngineRuns(client.Builds)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.CreateBuild(client.Builds)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.WaitForBuild(client.Builds)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.UnblockJob(client.Jobs)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
+				newToolDef(buildkite.ListBuilds),
+				newToolDef(buildkite.GetBuild),
+				newToolDef(buildkite.GetBuildTestEngineRuns),
+				newToolDef(buildkite.CreateBuild),
+				newToolDef(buildkite.WaitForBuild),
+				newToolDef(buildkite.UnblockJob),
 			},
 		},
 		ToolsetArtifacts: {
 			Name:        "Artifact Management",
 			Description: "Tools for managing build artifacts",
 			Tools: []ToolDefinition{
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					return buildkite.ListArtifactsForBuild(clientAdapter)
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					return buildkite.ListArtifactsForJob(clientAdapter)
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.GetArtifact(clientAdapter) }),
+				newToolDef(buildkite.ListArtifactsForBuild),
+				newToolDef(buildkite.ListArtifactsForJob),
+				newToolDef(buildkite.GetArtifact),
 			},
 		},
 		ToolsetTests: {
 			Name:        "Test Engine",
 			Description: "Tools for managing test runs and test results",
 			Tools: []ToolDefinition{
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.ListTestRuns(client.TestRuns) }),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.GetTestRun(client.TestRuns) }),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					return buildkite.GetFailedTestExecutions(client.TestRuns)
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.GetTest(client.Tests) }),
+				newToolDef(buildkite.ListTestRuns),
+				newToolDef(buildkite.GetTestRun),
+				newToolDef(buildkite.GetFailedTestExecutions),
+				newToolDef(buildkite.GetTest),
 			},
 		},
 		ToolsetLogs: {
 			Name:        "Log Management",
 			Description: "Tools for searching, reading, and analyzing job logs",
 			Tools: []ToolDefinition{
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.SearchLogs(buildkiteLogsClient)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.TailLogs(buildkiteLogsClient)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					tool, handler, scopes := buildkite.ReadLogs(buildkiteLogsClient)
-					return tool, mcp.NewTypedToolHandler(handler), scopes
-				}),
+				newToolDef(buildkite.SearchLogs),
+				newToolDef(buildkite.TailLogs),
+				newToolDef(buildkite.ReadLogs),
 			},
 		},
 		ToolsetAnnotations: {
 			Name:        "Annotation Management",
 			Description: "Tools for managing build annotations",
 			Tools: []ToolDefinition{
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					return buildkite.ListAnnotations(client.Annotations)
-				}),
+				newToolDef(buildkite.ListAnnotations),
 			},
 		},
 		ToolsetUser: {
 			Name:        "User & Organization",
 			Description: "Tools for user and organization information",
 			Tools: []ToolDefinition{
-				newToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.CurrentUser(client.User) }),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) {
-					return buildkite.UserTokenOrganization(client.Organizations)
-				}),
-				newDeferredToolFromFunc(func() (mcp.Tool, server.ToolHandlerFunc, []string) { return buildkite.AccessToken(client.AccessTokens) }),
+				newToolDef(buildkite.CurrentUser),
+				newToolDef(buildkite.UserTokenOrganization),
+				newToolDef(buildkite.AccessToken),
 			},
 		},
 	}
-}
-
-// newToolFromFunc creates a new ToolDefinition from a function that returns (tool, handler, scopes)
-func newToolFromFunc(toolFunc func() (mcp.Tool, server.ToolHandlerFunc, []string)) ToolDefinition {
-	tool, handler, scopes := toolFunc()
-	return NewTool(tool, handler, scopes)
-}
-
-// newDeferredToolFromFunc creates a new deferred ToolDefinition from a function
-func newDeferredToolFromFunc(toolFunc func() (mcp.Tool, server.ToolHandlerFunc, []string)) ToolDefinition {
-	tool, handler, scopes := toolFunc()
-	return NewDeferredTool(tool, handler, scopes)
 }

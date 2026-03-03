@@ -26,8 +26,6 @@ var _ AnnotationsClient = (*MockAnnotationsClient)(nil)
 func TestListAnnotations(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
-
 	client := &MockAnnotationsClient{
 		ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
 			return []buildkite.Annotation{
@@ -47,15 +45,17 @@ func TestListAnnotations(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := ListAnnotations(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{AnnotationsClient: client})
+
+	tool, handler, _ := ListAnnotations()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
-		"build_number":  "1",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListAnnotationsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	textContent := getTextResult(t, result)
 

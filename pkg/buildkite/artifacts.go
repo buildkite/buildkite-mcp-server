@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -12,9 +11,9 @@ import (
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -79,61 +78,66 @@ func (a *BuildkiteClientAdapter) rewriteArtifactURL(inputURL string) string {
 	return parsedURL.String()
 }
 
-func ListArtifactsForBuild(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("list_artifacts_for_build",
-			mcp.WithDescription("List all artifacts for a build across all jobs, including file details, paths, sizes, MIME types, and download URLs"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("build_number",
-				mcp.Required(),
-			),
-			withPagination(),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+type ListArtifactsForBuildArgs struct {
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
+	Page         int    `json:"page"`
+	PerPage      int    `json:"perPage"`
+}
+
+type ListArtifactsForJobArgs struct {
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
+	JobID        string `json:"job_id"`
+	Page         int    `json:"page"`
+	PerPage      int    `json:"perPage"`
+}
+
+type GetArtifactArgs struct {
+	URL string `json:"url"`
+}
+
+func ListArtifactsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForBuildArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "list_artifacts_for_build",
+			Description: "List all artifacts for a build across all jobs, including file details, paths, sizes, MIME types, and download URLs",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Build Artifact List",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args ListArtifactsForBuildArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.ListArtifactsForBuild")
 			defer span.End()
 
-			orgSlug, err := request.RequireString("org_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.OrgSlug == "" {
+				return utils.NewToolResultError("org_slug is required"), nil, nil
+			}
+			if args.PipelineSlug == "" {
+				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
+			}
+			if args.BuildNumber == "" {
+				return utils.NewToolResultError("build_number is required"), nil, nil
 			}
 
-			pipelineSlug, err := request.RequireString("pipeline_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			buildNumber, err := request.RequireString("build_number")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			paginationParams, err := optionalPaginationParams(request)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
+			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(
-				attribute.String("org_slug", orgSlug),
-				attribute.String("pipeline_slug", pipelineSlug),
-				attribute.String("build_number", buildNumber),
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("build_number", args.BuildNumber),
 				attribute.Int("page", paginationParams.Page),
 				attribute.Int("per_page", paginationParams.PerPage),
 			)
 
-			artifacts, resp, err := client.ListByBuild(ctx, orgSlug, pipelineSlug, buildNumber, &buildkite.ArtifactListOptions{
+			deps := DepsFromContext(ctx)
+			artifacts, resp, err := deps.ArtifactsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.ArtifactListOptions{
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			result := PaginatedResult[buildkite.Artifact]{
@@ -143,84 +147,57 @@ func ListArtifactsForBuild(client ArtifactsClient) (tool mcp.Tool, handler serve
 				},
 			}
 
-			r, err := json.Marshal(result)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal artifacts: %w", err)
-			}
-
 			span.SetAttributes(
 				attribute.Int("item_count", len(artifacts)),
-				attribute.Int("estimated_tokens", tokens.EstimateTokens(string(r))),
 			)
 
-			return mcp.NewToolResultText(string(r)), nil
+			return mcpTextResult(span, &result)
 		}, []string{"read_artifacts"}
 }
 
-func ListArtifactsForJob(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("list_artifacts_for_job",
-			mcp.WithDescription("List all artifacts for an individual job, including file details, paths, sizes, MIME types, and download URLs"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("build_number",
-				mcp.Required(),
-			),
-			mcp.WithString("job_id",
-				mcp.Required(),
-			),
-			withPagination(),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "list_artifacts_for_job",
+			Description: "List all artifacts for an individual job, including file details, paths, sizes, MIME types, and download URLs",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Job Artifact List",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args ListArtifactsForJobArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.ListArtifactsForJob")
 			defer span.End()
 
-			orgSlug, err := request.RequireString("org_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.OrgSlug == "" {
+				return utils.NewToolResultError("org_slug is required"), nil, nil
+			}
+			if args.PipelineSlug == "" {
+				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
+			}
+			if args.BuildNumber == "" {
+				return utils.NewToolResultError("build_number is required"), nil, nil
+			}
+			if args.JobID == "" {
+				return utils.NewToolResultError("job_id is required"), nil, nil
 			}
 
-			pipelineSlug, err := request.RequireString("pipeline_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			buildNumber, err := request.RequireString("build_number")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			jobID, err := request.RequireString("job_id")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-
-			paginationParams, err := optionalPaginationParams(request)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
+			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(
-				attribute.String("org_slug", orgSlug),
-				attribute.String("pipeline_slug", pipelineSlug),
-				attribute.String("build_number", buildNumber),
-				attribute.String("job_id", jobID),
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("build_number", args.BuildNumber),
+				attribute.String("job_id", args.JobID),
 				attribute.Int("page", paginationParams.Page),
 				attribute.Int("per_page", paginationParams.PerPage),
 			)
 
-			artifacts, resp, err := client.ListByJob(ctx, orgSlug, pipelineSlug, buildNumber, jobID, &buildkite.ArtifactListOptions{
+			deps := DepsFromContext(ctx)
+			artifacts, resp, err := deps.ArtifactsClient.ListByJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, &buildkite.ArtifactListOptions{
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			result := PaginatedResult[buildkite.Artifact]{
@@ -230,52 +207,47 @@ func ListArtifactsForJob(client ArtifactsClient) (tool mcp.Tool, handler server.
 				},
 			}
 
-			r, err := json.Marshal(result)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal artifacts: %w", err)
-			}
-
 			span.SetAttributes(
 				attribute.Int("item_count", len(artifacts)),
-				attribute.Int("estimated_tokens", tokens.EstimateTokens(string(r))),
+				attribute.Int("estimated_tokens", tokens.EstimateTokens(fmt.Sprintf("%v", result))),
 			)
 
-			return mcp.NewToolResultText(string(r)), nil
+			return mcpTextResult(span, &result)
 		}, []string{"read_artifacts"}
 }
 
-func GetArtifact(client ArtifactsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("get_artifact",
-			mcp.WithDescription("Get detailed information about a specific artifact including its metadata, file size, SHA-1 hash, and download URL"),
-			mcp.WithString("url",
-				mcp.Required(),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "get_artifact",
+			Description: "Get detailed information about a specific artifact including its metadata, file size, SHA-1 hash, and download URL",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Artifact",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetArtifactArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetArtifact")
 			defer span.End()
 
-			artifactURL, err := request.RequireString("url")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.URL == "" {
+				return utils.NewToolResultError("url is required"), nil, nil
 			}
 
+			artifactURL := args.URL
+
 			// Validate the URL format
-			if _, err = url.Parse(artifactURL); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("invalid URL format: %s", err.Error())), nil
+			if _, err := url.Parse(artifactURL); err != nil {
+				return utils.NewToolResultError(fmt.Sprintf("invalid URL format: %s", err.Error())), nil, nil
 			}
 
 			span.SetAttributes(attribute.String("url", artifactURL))
 
 			// Use a buffer to capture the artifact data instead of writing directly to stdout
 			var buffer bytes.Buffer
-			resp, err := client.DownloadArtifactByURL(ctx, artifactURL, &buffer)
+			deps := DepsFromContext(ctx)
+			resp, err := deps.ArtifactsClient.DownloadArtifactByURL(ctx, artifactURL, &buffer)
 			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("response failed with error %s", err.Error())), nil
+				return utils.NewToolResultError(fmt.Sprintf("response failed with error %s", err.Error())), nil, nil
 			}
 
 			// Create a response with the artifact data encoded safely for JSON

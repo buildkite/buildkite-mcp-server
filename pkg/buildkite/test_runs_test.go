@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,7 +45,6 @@ var _ TestRunsClient = (*MockTestRunsClient)(nil)
 func TestListTestRuns(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	testRuns := []buildkite.TestRun{
 		{
 			ID:        "run1",
@@ -74,29 +73,28 @@ func TestListTestRuns(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := ListTestRuns(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
+
+	tool, handler, _ := ListTestRuns()
 
 	// Test tool properties
 	assert.Equal("list_test_runs", tool.Name)
 	assert.Equal("List all test runs for a test suite in Buildkite Test Engine", tool.Description)
-	if tool.Annotations.ReadOnlyHint != nil {
-		assert.True(*tool.Annotations.ReadOnlyHint)
-	}
+	assert.True(tool.Annotations.ReadOnlyHint)
 
 	// Test successful request
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"page":            1,
-		"perPage":         30,
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListTestRunsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		Page:          1,
+		PerPage:       30,
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.NotNil(result)
 
 	// Check the result contains paginated data
-	textContent := result.Content[0].(mcp.TextContent)
+	textContent := result.Content[0].(*mcp.TextContent)
 	assert.Contains(textContent.Text, "run1")
 	assert.Contains(textContent.Text, "run2")
 	assert.Contains(textContent.Text, "abc123")
@@ -107,66 +105,65 @@ func TestListTestRuns(t *testing.T) {
 func TestListTestRunsWithError(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{
 		ListFunc: func(ctx context.Context, org, slug string, opt *buildkite.TestRunsListOptions) ([]buildkite.TestRun, *buildkite.Response, error) {
 			return []buildkite.TestRun{}, &buildkite.Response{}, fmt.Errorf("API error")
 		},
 	}
 
-	_, handler, _ := ListTestRuns(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
+	_, handler, _ := ListTestRuns()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListTestRunsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "API error")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
 }
 
 func TestListTestRunsMissingOrg(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{}
 
-	_, handler, _ := ListTestRuns(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"test_suite_slug": "suite1",
+	_, handler, _ := ListTestRuns()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListTestRunsArgs{
+		TestSuiteSlug: "suite1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "org")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org")
 }
 
 func TestListTestRunsMissingTestSuiteSlug(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{}
 
-	_, handler, _ := ListTestRuns(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug": "org",
+	_, handler, _ := ListTestRuns()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListTestRunsArgs{
+		OrgSlug: "org",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "test_suite_slug")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "test_suite_slug")
 }
 
 func TestGetTestRun(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	testRun := buildkite.TestRun{
 		ID:        "run1",
 		URL:       "https://api.buildkite.com/v2/analytics/organizations/org/suites/suite1/runs/run1",
@@ -185,28 +182,27 @@ func TestGetTestRun(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetTestRun(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
+
+	tool, handler, _ := GetTestRun()
 
 	// Test tool properties
 	assert.Equal("get_test_run", tool.Name)
 	assert.Equal("Get a specific test run in Buildkite Test Engine", tool.Description)
-	if tool.Annotations.ReadOnlyHint != nil {
-		assert.True(*tool.Annotations.ReadOnlyHint)
-	}
+	assert.True(tool.Annotations.ReadOnlyHint)
 
 	// Test successful request
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetTestRunArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.NotNil(result)
 
 	// Check the result contains test run data
-	textContent := result.Content[0].(mcp.TextContent)
+	textContent := result.Content[0].(*mcp.TextContent)
 	assert.Contains(textContent.Text, "run1")
 	assert.Contains(textContent.Text, "abc123")
 	assert.Contains(textContent.Text, "main")
@@ -215,82 +211,82 @@ func TestGetTestRun(t *testing.T) {
 func TestGetTestRunWithError(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{
 		GetFunc: func(ctx context.Context, org, slug, runID string) (buildkite.TestRun, *buildkite.Response, error) {
 			return buildkite.TestRun{}, &buildkite.Response{}, fmt.Errorf("API error")
 		},
 	}
 
-	_, handler, _ := GetTestRun(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
+	_, handler, _ := GetTestRun()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetTestRunArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "API error")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
 }
 
 func TestGetTestRunMissingOrg(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{}
 
-	_, handler, _ := GetTestRun(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
+	_, handler, _ := GetTestRun()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetTestRunArgs{
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "org")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org")
 }
 
 func TestGetTestRunMissingTestSuiteSlug(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{}
 
-	_, handler, _ := GetTestRun(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug": "org",
-		"run_id":   "run1",
+	_, handler, _ := GetTestRun()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetTestRunArgs{
+		OrgSlug: "org",
+		RunID:   "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "test_suite_slug")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "test_suite_slug")
 }
 
 func TestGetTestRunMissingRunID(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{}
 
-	_, handler, _ := GetTestRun(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
+	_, handler, _ := GetTestRun()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetTestRunArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "run_id")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "run_id")
 }
 
 func TestGetTestRunReturnsBuildID(t *testing.T) {
@@ -299,7 +295,6 @@ func TestGetTestRunReturnsBuildID(t *testing.T) {
 	// https://buildkite.com/docs/apis/rest-api/test-engine/runs
 	assert := require.New(t)
 
-	ctx := context.Background()
 	testRun := buildkite.TestRun{
 		ID:        "run1",
 		URL:       "https://api.buildkite.com/v2/analytics/organizations/org/suites/suite1/runs/run1",
@@ -319,19 +314,20 @@ func TestGetTestRunReturnsBuildID(t *testing.T) {
 		},
 	}
 
-	_, handler, _ := GetTestRun(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
+	_, handler, _ := GetTestRun()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetTestRunArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.NotNil(result)
 
-	textContent := result.Content[0].(mcp.TextContent)
+	textContent := result.Content[0].(*mcp.TextContent)
 
 	assert.Contains(textContent.Text, "build_id", "TestRun response should contain build_id field per Buildkite API spec")
 }
@@ -339,7 +335,6 @@ func TestGetTestRunReturnsBuildID(t *testing.T) {
 func TestGetTestRunHTTPError(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{
 		GetFunc: func(ctx context.Context, org, slug, runID string) (buildkite.TestRun, *buildkite.Response, error) {
 			return buildkite.TestRun{}, &buildkite.Response{
@@ -351,24 +346,24 @@ func TestGetTestRunHTTPError(t *testing.T) {
 		},
 	}
 
-	_, handler, _ := GetTestRun(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
-		"run_id":          "run1",
+	_, handler, _ := GetTestRun()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetTestRunArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		RunID:         "run1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "Test run not found")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "Test run not found")
 }
 
 func TestListTestRunsHTTPError(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	mockClient := &MockTestRunsClient{
 		ListFunc: func(ctx context.Context, org, slug string, opt *buildkite.TestRunsListOptions) ([]buildkite.TestRun, *buildkite.Response, error) {
 			resp := &http.Response{
@@ -382,15 +377,16 @@ func TestListTestRunsHTTPError(t *testing.T) {
 		},
 	}
 
-	_, handler, _ := ListTestRuns(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":        "org",
-		"test_suite_slug": "suite1",
+	_, handler, _ := ListTestRuns()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListTestRunsArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
 	})
-
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "Access denied")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "Access denied")
 }
