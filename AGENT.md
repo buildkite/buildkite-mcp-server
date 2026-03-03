@@ -3,7 +3,7 @@
 ## Build/Test Commands
 - `make build` - Build the binary
 - `make test` - Run all tests with coverage
-- `go test ./internal/buildkite/...` - Run tests for specific package
+- `go test ./pkg/buildkite/...` - Run tests for specific package
 - `go test -run TestName` - Run single test by name
 - `make lint` - Run golangci-lint
 - `make lint-fix` - Run golangci-lint with auto-fix
@@ -12,8 +12,8 @@
 
 ## Architecture
 - **Main binary**: `cmd/buildkite-mcp-server/main.go` - MCP server for Buildkite API access
-- **Core packages**: `internal/buildkite/` - API wrappers, `internal/commands/` - CLI commands
-- **Key dependencies**: `github.com/mark3labs/mcp-go` (MCP protocol), `github.com/buildkite/go-buildkite/v4` (API client)
+- **Core packages**: `pkg/buildkite/` - API wrappers and tool handlers, `internal/commands/` - CLI commands, `pkg/toolsets/` - tool registry, `pkg/server/` - MCP server setup
+- **Key dependencies**: `github.com/modelcontextprotocol/go-sdk` (MCP protocol), `github.com/buildkite/go-buildkite/v4` (API client)
 - **Configuration**: Environment variables (BUILDKITE_API_TOKEN, OTEL tracing)
 - **CI/CD**: `buildkite` organization, `buildkite-mcp-server` pipeline slug for build and test (`.buildkite/pipeline.yml`), `buildkite-mcp-server-release` pipeline slug for releases (`.buildkite/pipeline.release.yml`)
 
@@ -24,4 +24,6 @@
 - Error handling: return errors up the stack, log at top level
 - Package names: lowercase, descriptive (buildkite, commands, trace, tokens)
 - Use contexts for cancellation and tracing throughout
-- Use `mcp.NewToolResultError` or `mcp.NewToolResultErrorFromErr` to handle errors in tools.
+- Use `utils.NewToolResultError` or `utils.NewToolResultErrorFromErr` to handle errors in tools.
+- Tool handlers use typed pattern: `func(ctx, *mcp.CallToolRequest, Args) (*mcp.CallToolResult, any, error)`
+- Dependencies injected via context middleware, accessed with `DepsFromContext(ctx)`
