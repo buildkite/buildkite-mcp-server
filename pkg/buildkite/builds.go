@@ -641,14 +641,6 @@ func convertEntries(entries []Entry) map[string]string {
 	return result
 }
 
-func getTimestampStringOrNil(ts *buildkite.Timestamp) *string {
-	if ts == nil {
-		return nil
-	}
-	str := ts.Format(time.RFC3339)
-	return &str
-}
-
 // see https://buildkite.com/docs/pipelines/configure/notifications#build-states
 func isTerminalState(state string) bool {
 	switch state {
