@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
+
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -51,6 +54,7 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 
 	// Add middleware
 	s.AddReceivingMiddleware(
+		injectLoggerMiddleware(log.Logger),
 		trace.NewMiddleware(),
 		buildkite.InjectDepsMiddleware(deps),
 	)
@@ -72,6 +76,16 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 	}, buildkite.HandleDebugLogsGuideResource)
 
 	return s
+}
+
+// injectLoggerMiddleware returns middleware that injects a zerolog logger into the request context.
+func injectLoggerMiddleware(logger zerolog.Logger) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			ctx = logger.WithContext(ctx)
+			return next(ctx, method, req)
+		}
+	}
 }
 
 // RegisterTools registers tools from enabled toolsets onto the server
