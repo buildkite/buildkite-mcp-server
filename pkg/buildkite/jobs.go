@@ -2,7 +2,6 @@ package buildkite
 
 import (
 	"context"
-	"errors"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/go-buildkite/v4"
@@ -88,14 +87,7 @@ func UnblockJob(client JobsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerF
 			// Unblock the job
 			job, _, err := client.UnblockJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, &unblockOptions)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			return mcpTextResult(span, &job)

@@ -3,7 +3,6 @@ package buildkite
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -259,14 +258,7 @@ func ListBuilds(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHandle
 
 			builds, resp, err := client.ListByPipeline(ctx, args.OrgSlug, args.PipelineSlug, options)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			headers := map[string]string{
@@ -340,14 +332,7 @@ func GetBuildTestEngineRuns(client BuildsClient) (tool mcp.Tool, handler mcp.Typ
 				IncludeTestEngine: true,
 			})
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			// Extract just the test engine runs data
@@ -423,14 +408,7 @@ func GetBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHandlerF
 
 			build, _, err := client.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			// Parse job states filter
@@ -602,14 +580,7 @@ func CreateBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHandl
 
 			build, _, err := client.Create(ctx, args.OrgSlug, args.PipelineSlug, createBuild)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			return mcpTextResult(span, &build)
@@ -668,14 +639,7 @@ func WaitForBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHand
 
 			build, _, err := client.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{})
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
-					}
-				}
-
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			// wait for the build to enter a terminal state
@@ -702,14 +666,7 @@ func WaitForBuild(client BuildsClient) (tool mcp.Tool, handler mcp.TypedToolHand
 				case <-ticker.C:
 					build, _, err = client.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, nil)
 					if err != nil {
-						var errResp *buildkite.ErrorResponse
-						if errors.As(err, &errResp) {
-							if errResp.RawBody != nil {
-								return mcp.NewToolResultError(string(errResp.RawBody)), nil
-							}
-						}
-
-						return mcp.NewToolResultError(err.Error()), nil
+						return handleAPIError(err), nil
 					}
 
 					log.Ctx(ctx).Info().Str("build_id", build.ID).Str("state", build.State).Int("job_count", len(build.Jobs)).Msg("Build status checked")

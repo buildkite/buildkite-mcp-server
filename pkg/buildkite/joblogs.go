@@ -202,7 +202,7 @@ func SearchLogs(client BuildkiteLogsClient) (tool mcp.Tool, handler mcp.TypedToo
 			)
 
 			if err := validateSearchPattern(params.Pattern); err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			reader, err := newParquetReader(ctx, client, params.JobLogsBaseParams)

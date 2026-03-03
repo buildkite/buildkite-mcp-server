@@ -35,17 +35,17 @@ func ListClusterQueues(client ClusterQueuesClient) (tool mcp.Tool, handler serve
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			clusterID, err := request.RequireString("cluster_id")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			paginationParams, err := optionalPaginationParams(request)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 			span.SetAttributes(
 				attribute.String("org_slug", orgSlug),
@@ -58,7 +58,7 @@ func ListClusterQueues(client ClusterQueuesClient) (tool mcp.Tool, handler serve
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			if len(queues) == 0 {
@@ -102,17 +102,17 @@ func GetClusterQueue(client ClusterQueuesClient) (tool mcp.Tool, handler server.
 
 			orgSlug, err := request.RequireString("org_slug")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			clusterID, err := request.RequireString("cluster_id")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			queueID, err := request.RequireString("queue_id")
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 			span.SetAttributes(
 				attribute.String("org_slug", orgSlug),
@@ -122,7 +122,7 @@ func GetClusterQueue(client ClusterQueuesClient) (tool mcp.Tool, handler server.
 
 			queue, _, err := client.Get(ctx, orgSlug, clusterID, queueID)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return handleAPIError(err), nil
 			}
 
 			return mcpTextResult(span, &queue)
