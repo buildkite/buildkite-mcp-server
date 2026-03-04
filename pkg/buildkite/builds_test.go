@@ -51,7 +51,7 @@ func TestWaitForBuildCompletes(t *testing.T) {
 			// First call returns running build, second call returns finished build
 			state := "running"
 			if callCount >= 2 {
-				state = "finished"
+				state = "passed"
 			}
 
 			return buildkite.Build{
@@ -92,7 +92,7 @@ func TestWaitForBuildCompletes(t *testing.T) {
 	textContent := getTextResult(t, result)
 	assert.Contains(textContent.Text, `"id":"123"`)
 	assert.Contains(textContent.Text, `"number":1`)
-	assert.Contains(textContent.Text, `"state":"finished"`)
+	assert.Contains(textContent.Text, `"state":"passed"`)
 
 	// Should have been called at least twice (initial + polling)
 	assert.GreaterOrEqual(callCount, 2)

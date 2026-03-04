@@ -570,6 +570,10 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 			ticker := backoff.NewTicker(b)
 			defer ticker.Stop()
 
+			if args.WaitTimeout <= 0 {
+				args.WaitTimeout = 300
+			}
+
 			ctx, cancel := context.WithTimeout(ctx, time.Duration(args.WaitTimeout)*time.Second)
 			defer cancel()
 
@@ -598,14 +602,13 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 					if request.Params.GetProgressToken() != nil && request.Session != nil {
 						log.Ctx(ctx).Info().Any("progress_token", request.Params.GetProgressToken()).Msg("Build progress token")
 
-						total, remaining := completedJobs(build.Jobs)
+						total, completed := completedJobs(build.Jobs)
 
 						// TODO maybe some sort of adaptive backoff based on percentage complete
-						if remaining == 1 {
+						if total-completed == 1 {
 							b.Reset()
 						}
 
-						completed := total - remaining
 						err := request.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
 							ProgressToken: request.Params.GetProgressToken(),
 							Progress:      float64(completed),
@@ -651,14 +654,14 @@ func isTerminalState(state string) bool {
 	}
 }
 
-func completedJobs(jobs []buildkite.Job) (total int, remaining int) {
+func completedJobs(jobs []buildkite.Job) (total int, completed int) {
 	total = len(jobs)
 	for _, job := range jobs {
 		if isTerminalState(job.State) {
-			remaining++
+			completed++
 		}
 	}
-	return total, remaining
+	return total, completed
 }
 
 // safely calculate the percentage complete

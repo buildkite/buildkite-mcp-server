@@ -55,7 +55,13 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	logEvent := log.Ctx(ctx).Info().Str("address", c.Listen)
 
 	mux := http.NewServeMux()
-	srv := newServerWithTimeouts(mux)
+
+	writeTimeout := 30 * time.Second
+	if c.UseSSE {
+		writeTimeout = 0
+	}
+
+	srv := newServerWithTimeouts(mux, writeTimeout)
 
 	mux.HandleFunc("/health", healthHandler)
 
@@ -72,12 +78,12 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	return srv.Serve(listener)
 }
 
-func newServerWithTimeouts(mux *http.ServeMux) *http.Server {
+func newServerWithTimeouts(mux *http.ServeMux, writeTimeout time.Duration) *http.Server {
 	return &http.Server{
 		Handler:           otelhttp.NewHandler(mux, "mcp-server"),
 		ReadHeaderTimeout: 30 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      writeTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
 }

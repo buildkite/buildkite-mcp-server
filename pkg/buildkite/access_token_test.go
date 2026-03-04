@@ -55,8 +55,8 @@ func TestAccessToken(t *testing.T) {
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{AccessTokensClient: client})
 
 	tool, handler, _ := AccessToken()
-	assert.NotNil(t, tool)
-	assert.NotNil(t, handler)
+	assert.NotNil(tool)
+	assert.NotNil(handler)
 
 	request := createMCPRequest(t, map[string]any{})
 	result, _, err := handler(ctx, request, AccessTokenArgs{})

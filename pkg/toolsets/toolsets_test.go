@@ -130,8 +130,8 @@ func TestNewToolsetRegistry(t *testing.T) {
 
 	registry := NewToolsetRegistry()
 
-	assert.NotNil(t, registry)
-	assert.NotNil(t, registry.toolsets)
+	assert.NotNil(registry)
+	assert.NotNil(registry.toolsets)
 	assert.Empty(registry.toolsets)
 }
 
