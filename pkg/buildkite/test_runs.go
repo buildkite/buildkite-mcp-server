@@ -25,7 +25,7 @@ type ListTestRunsArgs struct {
 	OrgSlug       string `json:"org_slug"`
 	TestSuiteSlug string `json:"test_suite_slug"`
 	Page          int    `json:"page"`
-	PerPage       int    `json:"perPage"`
+	PerPage       int    `json:"per_page"`
 }
 
 type GetTestRunArgs struct {

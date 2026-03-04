@@ -83,7 +83,7 @@ type ListArtifactsForBuildArgs struct {
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
 	Page         int    `json:"page"`
-	PerPage      int    `json:"perPage"`
+	PerPage      int    `json:"per_page"`
 }
 
 type ListArtifactsForJobArgs struct {
@@ -92,7 +92,7 @@ type ListArtifactsForJobArgs struct {
 	BuildNumber  string `json:"build_number"`
 	JobID        string `json:"job_id"`
 	Page         int    `json:"page"`
-	PerPage      int    `json:"perPage"`
+	PerPage      int    `json:"per_page"`
 }
 
 type GetArtifactArgs struct {
@@ -235,9 +235,10 @@ func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string
 
 			artifactURL := args.URL
 
-			// Validate the URL format
-			if _, err := url.Parse(artifactURL); err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("invalid URL format: %s", err.Error())), nil, nil
+			// Validate the URL format and scheme
+			parsedURL, err := url.Parse(artifactURL)
+			if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+				return utils.NewToolResultError("invalid URL format: must be an http or https URL"), nil, nil
 			}
 
 			span.SetAttributes(attribute.String("url", artifactURL))

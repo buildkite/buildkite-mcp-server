@@ -24,9 +24,13 @@ func NewToolResultError(message string) *mcp.CallToolResult {
 }
 
 func NewToolResultErrorFromErr(message string, err error) *mcp.CallToolResult {
+	text := message
+	if err != nil {
+		text = fmt.Sprintf("%s: %v", message, err)
+	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
-			&mcp.TextContent{Text: fmt.Sprintf("%s: %v", message, err)},
+			&mcp.TextContent{Text: text},
 		},
 		IsError: true,
 	}

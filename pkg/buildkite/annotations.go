@@ -20,7 +20,7 @@ type ListAnnotationsArgs struct {
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
 	Page         int    `json:"page"`
-	PerPage      int    `json:"perPage"`
+	PerPage      int    `json:"per_page"`
 }
 
 // ListAnnotations returns an MCP tool + handler pair that lists annotations for a build.

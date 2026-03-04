@@ -20,7 +20,7 @@ type GetFailedTestExecutionsArgs struct {
 	RunID                  string `json:"run_id"`
 	IncludeFailureExpanded bool   `json:"include_failure_expanded"`
 	Page                   int    `json:"page"`
-	PerPage                int    `json:"perPage"`
+	PerPage                int    `json:"per_page"`
 }
 
 func GetFailedTestExecutions() (mcp.Tool, mcp.ToolHandlerFor[GetFailedTestExecutionsArgs, any], []string) {

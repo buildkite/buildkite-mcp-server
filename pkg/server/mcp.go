@@ -65,7 +65,7 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 	// Register prompt
 	s.AddPrompt(&mcp.Prompt{
 		Name:        "user_token_organization_prompt",
-		Description: "When asked for detail of a users pipelines start by looking up the user's token organization",
+		Description: "When asked for detail of a user's pipelines start by looking up the user's token organization",
 	}, buildkite.HandleUserTokenOrganizationPrompt)
 
 	// Register resource

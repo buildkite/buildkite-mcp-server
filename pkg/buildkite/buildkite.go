@@ -20,7 +20,7 @@ type PaginatedResult[T any] struct {
 // PaginationParams is embedded in tool args structs to provide pagination fields.
 type PaginationParams struct {
 	Page    int `json:"page"`
-	PerPage int `json:"perPage"`
+	PerPage int `json:"per_page"`
 }
 
 func paginationFromArgs(page, perPage int) buildkite.ListOptions {

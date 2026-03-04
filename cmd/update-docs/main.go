@@ -36,7 +36,7 @@ func generateToolsDocs(tools []toolsets.ToolDefinition) string {
 	buffer.WriteString(toolsSectionStart + "\n\n| Tool | Description |\n|------|-------------|\n")
 
 	for _, td := range tools {
-		buffer.WriteString(fmt.Sprintf("| `%s` | %s |\n", td.Tool.Name, td.Tool.Description))
+		fmt.Fprintf(&buffer, "| `%s` | %s |\n", td.Tool.Name, td.Tool.Description)
 	}
 
 	buffer.WriteString("\n---\n\n")

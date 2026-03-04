@@ -19,7 +19,7 @@ type ListClusterQueuesArgs struct {
 	OrgSlug   string `json:"org_slug"`
 	ClusterID string `json:"cluster_id"`
 	Page      int    `json:"page"`
-	PerPage   int    `json:"perPage"`
+	PerPage   int    `json:"per_page"`
 }
 
 type GetClusterQueueArgs struct {
@@ -66,7 +66,7 @@ func ListClusterQueues() (mcp.Tool, mcp.ToolHandlerFor[ListClusterQueuesArgs, an
 			}
 
 			if len(queues) == 0 {
-				return utils.NewToolResultText("No clusters found"), nil, nil
+				return utils.NewToolResultText("No queues found"), nil, nil
 			}
 
 			result := PaginatedResult[buildkite.ClusterQueue]{
