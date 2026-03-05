@@ -515,13 +515,12 @@ type WaitForBuildArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
-	WaitTimeout  int    `json:"wait_timeout"`
 }
 
 func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "wait_for_build",
-			Description: "Wait for a specific build to complete",
+			Description: "Wait for a specific build to complete. Polls for up to 45 seconds and returns the result. If the build is still running, returns progress info and you should call this tool again to continue waiting.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Wait for Build",
 				ReadOnlyHint: true,
@@ -546,7 +545,6 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),
 				attribute.String("build_number", args.BuildNumber),
-				attribute.Int("wait_timeout", args.WaitTimeout),
 			)
 
 			deps := DepsFromContext(ctx)
@@ -562,26 +560,27 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
-			// wait for the build to enter a terminal state
+			// Use a short internal timeout to ensure we respond within MCP client
+			// timeout limits (e.g. Claude Code has a ~60s timeout for tool calls).
+			// If the build hasn't finished, we return progress info so the caller
+			// can retry.
+			const maxWaitDuration = 45 * time.Second
+
 			b := backoff.NewExponentialBackOff()
 			b.InitialInterval = 5 * time.Second
-			b.MaxInterval = 30 * time.Second
+			b.MaxInterval = 10 * time.Second
 
 			ticker := backoff.NewTicker(b)
 			defer ticker.Stop()
 
-			if args.WaitTimeout <= 0 {
-				args.WaitTimeout = 300
-			}
-
-			ctx, cancel := context.WithTimeout(ctx, time.Duration(args.WaitTimeout)*time.Second)
+			waitCtx, cancel := context.WithTimeout(ctx, maxWaitDuration)
 			defer cancel()
 
 		WAITLOOP:
 			for {
 				select {
-				case <-ctx.Done():
-					log.Ctx(ctx).Info().Msg("Context cancelled, stopping build wait loop")
+				case <-waitCtx.Done():
+					log.Ctx(ctx).Info().Msg("Wait timeout reached, returning current build status")
 
 					break WAITLOOP
 				case <-ticker.C:
@@ -604,11 +603,6 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 
 						total, completed := completedJobs(build.Jobs)
 
-						// TODO maybe some sort of adaptive backoff based on percentage complete
-						if total-completed == 1 {
-							b.Reset()
-						}
-
 						err := request.Session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
 							ProgressToken: request.Params.GetProgressToken(),
 							Progress:      float64(completed),
@@ -623,6 +617,15 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 						break WAITLOOP
 					}
 				}
+			}
+
+			// If the build is still running, return progress info so the caller can retry
+			if !isTerminalState(build.State) {
+				total, completed := completedJobs(build.Jobs)
+				return utils.NewToolResultError(fmt.Sprintf(
+					"Build %s/%s#%s is still %q (%d/%d jobs completed). Call wait_for_build again to continue waiting, or use get_build to check its status.",
+					args.OrgSlug, args.PipelineSlug, args.BuildNumber, build.State, completed, total,
+				)), nil, nil
 			}
 
 			// default to detailed, use all jobs (no filtering)

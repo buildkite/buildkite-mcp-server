@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
-	"github.com/buildkite/buildkite-mcp-server/pkg/server"
 	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
@@ -17,7 +16,6 @@ import (
 
 type HTTPCmd struct {
 	Listen          string   `help:"The address to listen on." default:"localhost:3000" env:"HTTP_LISTEN_ADDR"`
-	UseSSE          bool     `help:"Use deprecated SSE transport instead of Streamable HTTP." default:"false"`
 	EnabledToolsets []string `help:"Comma-separated list of toolsets to enable (e.g., 'pipelines,builds,clusters'). Use 'all' to enable all toolsets." default:"all" env:"BUILDKITE_TOOLSETS"`
 	ReadOnly        bool     `help:"Enable read-only mode, which filters out write operations from all toolsets." default:"false" env:"BUILDKITE_READ_ONLY"`
 }
@@ -44,36 +42,26 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		BuildkiteLogsClient:  globals.BuildkiteLogsClient,
 	}
 
-	mcpServer := server.NewMCPServer(globals.Version, deps,
-		server.WithReadOnly(c.ReadOnly),
-		server.WithToolsets(c.EnabledToolsets...))
+	factory := newPerRequestServerFactory(globals.Version, deps, c.EnabledToolsets, c.ReadOnly)
 
 	listener, err := net.Listen("tcp", c.Listen)
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", c.Listen, err)
 	}
-	logEvent := log.Ctx(ctx).Info().Str("address", c.Listen)
 
 	mux := http.NewServeMux()
-
-	writeTimeout := 30 * time.Second
-	if c.UseSSE {
-		writeTimeout = 0
-	}
-
-	srv := newServerWithTimeouts(mux, writeTimeout)
+	srv := newServerWithTimeouts(mux, 30*time.Second)
 
 	mux.HandleFunc("/health", healthHandler)
 
-	if c.UseSSE {
-		handler := mcp.NewSSEHandler(func(_ *http.Request) *mcp.Server { return mcpServer }, nil)
-		mux.Handle("/sse", handler)
-		logEvent.Str("transport", "sse").Str("endpoint", fmt.Sprintf("http://%s/sse", listener.Addr())).Msg("Starting SSE HTTP server")
-	} else {
-		handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server { return mcpServer }, nil)
-		mux.Handle("/mcp", handler)
-		logEvent.Str("transport", "streamable-http").Str("endpoint", fmt.Sprintf("http://%s/mcp", listener.Addr())).Msg("Starting Streamable HTTP server")
-	}
+	handler := mcp.NewStreamableHTTPHandler(factory, nil)
+	mux.Handle("/mcp", handler)
+
+	log.Ctx(ctx).Info().
+		Str("address", c.Listen).
+		Str("transport", "streamable-http").
+		Str("endpoint", fmt.Sprintf("http://%s/mcp", listener.Addr())).
+		Msg("Starting Streamable HTTP server")
 
 	return srv.Serve(listener)
 }

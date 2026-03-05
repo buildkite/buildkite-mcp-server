@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/buildkite/go-buildkite/v4"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -85,7 +86,6 @@ func TestWaitForBuildCompletes(t *testing.T) {
 		OrgSlug:      "org",
 		PipelineSlug: "pipeline",
 		BuildNumber:  "1",
-		WaitTimeout:  10,
 	})
 	assert.NoError(err)
 
@@ -109,6 +109,7 @@ func TestWaitForBuildTimeout(t *testing.T) {
 					Number:    1,
 					State:     "running",
 					CreatedAt: &buildkite.Timestamp{},
+					Jobs:      []buildkite.Job{{ID: "j1", State: "running"}, {ID: "j2", State: "passed"}},
 				}, &buildkite.Response{
 					Response: &http.Response{
 						StatusCode: 200,
@@ -117,27 +118,29 @@ func TestWaitForBuildTimeout(t *testing.T) {
 		},
 	}
 
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+	// Use a short-lived context to simulate the MCP client timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ctx = ContextWithDeps(ctx, ToolDependencies{BuildsClient: client})
 
 	tool, handler, _ := WaitForBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	// Test with very short timeout (1 second)
 	request := createMCPRequest(t, map[string]any{})
 
 	result, _, err := handler(ctx, request, WaitForBuildArgs{
 		OrgSlug:      "org",
 		PipelineSlug: "pipeline",
 		BuildNumber:  "1",
-		WaitTimeout:  1,
 	})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	// Should still return the build even if timeout occurs
-	assert.Contains(textContent.Text, `"id":"123"`)
-	assert.Contains(textContent.Text, `"state":"running"`)
+	// Should return a retry message when build is still running
+	assert.True(result.IsError)
+	assert.Contains(textContent.Text, `still "running"`)
+	assert.Contains(textContent.Text, "Call wait_for_build again")
 }
 
 func TestWaitForBuildMissingParameters(t *testing.T) {
