@@ -17,19 +17,19 @@ type JobsClient interface {
 
 // GetJobLogsArgs struct for typed parameters
 type GetJobLogsArgs struct {
-	OrgSlug      string `json:"org_slug"`
-	PipelineSlug string `json:"pipeline_slug"`
-	BuildNumber  string `json:"build_number"`
-	JobUUID      string `json:"job_uuid"`
+	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
+	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
+	BuildNumber  string `json:"build_number" jsonschema:"The build number"`
+	JobUUID      string `json:"job_uuid" jsonschema:"The job UUID"`
 }
 
 // UnblockJobArgs struct for typed parameters
 type UnblockJobArgs struct {
-	OrgSlug      string            `json:"org_slug"`
-	PipelineSlug string            `json:"pipeline_slug"`
-	BuildNumber  string            `json:"build_number"`
-	JobID        string            `json:"job_id"`
-	Fields       map[string]string `json:"fields,omitempty"`
+	OrgSlug      string            `json:"org_slug" jsonschema:"The organization slug"`
+	PipelineSlug string            `json:"pipeline_slug" jsonschema:"The pipeline slug"`
+	BuildNumber  string            `json:"build_number" jsonschema:"The build number"`
+	JobID        string            `json:"job_id" jsonschema:"The job ID"`
+	Fields       map[string]string `json:"fields,omitempty" jsonschema:"JSON object containing string values for block step fields"`
 }
 
 func UnblockJob() (mcp.Tool, mcp.ToolHandlerFor[UnblockJobArgs, any], []string) {

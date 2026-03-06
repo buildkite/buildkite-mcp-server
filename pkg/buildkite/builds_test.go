@@ -606,30 +606,6 @@ func TestCreateBuild(t *testing.T) {
 	assert.JSONEq(`{"id":"123","number":1,"state":"created","blocked":false,"author":{},"env":{"ENV_VAR":"value"},"created_at":"0001-01-01T00:00:00Z","meta_data":{"meta_key":"meta_value"},"creator":{"avatar_url":"","created_at":null,"email":"","id":"","name":""}}`, textContent.Text)
 }
 
-func TestCalculatePercentage(t *testing.T) {
-	assert := require.New(t)
-
-	// Test zero division case - should return 0 instead of panicking
-	result := calculatePercentage(0, 0)
-	assert.Equal(0, result)
-
-	// Test normal completion percentage calculations
-	result = calculatePercentage(10, 3)
-	assert.Equal(70, result) // (10-3)*100/10 = 70%
-
-	// Test 100% completion
-	result = calculatePercentage(5, 0)
-	assert.Equal(100, result) // (5-0)*100/5 = 100%
-
-	// Test 0% completion
-	result = calculatePercentage(8, 8)
-	assert.Equal(0, result) // (8-8)*100/8 = 0%
-
-	// Test with single item
-	result = calculatePercentage(1, 0)
-	assert.Equal(100, result) // (1-0)*100/1 = 100%
-}
-
 func TestGetBuildWithJobStateFilter(t *testing.T) {
 	assert := require.New(t)
 

@@ -7,6 +7,7 @@ require (
 	github.com/buildkite/buildkite-logs v0.6.7
 	github.com/buildkite/go-buildkite/v4 v4.14.1
 	github.com/cenkalti/backoff/v5 v5.0.3
+	github.com/google/jsonschema-go v0.4.2
 	github.com/mattn/go-isatty v0.0.20
 	github.com/modelcontextprotocol/go-sdk v1.4.0
 	github.com/rs/zerolog v1.34.0
@@ -53,7 +54,6 @@ require (
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
-	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/google/wire v0.7.0 // indirect
 	github.com/googleapis/gax-go/v2 v2.17.0 // indirect

@@ -16,16 +16,16 @@ type ClusterQueuesClient interface {
 }
 
 type ListClusterQueuesArgs struct {
-	OrgSlug   string `json:"org_slug"`
-	ClusterID string `json:"cluster_id"`
-	Page      int    `json:"page"`
-	PerPage   int    `json:"per_page"`
+	OrgSlug   string `json:"org_slug" jsonschema:"The organization slug"`
+	ClusterID string `json:"cluster_id" jsonschema:"The cluster ID"`
+	Page      int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage   int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
 }
 
 type GetClusterQueueArgs struct {
-	OrgSlug   string `json:"org_slug"`
-	ClusterID string `json:"cluster_id"`
-	QueueID   string `json:"queue_id"`
+	OrgSlug   string `json:"org_slug" jsonschema:"The organization slug"`
+	ClusterID string `json:"cluster_id" jsonschema:"The cluster ID"`
+	QueueID   string `json:"queue_id" jsonschema:"The queue ID"`
 }
 
 func ListClusterQueues() (mcp.Tool, mcp.ToolHandlerFor[ListClusterQueuesArgs, any], []string) {

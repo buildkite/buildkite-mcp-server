@@ -1,8 +1,6 @@
 package utils
 
 import (
-	"fmt"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -18,19 +16,6 @@ func NewToolResultError(message string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{Text: message},
-		},
-		IsError: true,
-	}
-}
-
-func NewToolResultErrorFromErr(message string, err error) *mcp.CallToolResult {
-	text := message
-	if err != nil {
-		text = fmt.Sprintf("%s: %v", message, err)
-	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{Text: text},
 		},
 		IsError: true,
 	}

@@ -16,11 +16,11 @@ type AnnotationsClient interface {
 }
 
 type ListAnnotationsArgs struct {
-	OrgSlug      string `json:"org_slug"`
-	PipelineSlug string `json:"pipeline_slug"`
-	BuildNumber  string `json:"build_number"`
-	Page         int    `json:"page"`
-	PerPage      int    `json:"per_page"`
+	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
+	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
+	BuildNumber  string `json:"build_number" jsonschema:"The build number"`
+	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
 }
 
 // ListAnnotations returns an MCP tool + handler pair that lists annotations for a build.

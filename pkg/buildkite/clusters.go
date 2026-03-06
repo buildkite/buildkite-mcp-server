@@ -16,14 +16,14 @@ type ClustersClient interface {
 }
 
 type ListClustersArgs struct {
-	OrgSlug string `json:"org_slug"`
-	Page    int    `json:"page"`
-	PerPage int    `json:"per_page"`
+	OrgSlug string `json:"org_slug" jsonschema:"The organization slug"`
+	Page    int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
 }
 
 type GetClusterArgs struct {
-	OrgSlug   string `json:"org_slug"`
-	ClusterID string `json:"cluster_id"`
+	OrgSlug   string `json:"org_slug" jsonschema:"The organization slug"`
+	ClusterID string `json:"cluster_id" jsonschema:"The cluster ID"`
 }
 
 func ListClusters() (mcp.Tool, mcp.ToolHandlerFor[ListClustersArgs, any], []string) {

@@ -22,12 +22,12 @@ type PipelinesClient interface {
 }
 
 type ListPipelinesArgs struct {
-	OrgSlug     string `json:"org_slug"`
-	Name        string `json:"name"`
-	Repository  string `json:"repository"`
-	Page        int    `json:"page"`
-	PerPage     int    `json:"per_page"`
-	DetailLevel string `json:"detail_level"` // "summary", "detailed", "full"
+	OrgSlug     string `json:"org_slug" jsonschema:"The organization slug"`
+	Name        string `json:"name,omitempty" jsonschema:"Filter pipelines by name"`
+	Repository  string `json:"repository,omitempty" jsonschema:"Filter pipelines by repository URL"`
+	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default)\\, 'detailed'\\, or 'full'"`
 }
 
 type CreatePipelineResult struct {
@@ -118,9 +118,9 @@ func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []st
 }
 
 type GetPipelineArgs struct {
-	OrgSlug      string `json:"org_slug"`
-	PipelineSlug string `json:"pipeline_slug"`
-	DetailLevel  string `json:"detail_level"` // "summary", "detailed", "full"
+	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
+	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
+	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary'\\, 'detailed'\\, or 'full' (default)"`
 }
 
 func GetPipeline() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineArgs, any], []string) {
@@ -267,17 +267,17 @@ func createPaginatedResult[T any](pipelines []buildkite.Pipeline, converter func
 }
 
 type CreatePipelineArgs struct {
-	OrgSlug                   string   `json:"org_slug"`
-	Name                      string   `json:"name"`
-	RepositoryURL             string   `json:"repository_url"`
-	ClusterID                 string   `json:"cluster_id"`
-	Description               string   `json:"description"`
-	Configuration             string   `json:"configuration"`
-	DefaultBranch             string   `json:"default_branch"`
-	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds"`
-	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds"`
-	Tags                      []string `json:"tags"`
-	CreateWebhook             bool     `json:"create_webhook"`
+	OrgSlug                   string   `json:"org_slug" jsonschema:"The organization slug"`
+	Name                      string   `json:"name" jsonschema:"The pipeline name"`
+	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
+	ClusterID                 string   `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
+	Description               string   `json:"description,omitempty" jsonschema:"The pipeline description"`
+	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
+	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Tags                      []string `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
+	CreateWebhook             bool     `json:"create_webhook,omitempty" jsonschema:"Create a GitHub webhook to trigger builds on pull-request and push events"`
 }
 
 func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []string) {
@@ -373,17 +373,17 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 }
 
 type UpdatePipelineArgs struct {
-	OrgSlug                   string   `json:"org_slug"`
-	PipelineSlug              string   `json:"pipeline_slug"`
-	Name                      string   `json:"name"`
-	RepositoryURL             string   `json:"repository_url"`
-	ClusterID                 string   `json:"cluster_id"`
-	Description               string   `json:"description"`
-	Configuration             string   `json:"configuration"`
-	DefaultBranch             string   `json:"default_branch"`
-	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds"`
-	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds"`
-	Tags                      []string `json:"tags"` // Optional, labels to apply to the pipeline
+	OrgSlug                   string   `json:"org_slug" jsonschema:"The organization slug"`
+	PipelineSlug              string   `json:"pipeline_slug" jsonschema:"The pipeline slug"`
+	Name                      string   `json:"name,omitempty" jsonschema:"The pipeline name"`
+	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
+	ClusterID                 string   `json:"cluster_id,omitempty" jsonschema:"The cluster ID"`
+	Description               string   `json:"description,omitempty" jsonschema:"The pipeline description"`
+	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
+	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Tags                      []string `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
 }
 
 func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []string) {

@@ -2,9 +2,7 @@ package toolsets
 
 import (
 	"fmt"
-	"maps"
 	"slices"
-	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -144,64 +142,6 @@ func (tr *ToolsetRegistry) GetEnabledTools(enabledToolsets []string, readOnlyMod
 	}
 
 	return tools
-}
-
-// SearchResult contains rich metadata about a tool search match
-type SearchResult struct {
-	Tool           mcp.Tool
-	ToolsetName    string
-	MatchedIn      string // "name", "description", or "both"
-	RequiredScopes []string
-	ReadOnly       bool
-}
-
-// SearchToolsWithMetadata searches for tools matching the query across all toolsets
-// Returns results with additional metadata including toolset name and match location.
-// Toolsets are iterated in sorted order to ensure deterministic results.
-func (tr *ToolsetRegistry) SearchToolsWithMetadata(query string, limit int) []SearchResult {
-	var results []SearchResult
-	queryLower := strings.ToLower(query)
-
-	// Sort toolset names for deterministic iteration order
-	toolsetNames := slices.Sorted(maps.Keys(tr.toolsets))
-
-	for _, toolsetName := range toolsetNames {
-		toolset := tr.toolsets[toolsetName]
-		for _, toolDef := range toolset.Tools {
-			nameMatch := strings.Contains(strings.ToLower(toolDef.Tool.Name), queryLower)
-			descMatch := strings.Contains(strings.ToLower(toolDef.Tool.Description), queryLower)
-
-			if nameMatch || descMatch {
-				matchedIn := "description"
-				if nameMatch && descMatch {
-					matchedIn = "both"
-				} else if nameMatch {
-					matchedIn = "name"
-				}
-
-				results = append(results, SearchResult{
-					Tool:           toolDef.Tool,
-					ToolsetName:    toolsetName,
-					MatchedIn:      matchedIn,
-					RequiredScopes: toolDef.RequiredScopes,
-					ReadOnly:       toolDef.IsReadOnly(),
-				})
-				if len(results) >= limit {
-					break
-				}
-			}
-		}
-		if len(results) >= limit {
-			break
-		}
-	}
-
-	// Sort results alphabetically by tool name for deterministic output
-	slices.SortFunc(results, func(a, b SearchResult) int {
-		return strings.Compare(a.Tool.Name, b.Tool.Name)
-	})
-
-	return results
 }
 
 // GetAllTools returns all tools across all toolsets
