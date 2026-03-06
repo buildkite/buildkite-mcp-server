@@ -22,7 +22,7 @@ type PipelinesClient interface {
 }
 
 type ListPipelinesArgs struct {
-	OrgSlug     string `json:"org_slug" jsonschema:"The organization slug"`
+	OrgSlug     string `json:"org_slug"`
 	Name        string `json:"name,omitempty" jsonschema:"Filter pipelines by name"`
 	Repository  string `json:"repository,omitempty" jsonschema:"Filter pipelines by repository URL"`
 	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
@@ -118,8 +118,8 @@ func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []st
 }
 
 type GetPipelineArgs struct {
-	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
 	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary'\\, 'detailed'\\, or 'full' (default)"`
 }
 
@@ -267,11 +267,11 @@ func createPaginatedResult[T any](pipelines []buildkite.Pipeline, converter func
 }
 
 type CreatePipelineArgs struct {
-	OrgSlug                   string   `json:"org_slug" jsonschema:"The organization slug"`
-	Name                      string   `json:"name" jsonschema:"The pipeline name"`
+	OrgSlug                   string   `json:"org_slug"`
+	Name                      string   `json:"name"`
 	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
 	ClusterID                 string   `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
-	Description               string   `json:"description,omitempty" jsonschema:"The pipeline description"`
+	Description               string   `json:"description,omitempty"`
 	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
 	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
 	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
@@ -373,12 +373,12 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 }
 
 type UpdatePipelineArgs struct {
-	OrgSlug                   string   `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug              string   `json:"pipeline_slug" jsonschema:"The pipeline slug"`
-	Name                      string   `json:"name,omitempty" jsonschema:"The pipeline name"`
+	OrgSlug                   string   `json:"org_slug"`
+	PipelineSlug              string   `json:"pipeline_slug"`
+	Name                      string   `json:"name,omitempty"`
 	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
-	ClusterID                 string   `json:"cluster_id,omitempty" jsonschema:"The cluster ID"`
-	Description               string   `json:"description,omitempty" jsonschema:"The pipeline description"`
+	ClusterID                 string   `json:"cluster_id,omitempty"`
+	Description               string   `json:"description,omitempty"`
 	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
 	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
 	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`

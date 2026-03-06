@@ -22,16 +22,16 @@ type TestRunsClient interface {
 }
 
 type ListTestRunsArgs struct {
-	OrgSlug       string `json:"org_slug" jsonschema:"The organization slug"`
-	TestSuiteSlug string `json:"test_suite_slug" jsonschema:"The test suite slug"`
+	OrgSlug       string `json:"org_slug"`
+	TestSuiteSlug string `json:"test_suite_slug"`
 	Page          int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage       int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
 }
 
 type GetTestRunArgs struct {
-	OrgSlug       string `json:"org_slug" jsonschema:"The organization slug"`
-	TestSuiteSlug string `json:"test_suite_slug" jsonschema:"The test suite slug"`
-	RunID         string `json:"run_id" jsonschema:"The test run ID"`
+	OrgSlug       string `json:"org_slug"`
+	TestSuiteSlug string `json:"test_suite_slug"`
+	RunID         string `json:"run_id"`
 }
 
 func ListTestRuns() (mcp.Tool, mcp.ToolHandlerFor[ListTestRunsArgs, any], []string) {

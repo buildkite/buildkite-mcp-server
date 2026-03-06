@@ -61,8 +61,8 @@ type BuildWithSummary struct {
 
 // ListBuildsArgs struct with enhanced filtering
 type ListBuildsArgs struct {
-	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
 	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
 	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled\\, running\\, passed\\, failed\\, canceled\\, skipped)"`
 	Commit       string `json:"commit,omitempty" jsonschema:"Filter builds by specific commit SHA"`
@@ -74,9 +74,9 @@ type ListBuildsArgs struct {
 
 // GetBuildArgs struct
 type GetBuildArgs struct {
-	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
-	BuildNumber  string `json:"build_number" jsonschema:"The build number"`
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
 	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary'\\, 'detailed' (default)\\, or 'full'"`
 	JobState     string `json:"job_state,omitempty" jsonschema:"Filter jobs by state. Comma-separated for multiple states (e.g.\\, 'failed\\,broken\\,canceled')"`
 	IncludeAgent bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default)\\, only agent.id is included"`
@@ -84,9 +84,9 @@ type GetBuildArgs struct {
 
 // GetBuildTestEngineRunsArgs struct
 type GetBuildTestEngineRunsArgs struct {
-	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
-	BuildNumber  string `json:"build_number" jsonschema:"The build number"`
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
 }
 
 // Helper functions for build conversion
@@ -457,11 +457,11 @@ type Entry struct {
 }
 
 type CreateBuildArgs struct {
-	OrgSlug             string  `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug        string  `json:"pipeline_slug" jsonschema:"The pipeline slug"`
+	OrgSlug             string  `json:"org_slug"`
+	PipelineSlug        string  `json:"pipeline_slug"`
 	Commit              string  `json:"commit" jsonschema:"The commit SHA to build"`
-	Branch              string  `json:"branch" jsonschema:"The branch to build"`
-	Message             string  `json:"message" jsonschema:"The commit message for the build"`
+	Branch              string  `json:"branch"`
+	Message             string  `json:"message"`
 	IgnoreBranchFilters bool    `json:"ignore_branch_filters,omitempty" jsonschema:"Whether to ignore branch filters when triggering the build"`
 	Environment         []Entry `json:"environment,omitempty" jsonschema:"Environment variables to set for the build"`
 	MetaData            []Entry `json:"metadata,omitempty" jsonschema:"Meta-data values to set for the build"`
@@ -512,9 +512,9 @@ func CreateBuild() (mcp.Tool, mcp.ToolHandlerFor[CreateBuildArgs, any], []string
 }
 
 type WaitForBuildArgs struct {
-	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
-	BuildNumber  string `json:"build_number" jsonschema:"The build number"`
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
 }
 
 func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []string) {

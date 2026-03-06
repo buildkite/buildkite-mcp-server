@@ -46,9 +46,10 @@ func TestListBuildsArgsSchema(t *testing.T) {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
 
-	// Verify descriptions are set
+	// Verify descriptions are set for fields that have non-obvious info
 	require.Equal(t, "Filter builds by git branch name", s.Properties["branch"].Description)
-	require.Equal(t, "The organization slug", s.Properties["org_slug"].Description)
+	// org_slug should have no description (field name is self-explanatory)
+	require.Empty(t, s.Properties["org_slug"].Description)
 }
 
 func TestGetBuildArgsSchema(t *testing.T) {

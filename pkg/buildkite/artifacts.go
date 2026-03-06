@@ -79,24 +79,24 @@ func (a *BuildkiteClientAdapter) rewriteArtifactURL(inputURL string) string {
 }
 
 type ListArtifactsForBuildArgs struct {
-	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
-	BuildNumber  string `json:"build_number" jsonschema:"The build number"`
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
 }
 
 type ListArtifactsForJobArgs struct {
-	OrgSlug      string `json:"org_slug" jsonschema:"The organization slug"`
-	PipelineSlug string `json:"pipeline_slug" jsonschema:"The pipeline slug"`
-	BuildNumber  string `json:"build_number" jsonschema:"The build number"`
-	JobID        string `json:"job_id" jsonschema:"The job ID"`
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
+	JobID        string `json:"job_id"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
 }
 
 type GetArtifactArgs struct {
-	URL string `json:"url" jsonschema:"The artifact download URL"`
+	URL string `json:"url"`
 }
 
 func ListArtifactsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForBuildArgs, any], []string) {

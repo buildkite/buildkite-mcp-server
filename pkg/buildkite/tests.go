@@ -15,9 +15,9 @@ type TestsClient interface {
 }
 
 type GetTestArgs struct {
-	OrgSlug       string `json:"org_slug" jsonschema:"The organization slug"`
-	TestSuiteSlug string `json:"test_suite_slug" jsonschema:"The test suite slug"`
-	TestID        string `json:"test_id" jsonschema:"The test ID"`
+	OrgSlug       string `json:"org_slug"`
+	TestSuiteSlug string `json:"test_suite_slug"`
+	TestID        string `json:"test_id"`
 }
 
 func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {
