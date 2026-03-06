@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
+	"github.com/buildkite/buildkite-mcp-server/pkg/server"
 	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
@@ -42,7 +43,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		BuildkiteLogsClient:  globals.BuildkiteLogsClient,
 	}
 
-	factory := newPerRequestServerFactory(globals.Version, deps, c.EnabledToolsets, c.ReadOnly)
+	factory := server.NewPerRequestServerFactory(globals.Version, deps, c.EnabledToolsets, c.ReadOnly)
 
 	listener, err := net.Listen("tcp", c.Listen)
 	if err != nil {

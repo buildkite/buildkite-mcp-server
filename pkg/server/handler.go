@@ -1,11 +1,10 @@
-package commands
+package server
 
 import (
 	"net/http"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
-	"github.com/buildkite/buildkite-mcp-server/pkg/server"
 	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
@@ -21,10 +20,10 @@ const (
 	HeaderReadOnly = "X-Buildkite-Read-Only"
 )
 
-// newPerRequestServerFactory returns a function that creates an mcp.Server per HTTP request.
+// NewPerRequestServerFactory returns a function that creates an mcp.Server per HTTP request.
 // It reads X-Buildkite-Toolsets and X-Buildkite-Read-Only headers from the request,
 // falling back to the provided defaults when headers are absent.
-func newPerRequestServerFactory(
+func NewPerRequestServerFactory(
 	version string,
 	deps buildkite.ToolDependencies,
 	defaultToolsets []string,
@@ -35,7 +34,7 @@ func newPerRequestServerFactory(
 		readOnly := defaultReadOnly
 
 		if header := r.Header.Get(HeaderToolsets); header != "" {
-			parsed := parseToolsetsHeader(header)
+			parsed := ParseToolsetsHeader(header)
 			if err := toolsets.ValidateToolsets(parsed); err != nil {
 				log.Warn().Err(err).Str("header", header).Msg("Invalid toolsets in header, using server defaults")
 			} else {
@@ -47,15 +46,15 @@ func newPerRequestServerFactory(
 			readOnly = strings.EqualFold(strings.TrimSpace(header), "true")
 		}
 
-		return server.NewMCPServer(version, deps,
-			server.WithToolsets(enabledToolsets...),
-			server.WithReadOnly(readOnly),
+		return NewMCPServer(version, deps,
+			WithToolsets(enabledToolsets...),
+			WithReadOnly(readOnly),
 		)
 	}
 }
 
-// parseToolsetsHeader parses a comma-separated list of toolset names from a header value.
-func parseToolsetsHeader(header string) []string {
+// ParseToolsetsHeader parses a comma-separated list of toolset names from a header value.
+func ParseToolsetsHeader(header string) []string {
 	var result []string
 	for _, part := range strings.Split(header, ",") {
 		trimmed := strings.TrimSpace(part)

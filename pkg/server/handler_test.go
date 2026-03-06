@@ -1,4 +1,4 @@
-package commands
+package server
 
 import (
 	"net/http"
@@ -48,14 +48,14 @@ func TestParseToolsetsHeader(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseToolsetsHeader(tt.header)
+			got := ParseToolsetsHeader(tt.header)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestPerRequestServerFactory_DefaultsWhenNoHeaders(t *testing.T) {
-	factory := newPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
+func TestNewPerRequestServerFactory_DefaultsWhenNoHeaders(t *testing.T) {
+	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
 
 	req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
 	require.NoError(t, err)
@@ -64,8 +64,8 @@ func TestPerRequestServerFactory_DefaultsWhenNoHeaders(t *testing.T) {
 	require.NotNil(t, srv)
 }
 
-func TestPerRequestServerFactory_ToolsetsHeader(t *testing.T) {
-	factory := newPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
+func TestNewPerRequestServerFactory_ToolsetsHeader(t *testing.T) {
+	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
 
 	req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
 	require.NoError(t, err)
@@ -75,8 +75,8 @@ func TestPerRequestServerFactory_ToolsetsHeader(t *testing.T) {
 	require.NotNil(t, srv)
 }
 
-func TestPerRequestServerFactory_ReadOnlyHeader(t *testing.T) {
-	factory := newPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
+func TestNewPerRequestServerFactory_ReadOnlyHeader(t *testing.T) {
+	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
 
 	req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
 	require.NoError(t, err)
@@ -86,8 +86,8 @@ func TestPerRequestServerFactory_ReadOnlyHeader(t *testing.T) {
 	require.NotNil(t, srv)
 }
 
-func TestPerRequestServerFactory_ReadOnlyHeaderCaseInsensitive(t *testing.T) {
-	factory := newPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
+func TestNewPerRequestServerFactory_ReadOnlyHeaderCaseInsensitive(t *testing.T) {
+	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
 
 	req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
 	require.NoError(t, err)
@@ -97,8 +97,8 @@ func TestPerRequestServerFactory_ReadOnlyHeaderCaseInsensitive(t *testing.T) {
 	require.NotNil(t, srv)
 }
 
-func TestPerRequestServerFactory_InvalidToolsetsFallsBackToDefaults(t *testing.T) {
-	factory := newPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
+func TestNewPerRequestServerFactory_InvalidToolsetsFallsBackToDefaults(t *testing.T) {
+	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
 
 	req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
 	require.NoError(t, err)
@@ -109,8 +109,8 @@ func TestPerRequestServerFactory_InvalidToolsetsFallsBackToDefaults(t *testing.T
 	require.NotNil(t, srv)
 }
 
-func TestPerRequestServerFactory_BothHeaders(t *testing.T) {
-	factory := newPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
+func TestNewPerRequestServerFactory_BothHeaders(t *testing.T) {
+	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false)
 
 	req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
 	require.NoError(t, err)
