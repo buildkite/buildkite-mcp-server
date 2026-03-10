@@ -450,6 +450,10 @@ func TestListBuildsByOrg(t *testing.T) {
 					},
 				}, nil
 		},
+		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+			t.Fatal("ListByPipeline should not be called when pipeline_slug is empty")
+			return nil, nil, nil
+		},
 	}
 
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
@@ -472,6 +476,39 @@ func TestListBuildsByOrg(t *testing.T) {
 	assert.Equal("my-org", capturedOrg)
 	assert.NotNil(capturedOptions)
 	assert.Equal([]string{"running"}, capturedOptions.State)
+	assert.Equal(1, capturedOptions.Page)
+	assert.Equal(30, capturedOptions.PerPage)
+	// Pipeline info should be included for org-wide queries
+	assert.False(capturedOptions.ExcludePipeline)
+}
+
+func TestListBuildsByOrgError(t *testing.T) {
+	assert := require.New(t)
+
+	client := &MockBuildsClient{
+		ListByOrgFunc: func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+			return nil, nil, &buildkite.ErrorResponse{
+				RawBody: []byte("organization not found"),
+				Response: &http.Response{
+					StatusCode: 404,
+				},
+			}
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	_, handler, _ := ListBuilds()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListBuildsArgs{
+		OrgSlug: "bad-org",
+	})
+	assert.NoError(err)
+
+	textContent := getTextResult(t, result)
+	assert.Contains(textContent.Text, "organization not found")
+	assert.True(result.IsError)
 }
 
 func TestGetBuildTestEngineRuns(t *testing.T) {

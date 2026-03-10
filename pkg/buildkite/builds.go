@@ -151,7 +151,7 @@ func createPaginatedBuildResult[T any](builds []buildkite.Build, converter func(
 func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_builds",
-			Description: "List all builds for a pipeline with their status, commit information, and metadata. When pipeline_slug is omitted, lists builds across all pipelines in the organization",
+			Description: "List builds for a pipeline or across all pipelines in an organization. When pipeline_slug is omitted, lists builds across all pipelines in the organization",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Builds",
 				ReadOnlyHint: true,
@@ -205,10 +205,15 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			switch detailLevel {
 			case "summary":
 				options.ExcludeJobs = true
-				options.ExcludePipeline = true
+				// Only exclude pipeline when it's already known from the request
+				if args.PipelineSlug != "" {
+					options.ExcludePipeline = true
+				}
 			case "detailed":
 				options.ExcludeJobs = true
-				options.ExcludePipeline = true
+				if args.PipelineSlug != "" {
+					options.ExcludePipeline = true
+				}
 			case "full":
 				// Include everything
 			default:
