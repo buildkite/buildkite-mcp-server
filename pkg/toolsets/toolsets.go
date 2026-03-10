@@ -320,7 +320,6 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.GetBuild),
 				newToolDef(buildkite.GetBuildTestEngineRuns),
 				newToolDef(buildkite.CreateBuild),
-				newToolDef(buildkite.WaitForBuild),
 				newToolDef(buildkite.UnblockJob),
 			},
 		},
