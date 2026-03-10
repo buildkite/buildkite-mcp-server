@@ -12,6 +12,7 @@ import (
 )
 
 type MockBuildsClient struct {
+	ListByOrgFunc      func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	ListByPipelineFunc func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	GetFunc            func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
 	CreateFunc         func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error)
@@ -22,6 +23,13 @@ func (m *MockBuildsClient) Get(ctx context.Context, org string, pipeline string,
 		return m.GetFunc(ctx, org, pipeline, id, opt)
 	}
 	return buildkite.Build{}, nil, nil
+}
+
+func (m *MockBuildsClient) ListByOrg(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+	if m.ListByOrgFunc != nil {
+		return m.ListByOrgFunc(ctx, org, opt)
+	}
+	return nil, nil, nil
 }
 
 func (m *MockBuildsClient) ListByPipeline(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
@@ -410,6 +418,60 @@ func TestListBuildsWithBranchFilter(t *testing.T) {
 	assert.Equal([]string{"main"}, capturedOptions.Branch)
 	assert.Equal(1, capturedOptions.Page)
 	assert.Equal(30, capturedOptions.PerPage) // New default
+}
+
+func TestListBuildsByOrg(t *testing.T) {
+	assert := require.New(t)
+
+	var capturedOrg string
+	var capturedOptions *buildkite.BuildsListOptions
+	client := &MockBuildsClient{
+		ListByOrgFunc: func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+			capturedOrg = org
+			capturedOptions = opt
+			return []buildkite.Build{
+					{
+						ID:        "build-1",
+						Number:    10,
+						State:     "running",
+						CreatedAt: &buildkite.Timestamp{},
+						Pipeline:  &buildkite.Pipeline{Slug: "pipeline-a"},
+					},
+					{
+						ID:        "build-2",
+						Number:    20,
+						State:     "scheduled",
+						CreatedAt: &buildkite.Timestamp{},
+						Pipeline:  &buildkite.Pipeline{Slug: "pipeline-b"},
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := ListBuilds()
+	assert.NotNil(tool)
+	assert.NotNil(handler)
+
+	// Test without pipeline_slug — should use ListByOrg
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListBuildsArgs{
+		OrgSlug: "my-org",
+		State:   "running",
+	})
+	assert.NoError(err)
+
+	textContent := getTextResult(t, result)
+	assert.Contains(textContent.Text, `"id":"build-1"`)
+	assert.Contains(textContent.Text, `"id":"build-2"`)
+	assert.Equal("my-org", capturedOrg)
+	assert.NotNil(capturedOptions)
+	assert.Equal([]string{"running"}, capturedOptions.State)
 }
 
 func TestGetBuildTestEngineRuns(t *testing.T) {
