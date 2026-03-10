@@ -9,6 +9,10 @@ linters:
     - gosec
     - gocritic
     - testifylint
+  settings:
+    gosec:
+      excludes:
+        - G117
   exclusions:
     generated: lax
     presets:

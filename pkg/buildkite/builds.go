@@ -19,6 +19,7 @@ import (
 
 type BuildsClient interface {
 	Get(ctx context.Context, org, pipelineSlug, buildNumber string, options *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
+	ListByOrg(ctx context.Context, org string, options *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	ListByPipeline(ctx context.Context, org, pipelineSlug string, options *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	Create(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error)
 }
@@ -62,7 +63,7 @@ type BuildWithSummary struct {
 // ListBuildsArgs struct with enhanced filtering
 type ListBuildsArgs struct {
 	OrgSlug      string `json:"org_slug"`
-	PipelineSlug string `json:"pipeline_slug"`
+	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Filter builds by pipeline. When omitted\\, lists builds across all pipelines in the organization"`
 	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
 	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled\\, running\\, passed\\, failed\\, canceled\\, skipped)"`
 	Commit       string `json:"commit,omitempty" jsonschema:"Filter builds by specific commit SHA"`
@@ -150,7 +151,7 @@ func createPaginatedBuildResult[T any](builds []buildkite.Build, converter func(
 func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_builds",
-			Description: "List all builds for a pipeline with their status, commit information, and metadata",
+			Description: "List builds for a pipeline or across all pipelines in an organization. When pipeline_slug is omitted, lists builds across all pipelines in the organization",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Builds",
 				ReadOnlyHint: true,
@@ -163,9 +164,6 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			// Validate required parameters
 			if args.OrgSlug == "" {
 				return utils.NewToolResultError("org_slug parameter is required"), nil, nil
-			}
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug parameter is required"), nil, nil
 			}
 
 			span.SetAttributes(
@@ -207,10 +205,15 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			switch detailLevel {
 			case "summary":
 				options.ExcludeJobs = true
-				options.ExcludePipeline = true
+				// Only exclude pipeline when it's already known from the request
+				if args.PipelineSlug != "" {
+					options.ExcludePipeline = true
+				}
 			case "detailed":
 				options.ExcludeJobs = true
-				options.ExcludePipeline = true
+				if args.PipelineSlug != "" {
+					options.ExcludePipeline = true
+				}
 			case "full":
 				// Include everything
 			default:
@@ -232,7 +235,14 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			}
 
 			deps := DepsFromContext(ctx)
-			builds, resp, err := deps.BuildsClient.ListByPipeline(ctx, args.OrgSlug, args.PipelineSlug, options)
+			var builds []buildkite.Build
+			var resp *buildkite.Response
+			var err error
+			if args.PipelineSlug != "" {
+				builds, resp, err = deps.BuildsClient.ListByPipeline(ctx, args.OrgSlug, args.PipelineSlug, options)
+			} else {
+				builds, resp, err = deps.BuildsClient.ListByOrg(ctx, args.OrgSlug, options)
+			}
 			if err != nil {
 				var errResp *buildkite.ErrorResponse
 				if errors.As(err, &errResp) {
