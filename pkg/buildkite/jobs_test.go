@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,11 +25,9 @@ func (m *MockJobsClient) UnblockJob(ctx context.Context, org string, pipeline st
 }
 
 func TestUnblockJob(t *testing.T) {
-	ctx := context.Background()
-
 	// Test tool definition
 	t.Run("ToolDefinition", func(t *testing.T) {
-		tool, _, _ := UnblockJob(&MockJobsClient{})
+		tool, _, _ := UnblockJob()
 		assert.Equal(t, "unblock_job", tool.Name)
 		assert.Contains(t, tool.Description, "Unblock a blocked job")
 	})
@@ -54,7 +52,9 @@ func TestUnblockJob(t *testing.T) {
 			},
 		}
 
-		_, handler, _ := UnblockJob(mockJobs)
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+
+		_, handler, _ := UnblockJob()
 
 		req := createMCPRequest(t, map[string]any{})
 		args := UnblockJobArgs{
@@ -64,11 +64,11 @@ func TestUnblockJob(t *testing.T) {
 			JobID:        "job-123",
 		}
 
-		result, err := handler(ctx, req, args)
+		result, _, err := handler(ctx, req, args)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result.Content[0].(mcp.TextContent).Text, `"id":"job-123"`)
-		assert.Contains(t, result.Content[0].(mcp.TextContent).Text, `"state":"unblocked"`)
+		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"id":"job-123"`)
+		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"state":"unblocked"`)
 	})
 
 	// Test with fields
@@ -91,7 +91,9 @@ func TestUnblockJob(t *testing.T) {
 			},
 		}
 
-		_, handler, _ := UnblockJob(mockJobs)
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+
+		_, handler, _ := UnblockJob()
 
 		req := createMCPRequest(t, map[string]any{})
 		args := UnblockJobArgs{
@@ -102,7 +104,7 @@ func TestUnblockJob(t *testing.T) {
 			Fields:       map[string]string{"version": "v1.0.0", "environment": "prod"},
 		}
 
-		result, err := handler(ctx, req, args)
+		result, _, err := handler(ctx, req, args)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
 	})
@@ -115,7 +117,9 @@ func TestUnblockJob(t *testing.T) {
 			},
 		}
 
-		_, handler, _ := UnblockJob(mockJobs)
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+
+		_, handler, _ := UnblockJob()
 
 		req := createMCPRequest(t, map[string]any{})
 		args := UnblockJobArgs{
@@ -125,14 +129,16 @@ func TestUnblockJob(t *testing.T) {
 			JobID:        "job-123",
 		}
 
-		result, err := handler(ctx, req, args)
+		result, _, err := handler(ctx, req, args)
 		require.NoError(t, err)
-		assert.Contains(t, result.Content[0].(mcp.TextContent).Text, "API connection failed")
+		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "API connection failed")
 	})
 
 	// Test missing parameters
 	t.Run("MissingParameters", func(t *testing.T) {
-		_, handler, _ := UnblockJob(&MockJobsClient{})
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: &MockJobsClient{}})
+
+		_, handler, _ := UnblockJob()
 
 		// Test missing org parameter
 		req := createMCPRequest(t, map[string]any{})
@@ -141,9 +147,9 @@ func TestUnblockJob(t *testing.T) {
 			BuildNumber:  "123",
 			JobID:        "job-123",
 		}
-		result, err := handler(ctx, req, args)
+		result, _, err := handler(ctx, req, args)
 		require.NoError(t, err)
-		assert.Contains(t, result.Content[0].(mcp.TextContent).Text, "org_slug parameter is required")
+		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "org_slug parameter is required")
 
 		// Test missing pipeline_slug parameter
 		args = UnblockJobArgs{
@@ -151,9 +157,9 @@ func TestUnblockJob(t *testing.T) {
 			BuildNumber: "123",
 			JobID:       "job-123",
 		}
-		result, err = handler(ctx, req, args)
+		result, _, err = handler(ctx, req, args)
 		require.NoError(t, err)
-		assert.Contains(t, result.Content[0].(mcp.TextContent).Text, "pipeline_slug parameter is required")
+		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "pipeline_slug parameter is required")
 
 		// Test missing build_number parameter
 		args = UnblockJobArgs{
@@ -161,9 +167,9 @@ func TestUnblockJob(t *testing.T) {
 			PipelineSlug: "test-pipeline",
 			JobID:        "job-123",
 		}
-		result, err = handler(ctx, req, args)
+		result, _, err = handler(ctx, req, args)
 		require.NoError(t, err)
-		assert.Contains(t, result.Content[0].(mcp.TextContent).Text, "build_number parameter is required")
+		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "build_number parameter is required")
 
 		// Test missing job_id parameter
 		args = UnblockJobArgs{
@@ -171,8 +177,8 @@ func TestUnblockJob(t *testing.T) {
 			PipelineSlug: "test-pipeline",
 			BuildNumber:  "123",
 		}
-		result, err = handler(ctx, req, args)
+		result, _, err = handler(ctx, req, args)
 		require.NoError(t, err)
-		assert.Contains(t, result.Content[0].(mcp.TextContent).Text, "job_id parameter is required")
+		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "job_id parameter is required")
 	})
 }

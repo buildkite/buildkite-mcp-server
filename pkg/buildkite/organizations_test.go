@@ -23,7 +23,6 @@ func (m *MockOrganizationsClient) List(ctx context.Context, options *buildkite.O
 func TestUserTokenOrganization(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockOrganizationsClient{
 		ListFunc: func(ctx context.Context, options *buildkite.OrganizationListOptions) ([]buildkite.Organization, *buildkite.Response, error) {
 			return []buildkite.Organization{
@@ -39,12 +38,14 @@ func TestUserTokenOrganization(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := UserTokenOrganization(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{OrganizationsClient: client})
+
+	tool, handler, _ := UserTokenOrganization()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	request := createMCPRequest(t, map[string]any{})
-	result, err := handler(ctx, request)
+	result, _, err := handler(ctx, request, UserTokenOrganizationArgs{})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -55,7 +56,6 @@ func TestUserTokenOrganization(t *testing.T) {
 func TestUserTokenOrganizationError(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockOrganizationsClient{
 		ListFunc: func(ctx context.Context, options *buildkite.OrganizationListOptions) ([]buildkite.Organization, *buildkite.Response, error) {
 			resp := &http.Response{
@@ -68,12 +68,14 @@ func TestUserTokenOrganizationError(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := UserTokenOrganization(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{OrganizationsClient: client})
+
+	tool, handler, _ := UserTokenOrganization()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	request := createMCPRequest(t, map[string]any{})
-	result, err := handler(ctx, request)
+	result, _, err := handler(ctx, request, UserTokenOrganizationArgs{})
 	assert.NoError(err)
 	assert.Contains(getTextResult(t, result).Text, "Internal Server Error")
 }
@@ -81,7 +83,6 @@ func TestUserTokenOrganizationError(t *testing.T) {
 func TestUserTokenOrganizationErrorNoOrganization(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockOrganizationsClient{
 		ListFunc: func(ctx context.Context, options *buildkite.OrganizationListOptions) ([]buildkite.Organization, *buildkite.Response, error) {
 			return nil, &buildkite.Response{
@@ -92,12 +93,14 @@ func TestUserTokenOrganizationErrorNoOrganization(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := UserTokenOrganization(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{OrganizationsClient: client})
+
+	tool, handler, _ := UserTokenOrganization()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	request := createMCPRequest(t, map[string]any{})
-	result, err := handler(ctx, request)
+	result, _, err := handler(ctx, request, UserTokenOrganizationArgs{})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)

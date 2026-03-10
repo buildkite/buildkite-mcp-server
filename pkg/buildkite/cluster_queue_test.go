@@ -33,7 +33,6 @@ var _ ClusterQueuesClient = (*mockClusterQueuesClient)(nil)
 func TestListClusterQueues(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &mockClusterQueuesClient{
 		ListFunc: func(ctx context.Context, org, clusterID string, opts *buildkite.ClusterQueuesListOptions) ([]buildkite.ClusterQueue, *buildkite.Response, error) {
 			return []buildkite.ClusterQueue{
@@ -48,15 +47,17 @@ func TestListClusterQueues(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := ListClusterQueues(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClusterQueuesClient: client})
+
+	tool, handler, _ := ListClusterQueues()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":   "org",
-		"cluster_id": "cluster-id",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListClusterQueuesArgs{
+		OrgSlug:   "org",
+		ClusterID: "cluster-id",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -66,7 +67,6 @@ func TestListClusterQueues(t *testing.T) {
 func TestGetClusterQueue(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &mockClusterQueuesClient{
 		GetFunc: func(ctx context.Context, org, clusterID, queueID string) (buildkite.ClusterQueue, *buildkite.Response, error) {
 			return buildkite.ClusterQueue{
@@ -79,16 +79,18 @@ func TestGetClusterQueue(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := GetClusterQueue(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClusterQueuesClient: client})
+
+	tool, handler, _ := GetClusterQueue()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":   "org",
-		"cluster_id": "cluster-id",
-		"queue_id":   "queue-id",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetClusterQueueArgs{
+		OrgSlug:   "org",
+		ClusterID: "cluster-id",
+		QueueID:   "queue-id",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)

@@ -7,9 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/buildkite/buildkite-mcp-server/pkg/server"
-	gobuildkite "github.com/buildkite/go-buildkite/v4"
-	mcpserver "github.com/mark3labs/mcp-go/server"
+	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
 )
 
 const (
@@ -20,11 +18,10 @@ const (
 )
 
 func main() {
-	// Create a dummy client to initialize tools
-	client := &gobuildkite.Client{}
+	registry := toolsets.NewToolsetRegistry()
+	registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
 
-	// Collect all tools (pass nil for ParquetClient since this is just for docs)
-	tools := server.BuildkiteTools(client, nil)
+	tools := registry.GetEnabledTools([]string{"all"}, false)
 
 	// Generate markdown documentation for the tools
 	toolsDocs := generateToolsDocs(tools)
@@ -33,13 +30,13 @@ func main() {
 	updateReadme(toolsDocs)
 }
 
-func generateToolsDocs(tools []mcpserver.ServerTool) string {
+func generateToolsDocs(tools []toolsets.ToolDefinition) string {
 	var buffer strings.Builder
 
 	buffer.WriteString(toolsSectionStart + "\n\n| Tool | Description |\n|------|-------------|\n")
 
-	for _, st := range tools {
-		buffer.WriteString(fmt.Sprintf("| `%s` | %s |\n", st.Tool.Name, st.Tool.Description))
+	for _, td := range tools {
+		fmt.Fprintf(&buffer, "| `%s` | %s |\n", td.Tool.Name, td.Tool.Description)
 	}
 
 	buffer.WriteString("\n---\n\n")

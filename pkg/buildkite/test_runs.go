@@ -9,9 +9,9 @@ import (
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -21,43 +21,45 @@ type TestRunsClient interface {
 	GetFailedExecutions(ctx context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error)
 }
 
-func ListTestRuns(client TestRunsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("list_test_runs",
-			mcp.WithDescription("List all test runs for a test suite in Buildkite Test Engine"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("test_suite_slug",
-				mcp.Required(),
-			),
-			withPagination(),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+type ListTestRunsArgs struct {
+	OrgSlug       string `json:"org_slug"`
+	TestSuiteSlug string `json:"test_suite_slug"`
+	Page          int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage       int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+}
+
+type GetTestRunArgs struct {
+	OrgSlug       string `json:"org_slug"`
+	TestSuiteSlug string `json:"test_suite_slug"`
+	RunID         string `json:"run_id"`
+}
+
+func ListTestRuns() (mcp.Tool, mcp.ToolHandlerFor[ListTestRunsArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "list_test_runs",
+			Description: "List all test runs for a test suite in Buildkite Test Engine",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Test Runs",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args ListTestRunsArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.ListTestRuns")
 			defer span.End()
 
-			orgSlug, err := request.RequireString("org_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.OrgSlug == "" {
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 
-			testSuiteSlug, err := request.RequireString("test_suite_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.TestSuiteSlug == "" {
+				return utils.NewToolResultError("test_suite_slug is required"), nil, nil
 			}
 
-			paginationParams, err := optionalPaginationParams(request)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
+			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(
-				attribute.String("org_slug", orgSlug),
-				attribute.String("test_suite_slug", testSuiteSlug),
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("test_suite_slug", args.TestSuiteSlug),
 				attribute.Int("page", paginationParams.Page),
 				attribute.Int("per_page", paginationParams.PerPage),
 			)
@@ -66,9 +68,10 @@ func ListTestRuns(client TestRunsClient) (tool mcp.Tool, handler server.ToolHand
 				ListOptions: paginationParams,
 			}
 
-			testRuns, resp, err := client.List(ctx, orgSlug, testSuiteSlug, options)
+			deps := DepsFromContext(ctx)
+			testRuns, resp, err := deps.TestRunsClient.List(ctx, args.OrgSlug, args.TestSuiteSlug, options)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			result := PaginatedResult[buildkite.TestRun]{
@@ -80,7 +83,7 @@ func ListTestRuns(client TestRunsClient) (tool mcp.Tool, handler server.ToolHand
 
 			r, err := json.Marshal(&result)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal test runs: %w", err)
+				return nil, nil, fmt.Errorf("failed to marshal test runs: %w", err)
 			}
 
 			span.SetAttributes(
@@ -88,63 +91,53 @@ func ListTestRuns(client TestRunsClient) (tool mcp.Tool, handler server.ToolHand
 				attribute.Int("estimated_tokens", tokens.EstimateTokens(string(r))),
 			)
 
-			return mcp.NewToolResultText(string(r)), nil
+			return utils.NewToolResultText(string(r)), nil, nil
 		}, []string{"read_suites"}
 }
 
-func GetTestRun(client TestRunsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("get_test_run",
-			mcp.WithDescription("Get a specific test run in Buildkite Test Engine"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("test_suite_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("run_id",
-				mcp.Required(),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func GetTestRun() (mcp.Tool, mcp.ToolHandlerFor[GetTestRunArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "get_test_run",
+			Description: "Get a specific test run in Buildkite Test Engine",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Test Run",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetTestRunArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetTestRun")
 			defer span.End()
 
-			orgSlug, err := request.RequireString("org_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.OrgSlug == "" {
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 
-			testSuiteSlug, err := request.RequireString("test_suite_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.TestSuiteSlug == "" {
+				return utils.NewToolResultError("test_suite_slug is required"), nil, nil
 			}
 
-			runID, err := request.RequireString("run_id")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.RunID == "" {
+				return utils.NewToolResultError("run_id is required"), nil, nil
 			}
 
 			span.SetAttributes(
-				attribute.String("org_slug", orgSlug),
-				attribute.String("test_suite_slug", testSuiteSlug),
-				attribute.String("run_id", runID),
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("test_suite_slug", args.TestSuiteSlug),
+				attribute.String("run_id", args.RunID),
 			)
 
-			testRun, resp, err := client.Get(ctx, orgSlug, testSuiteSlug, runID)
+			deps := DepsFromContext(ctx)
+			testRun, resp, err := deps.TestRunsClient.Get(ctx, args.OrgSlug, args.TestSuiteSlug, args.RunID)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			if resp.StatusCode != http.StatusOK {
 				body, err := io.ReadAll(resp.Body)
 				if err != nil {
-					return nil, fmt.Errorf("failed to read response body: %w", err)
+					return nil, nil, fmt.Errorf("failed to read response body: %w", err)
 				}
-				return mcp.NewToolResultError(fmt.Sprintf("failed to get test run: %s", string(body))), nil
+				return utils.NewToolResultError(fmt.Sprintf("failed to get test run: %s", string(body))), nil, nil
 			}
 
 			return mcpTextResult(span, &testRun)

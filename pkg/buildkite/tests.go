@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -14,51 +14,47 @@ type TestsClient interface {
 	Get(ctx context.Context, org, slug, testID string) (buildkite.Test, *buildkite.Response, error)
 }
 
-func GetTest(client TestsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("get_test",
-			mcp.WithDescription("Get a specific test in Buildkite Test Engine. This provides additional metadata for failed test executions"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("test_suite_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("test_id",
-				mcp.Required(),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+type GetTestArgs struct {
+	OrgSlug       string `json:"org_slug"`
+	TestSuiteSlug string `json:"test_suite_slug"`
+	TestID        string `json:"test_id"`
+}
+
+func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "get_test",
+			Description: "Get a specific test in Buildkite Test Engine. This provides additional metadata for failed test executions",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Test",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetTestArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetTest")
 			defer span.End()
 
-			orgSlug, err := request.RequireString("org_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.OrgSlug == "" {
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 
-			testSuiteSlug, err := request.RequireString("test_suite_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.TestSuiteSlug == "" {
+				return utils.NewToolResultError("test_suite_slug is required"), nil, nil
 			}
 
-			testID, err := request.RequireString("test_id")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.TestID == "" {
+				return utils.NewToolResultError("test_id is required"), nil, nil
 			}
 
 			span.SetAttributes(
-				attribute.String("org_slug", orgSlug),
-				attribute.String("test_suite_slug", testSuiteSlug),
-				attribute.String("test_id", testID),
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("test_suite_slug", args.TestSuiteSlug),
+				attribute.String("test_id", args.TestID),
 			)
 
-			test, _, err := client.Get(ctx, orgSlug, testSuiteSlug, testID)
+			deps := DepsFromContext(ctx)
+			test, _, err := deps.TestsClient.Get(ctx, args.OrgSlug, args.TestSuiteSlug, args.TestID)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			return mcpTextResult(span, &test)

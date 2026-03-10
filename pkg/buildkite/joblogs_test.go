@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -102,7 +102,6 @@ func TestValidateSearchPattern(t *testing.T) {
 
 func TestSearchLogsHandler(t *testing.T) {
 	assert := require.New(t)
-	ctx := context.Background()
 
 	mockClient := &MockBuildkiteLogsClient{
 		DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
@@ -114,7 +113,9 @@ func TestSearchLogsHandler(t *testing.T) {
 		},
 	}
 
-	_, handler, _ := SearchLogs(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildkiteLogsClient: mockClient})
+
+	_, handler, _ := SearchLogs()
 
 	t.Run("invalid regex pattern", func(t *testing.T) {
 		params := SearchLogsParams{
@@ -127,10 +128,9 @@ func TestSearchLogsHandler(t *testing.T) {
 			Pattern: "[", // Invalid regex
 		}
 
-		result, err := handler(ctx, mcp.CallToolRequest{}, params)
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), params)
 		assert.NoError(err)
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		assert.True(ok)
+		textContent := result.Content[0].(*mcp.TextContent)
 		assert.Contains(textContent.Text, "invalid regex pattern")
 	})
 
@@ -141,7 +141,8 @@ func TestSearchLogsHandler(t *testing.T) {
 			},
 		}
 
-		_, errorHandler, _ := SearchLogs(errorClient)
+		errorCtx := ContextWithDeps(context.Background(), ToolDependencies{BuildkiteLogsClient: errorClient})
+		_, errorHandler, _ := SearchLogs()
 
 		params := SearchLogsParams{
 			JobLogsBaseParams: JobLogsBaseParams{
@@ -153,17 +154,15 @@ func TestSearchLogsHandler(t *testing.T) {
 			Pattern: "error",
 		}
 
-		result, err := errorHandler(ctx, mcp.CallToolRequest{}, params)
+		result, _, err := errorHandler(errorCtx, createMCPRequest(t, map[string]any{}), params)
 		assert.NoError(err)
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		assert.True(ok)
+		textContent := result.Content[0].(*mcp.TextContent)
 		assert.Contains(textContent.Text, "Failed to create log reader")
 	})
 }
 
 func TestTailLogsHandler(t *testing.T) {
 	assert := require.New(t)
-	ctx := context.Background()
 
 	mockClient := &MockBuildkiteLogsClient{
 		DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
@@ -171,7 +170,9 @@ func TestTailLogsHandler(t *testing.T) {
 		},
 	}
 
-	_, handler, _ := TailLogs(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildkiteLogsClient: mockClient})
+
+	_, handler, _ := TailLogs()
 
 	t.Run("default tail value", func(t *testing.T) {
 		params := TailLogsParams{
@@ -185,17 +186,15 @@ func TestTailLogsHandler(t *testing.T) {
 		}
 
 		// This will fail due to the parquet file not existing, but we can check the parameters
-		result, err := handler(ctx, mcp.CallToolRequest{}, params)
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), params)
 		assert.NoError(err)
-		textContent, ok := result.Content[0].(mcp.TextContent)
-		assert.True(ok)
+		textContent := result.Content[0].(*mcp.TextContent)
 		assert.Contains(textContent.Text, "Failed to get file info")
 	})
 }
 
 func TestReadLogsHandler(t *testing.T) {
 	assert := require.New(t)
-	ctx := context.Background()
 
 	mockClient := &MockBuildkiteLogsClient{
 		DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
@@ -203,7 +202,9 @@ func TestReadLogsHandler(t *testing.T) {
 		},
 	}
 
-	_, handler, _ := ReadLogs(mockClient)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildkiteLogsClient: mockClient})
+
+	_, handler, _ := ReadLogs()
 
 	params := ReadLogsParams{
 		JobLogsBaseParams: JobLogsBaseParams{
@@ -217,10 +218,9 @@ func TestReadLogsHandler(t *testing.T) {
 	}
 
 	// This will fail due to the parquet file not existing, but we can test the flow
-	result, err := handler(ctx, mcp.CallToolRequest{}, params)
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), params)
 	assert.NoError(err)
-	textContent, ok := result.Content[0].(mcp.TextContent)
-	assert.True(ok)
+	textContent := result.Content[0].(*mcp.TextContent)
 	assert.Contains(textContent.Text, "Failed to read entries")
 }
 

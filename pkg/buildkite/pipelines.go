@@ -7,8 +7,9 @@ import (
 	"net/url"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -22,11 +23,11 @@ type PipelinesClient interface {
 
 type ListPipelinesArgs struct {
 	OrgSlug     string `json:"org_slug"`
-	Name        string `json:"name"`
-	Repository  string `json:"repository"`
-	Page        int    `json:"page"`
-	PerPage     int    `json:"per_page"`
-	DetailLevel string `json:"detail_level"` // "summary", "detailed", "full"
+	Name        string `json:"name,omitempty" jsonschema:"Filter pipelines by name"`
+	Repository  string `json:"repository,omitempty" jsonschema:"Filter pipelines by repository URL"`
+	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default)\\, 'detailed'\\, or 'full'"`
 }
 
 type CreatePipelineResult struct {
@@ -40,32 +41,20 @@ type WebhookInfo struct {
 	Note    string `json:"note,omitempty"`
 }
 
-func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[ListPipelinesArgs], scopes []string) {
-	return mcp.NewTool("list_pipelines",
-			mcp.WithDescription("List all pipelines in an organization with their basic details, build counts, and current status"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("name",
-				mcp.Description("Filter pipelines by name"),
-			),
-			mcp.WithString("repository",
-				mcp.Description("Filter pipelines by repository URL"),
-			),
-			mcp.WithString("detail_level",
-				mcp.Description("Response detail level: 'summary' (default), 'detailed', or 'full'"),
-			),
-			withPagination(),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "list_pipelines",
+			Description: "List all pipelines in an organization with their basic details, build counts, and current status",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Pipelines",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		), func(ctx context.Context, request mcp.CallToolRequest, args ListPipelinesArgs) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListPipelinesArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.ListPipelines")
 			defer span.End()
 
 			if args.OrgSlug == "" {
-				return mcp.NewToolResultError("org_slug is required"), nil
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 
 			// Set defaults
@@ -88,7 +77,8 @@ func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedTool
 				attribute.Int("per_page", args.PerPage),
 			)
 
-			pipelines, resp, err := client.List(ctx, args.OrgSlug, &buildkite.PipelineListOptions{
+			deps := DepsFromContext(ctx)
+			pipelines, resp, err := deps.PipelinesClient.List(ctx, args.OrgSlug, &buildkite.PipelineListOptions{
 				ListOptions: buildkite.ListOptions{
 					Page:    args.Page,
 					PerPage: args.PerPage,
@@ -100,11 +90,11 @@ func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedTool
 				var errResp *buildkite.ErrorResponse
 				if errors.As(err, &errResp) {
 					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
+						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
 					}
 				}
 
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			headers := map[string]string{"Link": resp.Header.Get("Link")}
@@ -130,35 +120,27 @@ func ListPipelines(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedTool
 type GetPipelineArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
-	DetailLevel  string `json:"detail_level"` // "summary", "detailed", "full"
+	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary'\\, 'detailed'\\, or 'full' (default)"`
 }
 
-func GetPipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[GetPipelineArgs], scopes []string) {
-	return mcp.NewTool("get_pipeline",
-			mcp.WithDescription("Get detailed information about a specific pipeline including its configuration, steps, environment variables, and build statistics"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("detail_level",
-				mcp.Description("Response detail level: 'summary', 'detailed', or 'full' (default)"),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+func GetPipeline() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "get_pipeline",
+			Description: "Get detailed information about a specific pipeline including its configuration, steps, environment variables, and build statistics",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Pipeline",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest, args GetPipelineArgs) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetPipelineArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetPipeline")
 			defer span.End()
 
 			if args.OrgSlug == "" {
-				return mcp.NewToolResultError("org_slug is required"), nil
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 			if args.PipelineSlug == "" {
-				return mcp.NewToolResultError("pipeline_slug is required"), nil
+				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
 			}
 
 			// Set default
@@ -172,16 +154,17 @@ func GetPipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToolHa
 				attribute.String("detail_level", args.DetailLevel),
 			)
 
-			pipeline, _, err := client.Get(ctx, args.OrgSlug, args.PipelineSlug)
+			deps := DepsFromContext(ctx)
+			pipeline, _, err := deps.PipelinesClient.Get(ctx, args.OrgSlug, args.PipelineSlug)
 			if err != nil {
 				var errResp *buildkite.ErrorResponse
 				if errors.As(err, &errResp) {
 					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
+						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
 					}
 				}
 
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			var result any
@@ -286,87 +269,48 @@ func createPaginatedResult[T any](pipelines []buildkite.Pipeline, converter func
 type CreatePipelineArgs struct {
 	OrgSlug                   string   `json:"org_slug"`
 	Name                      string   `json:"name"`
-	RepositoryURL             string   `json:"repository_url"`
-	ClusterID                 string   `json:"cluster_id"`
-	Description               string   `json:"description"`
-	Configuration             string   `json:"configuration"`
-	DefaultBranch             string   `json:"default_branch"`
-	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds"`
-	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds"`
-	Tags                      []string `json:"tags"`
-	CreateWebhook             bool     `json:"create_webhook"`
+	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
+	ClusterID                 string   `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
+	Description               string   `json:"description,omitempty"`
+	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
+	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Tags                      []string `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
+	CreateWebhook             bool     `json:"create_webhook,omitempty" jsonschema:"Create a GitHub webhook to trigger builds on pull-request and push events"`
 }
 
-func CreatePipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToolHandlerFunc[CreatePipelineArgs], scopes []string) {
-	return mcp.NewTool("create_pipeline",
-			mcp.WithDescription("Set up a new CI/CD pipeline in Buildkite with YAML configuration, repository connection, and cluster assignment"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-				mcp.Description("The organization slug"),
-			),
-			mcp.WithString("name",
-				mcp.Required(),
-			),
-			mcp.WithString("repository_url",
-				mcp.Required(),
-			),
-			mcp.WithString("cluster_id",
-				mcp.Required(),
-			),
-			mcp.WithString("configuration",
-				mcp.Required(),
-				mcp.Description("The pipeline configuration in YAML format. Contains the build steps and pipeline settings. If not provided, a basic configuration will be used"),
-			),
-			mcp.WithBoolean("create_webhook",
-				mcp.Required(),
-				mcp.Description("Create a GitHub webhook to trigger builds in response to pull-request and push events"),
-				mcp.DefaultBool(true),
-			),
-			mcp.WithString("description"),
-			mcp.WithString("default_branch",
-				mcp.Description("The default branch for builds and metrics filtering"),
-			),
-			mcp.WithBoolean("skip_queued_branch_builds",
-				mcp.Description("Skip intermediate builds when new builds are created on the same branch"),
-			),
-			mcp.WithBoolean("cancel_running_branch_builds",
-				mcp.Description("Cancel running builds when new builds are created on the same branch"),
-			),
-			mcp.WithArray("tags",
-				mcp.Description("Tags to apply to the pipeline. These can be used for filtering and organization"),
-				mcp.Items(map[string]any{
-					"type":        "string",
-					"description": "A tag to apply to the pipeline",
-				}),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
-				Title:        "Create Pipeline",
-				ReadOnlyHint: mcp.ToBoolPtr(false),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest, args CreatePipelineArgs) (*mcp.CallToolResult, error) {
+func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "create_pipeline",
+			Description: "Set up a new CI/CD pipeline in Buildkite with YAML configuration, repository connection, and cluster assignment",
+			Annotations: &mcp.ToolAnnotations{
+				Title: "Create Pipeline",
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args CreatePipelineArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.CreatePipeline")
 			defer span.End()
 
 			if args.OrgSlug == "" {
-				return mcp.NewToolResultError("org_slug is required"), nil
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 			if args.Name == "" {
-				return mcp.NewToolResultError("name is required"), nil
+				return utils.NewToolResultError("name is required"), nil, nil
 			}
 			if args.RepositoryURL == "" {
-				return mcp.NewToolResultError("repository_url is required"), nil
+				return utils.NewToolResultError("repository_url is required"), nil, nil
 			}
 			if args.ClusterID == "" {
-				return mcp.NewToolResultError("cluster_id is required"), nil
+				return utils.NewToolResultError("cluster_id is required"), nil, nil
 			}
 			if args.Configuration == "" {
-				return mcp.NewToolResultError("configuration is required"), nil
+				return utils.NewToolResultError("configuration is required"), nil, nil
 			}
 
 			// parse the URL to ensure it's valid
 			if _, err := url.Parse(args.RepositoryURL); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("invalid repository URL: %s", err.Error())), nil
+				return utils.NewToolResultError(fmt.Sprintf("invalid repository URL: %s", err.Error())), nil, nil
 			}
 
 			span.SetAttributes(
@@ -390,20 +334,21 @@ func CreatePipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToo
 				create.DefaultBranch = args.DefaultBranch
 			}
 
-			pipeline, _, err := client.Create(ctx, args.OrgSlug, create)
+			deps := DepsFromContext(ctx)
+			pipeline, _, err := deps.PipelinesClient.Create(ctx, args.OrgSlug, create)
 			if err != nil {
 				var errResp *buildkite.ErrorResponse
 				if errors.As(err, &errResp) {
 					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
+						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
 					}
 				}
 
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			if args.CreateWebhook {
-				_, err := client.AddWebhook(ctx, args.OrgSlug, pipeline.Slug)
+				_, err := deps.PipelinesClient.AddWebhook(ctx, args.OrgSlug, pipeline.Slug)
 				result := CreatePipelineResult{
 					Pipeline: pipeline,
 					Webhook: &WebhookInfo{
@@ -430,76 +375,45 @@ func CreatePipeline(client PipelinesClient) (tool mcp.Tool, handler mcp.TypedToo
 type UpdatePipelineArgs struct {
 	OrgSlug                   string   `json:"org_slug"`
 	PipelineSlug              string   `json:"pipeline_slug"`
-	Name                      string   `json:"name"`
-	RepositoryURL             string   `json:"repository_url"`
-	ClusterID                 string   `json:"cluster_id"`
-	Description               string   `json:"description"`
-	Configuration             string   `json:"configuration"`
-	DefaultBranch             string   `json:"default_branch"`
-	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds"`
-	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds"`
-	Tags                      []string `json:"tags"` // Optional, labels to apply to the pipeline
+	Name                      string   `json:"name,omitempty"`
+	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
+	ClusterID                 string   `json:"cluster_id,omitempty"`
+	Description               string   `json:"description,omitempty"`
+	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
+	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Tags                      []string `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
 }
 
-func UpdatePipeline(client PipelinesClient) (mcp.Tool, mcp.TypedToolHandlerFunc[UpdatePipelineArgs], []string) {
-	return mcp.NewTool("update_pipeline",
-			mcp.WithDescription("Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata"),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("pipeline_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("name"),
-			mcp.WithString("repository_url",
-				mcp.Description("The Git repository URL to use for the pipeline"),
-			),
-			mcp.WithString("cluster_id"),
-			mcp.WithString("configuration",
-				mcp.Description("The pipeline configuration in YAML format. Contains the build steps and pipeline settings. If not provided, the existing configuration will be used"),
-			),
-			mcp.WithString("description"),
-			mcp.WithString("default_branch",
-				mcp.Description("The default branch for builds and metrics filtering"),
-			),
-			mcp.WithBoolean("skip_queued_branch_builds",
-				mcp.Description("Skip intermediate builds when new builds are created on the same branch"),
-			),
-			mcp.WithBoolean("cancel_running_branch_builds",
-				mcp.Description("Cancel running builds when new builds are created on the same branch"),
-			),
-			mcp.WithArray("tags",
-				mcp.Description("Tags to apply to the pipeline. These can be used for filtering and organization"),
-				mcp.Items(map[string]any{
-					"type":        "string",
-					"description": "A tag to apply to the pipeline",
-				}),
-			),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
-				Title:        "Update Pipeline",
-				ReadOnlyHint: mcp.ToBoolPtr(false),
-			}),
-		), func(ctx context.Context, request mcp.CallToolRequest, args UpdatePipelineArgs) (*mcp.CallToolResult, error) {
+func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "update_pipeline",
+			Description: "Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata",
+			Annotations: &mcp.ToolAnnotations{
+				Title: "Update Pipeline",
+			},
+		}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.UpdatePipeline")
 			defer span.End()
 
 			if args.OrgSlug == "" {
-				return mcp.NewToolResultError("org_slug is required"), nil
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 			if args.RepositoryURL == "" {
-				return mcp.NewToolResultError("repository_url is required"), nil
+				return utils.NewToolResultError("repository_url is required"), nil, nil
 			}
 
 			if args.PipelineSlug == "" {
-				return mcp.NewToolResultError("pipeline_slug is required"), nil
+				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
 			}
 			if args.Configuration == "" {
-				return mcp.NewToolResultError("configuration is required"), nil
+				return utils.NewToolResultError("configuration is required"), nil, nil
 			}
 
 			// parse the URL to ensure it's valid
 			if _, err := url.Parse(args.RepositoryURL); err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("invalid repository URL: %s", err.Error())), nil
+				return utils.NewToolResultError(fmt.Sprintf("invalid repository URL: %s", err.Error())), nil, nil
 			}
 
 			span.SetAttributes(
@@ -522,16 +436,17 @@ func UpdatePipeline(client PipelinesClient) (mcp.Tool, mcp.TypedToolHandlerFunc[
 				update.DefaultBranch = args.DefaultBranch
 			}
 
-			pipeline, _, err := client.Update(ctx, args.OrgSlug, args.PipelineSlug, update)
+			deps := DepsFromContext(ctx)
+			pipeline, _, err := deps.PipelinesClient.Update(ctx, args.OrgSlug, args.PipelineSlug, update)
 			if err != nil {
 				var errResp *buildkite.ErrorResponse
 				if errors.As(err, &errResp) {
 					if errResp.RawBody != nil {
-						return mcp.NewToolResultError(string(errResp.RawBody)), nil
+						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
 					}
 				}
 
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			return mcpTextResult(span, &pipeline)

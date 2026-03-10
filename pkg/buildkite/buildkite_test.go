@@ -1,103 +1,95 @@
 package buildkite
 
 import (
+	"encoding/json"
 	"testing"
 
-	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
-func Test_optionalPaginationParams(t *testing.T) {
+func Test_paginationFromArgs(t *testing.T) {
 	tests := []struct {
 		name      string
-		args      map[string]any
-		expected  buildkite.ListOptions
+		page      int
+		perPage   int
+		expected  buildkiteListOptions
 		expectErr bool
 	}{
 		{
-			name: "valid pagination parameters",
-			args: map[string]any{
-				"page":    float64(1),
-				"perPage": float64(25),
-			},
-			expected: buildkite.ListOptions{
+			name:    "valid pagination parameters",
+			page:    1,
+			perPage: 25,
+			expected: buildkiteListOptions{
 				Page:    1,
 				PerPage: 25,
 			},
-			expectErr: false,
 		},
 		{
-			name: "missing pagination parameters should use new defaults (100 per page)",
-			args: map[string]any{
-				"name": "test-name",
-			},
-			expected: buildkite.ListOptions{
+			name:    "missing pagination parameters should use new defaults (100 per page)",
+			page:    0,
+			perPage: 0,
+			expected: buildkiteListOptions{
 				Page:    1,
 				PerPage: 100,
 			},
-			expectErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert := require.New(t)
-			req := createMCPRequest(t, tt.args)
-
-			opts, err := optionalPaginationParams(req)
-			if tt.expectErr {
-				assert.Error(err)
-			} else {
-				assert.NoError(err)
-				assert.Equal(tt.expected, opts)
-			}
+			opts := paginationFromArgs(tt.page, tt.perPage)
+			assert.Equal(tt.expected.Page, opts.Page)
+			assert.Equal(tt.expected.PerPage, opts.PerPage)
 		})
 	}
+}
+
+// buildkiteListOptions is a helper for test expectations
+type buildkiteListOptions struct {
+	Page    int
+	PerPage int
 }
 
 func Test_getClientSidePaginationParams(t *testing.T) {
 	tests := []struct {
 		name           string
-		args           map[string]any
+		page           int
+		perPage        int
 		expectedParams ClientSidePaginationParams
 	}{
 		{
-			name: "valid pagination parameters",
-			args: map[string]any{
-				"page":    float64(2),
-				"perPage": float64(10),
-			},
+			name:    "valid pagination parameters",
+			page:    2,
+			perPage: 10,
 			expectedParams: ClientSidePaginationParams{
 				Page:    2,
 				PerPage: 10,
 			},
 		},
 		{
-			name: "only page parameter",
-			args: map[string]any{
-				"page": float64(3),
-			},
+			name:    "only page parameter",
+			page:    3,
+			perPage: 0,
 			expectedParams: ClientSidePaginationParams{
 				Page:    3,
 				PerPage: 25, // default
 			},
 		},
 		{
-			name: "only perPage parameter",
-			args: map[string]any{
-				"perPage": float64(50),
-			},
+			name:    "only perPage parameter",
+			page:    0,
+			perPage: 50,
 			expectedParams: ClientSidePaginationParams{
 				Page:    1, // default
 				PerPage: 50,
 			},
 		},
 		{
-			name: "no pagination parameters",
-			args: map[string]any{
-				"name": "test-name",
-			},
+			name:    "no pagination parameters",
+			page:    0,
+			perPage: 0,
 			expectedParams: ClientSidePaginationParams{
 				Page:    1,  // default
 				PerPage: 25, // default
@@ -108,9 +100,7 @@ func Test_getClientSidePaginationParams(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert := require.New(t)
-			req := createMCPRequest(t, tt.args)
-
-			params := getClientSidePaginationParams(req)
+			params := clientSidePaginationFromArgs(tt.page, tt.perPage)
 			assert.Equal(tt.expectedParams, params)
 		})
 	}
@@ -236,25 +226,25 @@ func Test_applyClientSidePagination(t *testing.T) {
 	}
 }
 
-func createMCPRequest(t *testing.T, args map[string]any) mcp.CallToolRequest {
+func createMCPRequest(t *testing.T, args map[string]any) *mcp.CallToolRequest {
 	t.Helper()
-	return mcp.CallToolRequest{
-		Params: struct {
-			Name      string    `json:"name"`
-			Arguments any       `json:"arguments,omitempty"`
-			Meta      *mcp.Meta `json:"_meta,omitempty"`
-		}{
-			Arguments: args,
+	argsJSON, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("failed to marshal args: %v", err)
+	}
+	return &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: argsJSON,
 		},
 	}
 }
 
-func getTextResult(t *testing.T, result *mcp.CallToolResult) mcp.TextContent {
+func getTextResult(t *testing.T, result *mcp.CallToolResult) *mcp.TextContent {
 	t.Helper()
-	textContent, ok := result.Content[0].(mcp.TextContent)
+	textContent, ok := result.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Error("expected text content")
-		return mcp.TextContent{}
+		return &mcp.TextContent{}
 	}
 
 	return textContent

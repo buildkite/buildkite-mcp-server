@@ -4,33 +4,37 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type OrganizationsClient interface {
 	List(ctx context.Context, options *buildkite.OrganizationListOptions) ([]buildkite.Organization, *buildkite.Response, error)
 }
 
-func UserTokenOrganization(client OrganizationsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("user_token_organization",
-			mcp.WithDescription("Get the organization associated with the user token used for this request"),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+type UserTokenOrganizationArgs struct{}
+
+func UserTokenOrganization() (mcp.Tool, mcp.ToolHandlerFor[UserTokenOrganizationArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "user_token_organization",
+			Description: "Get the organization associated with the user token used for this request",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Organization for User Token",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		}, func(ctx context.Context, request *mcp.CallToolRequest, args UserTokenOrganizationArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.UserTokenOrganization")
 			defer span.End()
 
-			orgs, _, err := client.List(ctx, &buildkite.OrganizationListOptions{})
+			deps := DepsFromContext(ctx)
+			orgs, _, err := deps.OrganizationsClient.List(ctx, &buildkite.OrganizationListOptions{})
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			if len(orgs) == 0 {
-				return mcp.NewToolResultError("no organization found for the current user token"), nil
+				return utils.NewToolResultError("no organization found for the current user token"), nil, nil
 			}
 
 			return mcpTextResult(span, &orgs[0])
@@ -39,15 +43,14 @@ func UserTokenOrganization(client OrganizationsClient) (tool mcp.Tool, handler s
 
 func HandleUserTokenOrganizationPrompt(
 	ctx context.Context,
-	request mcp.GetPromptRequest,
+	request *mcp.GetPromptRequest,
 ) (*mcp.GetPromptResult, error) {
 	return &mcp.GetPromptResult{
 		Description: "When asked for detail of a users pipelines start by looking up the user's token organization",
-		Messages: []mcp.PromptMessage{
+		Messages: []*mcp.PromptMessage{
 			{
-				Role: mcp.RoleUser,
-				Content: mcp.TextContent{
-					Type: "text",
+				Role: mcp.Role("user"),
+				Content: &mcp.TextContent{
 					Text: "When asked for detail of a users pipelines start by looking up the user's token organization",
 				},
 			},

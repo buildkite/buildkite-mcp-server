@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -14,67 +14,60 @@ type TestExecutionsClient interface {
 	GetFailedExecutions(ctx context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error)
 }
 
-func GetFailedTestExecutions(client TestExecutionsClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	return mcp.NewTool("get_failed_executions",
-			mcp.WithDescription("Get failed test executions for a specific test run in Buildkite Test Engine. Optionally get the expanded failure details such as full error messages and stack traces."),
-			mcp.WithString("org_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("test_suite_slug",
-				mcp.Required(),
-			),
-			mcp.WithString("run_id",
-				mcp.Required(),
-			),
-			mcp.WithBoolean("include_failure_expanded",
-				mcp.Description("Include the expanded failure details such as full error messages and stack traces. This can be used to explain and diganose the cause of test failures."),
-			),
-			withClientSidePagination(),
-			mcp.WithToolAnnotation(mcp.ToolAnnotation{
+type GetFailedTestExecutionsArgs struct {
+	OrgSlug                string `json:"org_slug"`
+	TestSuiteSlug          string `json:"test_suite_slug"`
+	RunID                  string `json:"run_id"`
+	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded failure details such as full error messages and stack traces"`
+	Page                   int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage                int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+}
+
+func GetFailedTestExecutions() (mcp.Tool, mcp.ToolHandlerFor[GetFailedTestExecutionsArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "get_failed_executions",
+			Description: "Get failed test executions for a specific test run in Buildkite Test Engine. Optionally get the expanded failure details such as full error messages and stack traces.",
+			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Failed Test Executions",
-				ReadOnlyHint: mcp.ToBoolPtr(true),
-			}),
-		),
-		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetFailedTestExecutionsArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetFailedExecutions")
 			defer span.End()
 
-			orgSlug, err := request.RequireString("org_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.OrgSlug == "" {
+				return utils.NewToolResultError("org_slug is required"), nil, nil
 			}
 
-			testSuiteSlug, err := request.RequireString("test_suite_slug")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.TestSuiteSlug == "" {
+				return utils.NewToolResultError("test_suite_slug is required"), nil, nil
 			}
 
-			runID, err := request.RequireString("run_id")
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+			if args.RunID == "" {
+				return utils.NewToolResultError("run_id is required"), nil, nil
 			}
-
-			includeFailureExpanded := request.GetBool("include_failure_expanded", false)
 
 			// Get client-side pagination parameters (always enabled)
-			paginationParams := getClientSidePaginationParams(request)
+			paginationParams := clientSidePaginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(
-				attribute.String("org_slug", orgSlug),
-				attribute.String("test_suite_slug", testSuiteSlug),
-				attribute.String("run_id", runID),
-				attribute.Bool("include_failure_expanded", includeFailureExpanded),
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("test_suite_slug", args.TestSuiteSlug),
+				attribute.String("run_id", args.RunID),
+				attribute.Bool("include_failure_expanded", args.IncludeFailureExpanded),
 				attribute.Int("page", paginationParams.Page),
 				attribute.Int("per_page", paginationParams.PerPage),
 			)
 
 			options := &buildkite.FailedExecutionsOptions{
-				IncludeFailureExpanded: includeFailureExpanded,
+				IncludeFailureExpanded: args.IncludeFailureExpanded,
 			}
 
-			failedExecutions, _, err := client.GetFailedExecutions(ctx, orgSlug, testSuiteSlug, runID, options)
+			deps := DepsFromContext(ctx)
+			failedExecutions, _, err := deps.TestExecutionsClient.GetFailedExecutions(ctx, args.OrgSlug, args.TestSuiteSlug, args.RunID, options)
 			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			// Always apply client-side pagination

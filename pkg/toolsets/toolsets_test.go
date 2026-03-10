@@ -1,11 +1,9 @@
 package toolsets
 
 import (
-	"context"
 	"testing"
 
-	gobuildkite "github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,8 +18,8 @@ func TestToolDefinition_IsReadOnly(t *testing.T) {
 			name: "read-only tool with hint set to true",
 			tool: ToolDefinition{
 				Tool: mcp.Tool{
-					Annotations: mcp.ToolAnnotation{
-						ReadOnlyHint: func() *bool { b := true; return &b }(),
+					Annotations: &mcp.ToolAnnotations{
+						ReadOnlyHint: true,
 					},
 				},
 			},
@@ -31,21 +29,17 @@ func TestToolDefinition_IsReadOnly(t *testing.T) {
 			name: "read-write tool with hint set to false",
 			tool: ToolDefinition{
 				Tool: mcp.Tool{
-					Annotations: mcp.ToolAnnotation{
-						ReadOnlyHint: func() *bool { b := false; return &b }(),
+					Annotations: &mcp.ToolAnnotations{
+						ReadOnlyHint: false,
 					},
 				},
 			},
 			expected: false,
 		},
 		{
-			name: "tool with no read-only hint",
+			name: "tool with no annotations",
 			tool: ToolDefinition{
-				Tool: mcp.Tool{
-					Annotations: mcp.ToolAnnotation{
-						ReadOnlyHint: nil,
-					},
-				},
+				Tool: mcp.Tool{},
 			},
 			expected: false,
 		},
@@ -63,8 +57,8 @@ func TestToolset_GetReadOnlyTools(t *testing.T) {
 	readOnlyTool := ToolDefinition{
 		Tool: mcp.Tool{
 			Name: "read-only-tool",
-			Annotations: mcp.ToolAnnotation{
-				ReadOnlyHint: func() *bool { b := true; return &b }(),
+			Annotations: &mcp.ToolAnnotations{
+				ReadOnlyHint: true,
 			},
 		},
 	}
@@ -72,8 +66,8 @@ func TestToolset_GetReadOnlyTools(t *testing.T) {
 	readWriteTool := ToolDefinition{
 		Tool: mcp.Tool{
 			Name: "read-write-tool",
-			Annotations: mcp.ToolAnnotation{
-				ReadOnlyHint: func() *bool { b := false; return &b }(),
+			Annotations: &mcp.ToolAnnotations{
+				ReadOnlyHint: false,
 			},
 		},
 	}
@@ -111,7 +105,7 @@ func TestToolset_GetAllTools(t *testing.T) {
 	}
 
 	allTools := toolset.GetAllTools()
-	assert.Equal(tools, allTools)
+	assert.Len(allTools, len(tools))
 }
 
 func TestToolset_GetRequiredScopes(t *testing.T) {
@@ -136,8 +130,8 @@ func TestNewToolsetRegistry(t *testing.T) {
 
 	registry := NewToolsetRegistry()
 
-	assert.NotNil(t, registry)
-	assert.NotNil(t, registry.toolsets)
+	assert.NotNil(registry)
+	assert.NotNil(registry.toolsets)
 	assert.Empty(registry.toolsets)
 }
 
@@ -223,8 +217,8 @@ func TestToolsetRegistry_GetToolsForToolsets(t *testing.T) {
 	readOnlyTool := ToolDefinition{
 		Tool: mcp.Tool{
 			Name: "read-only-tool",
-			Annotations: mcp.ToolAnnotation{
-				ReadOnlyHint: func() *bool { b := true; return &b }(),
+			Annotations: &mcp.ToolAnnotations{
+				ReadOnlyHint: true,
 			},
 		},
 	}
@@ -355,8 +349,8 @@ func TestToolsetRegistry_GetEnabledTools(t *testing.T) {
 	readOnlyTool := ToolDefinition{
 		Tool: mcp.Tool{
 			Name: "read-only-tool",
-			Annotations: mcp.ToolAnnotation{
-				ReadOnlyHint: func() *bool { b := true; return &b }(),
+			Annotations: &mcp.ToolAnnotations{
+				ReadOnlyHint: true,
 			},
 		},
 	}
@@ -413,8 +407,8 @@ func TestToolsetRegistry_GetMetadata(t *testing.T) {
 		assert := require.New(t)
 		readOnlyTool := ToolDefinition{
 			Tool: mcp.Tool{
-				Annotations: mcp.ToolAnnotation{
-					ReadOnlyHint: func() *bool { b := true; return &b }(),
+				Annotations: &mcp.ToolAnnotations{
+					ReadOnlyHint: true,
 				},
 			},
 		}
@@ -455,7 +449,7 @@ func TestToolsetRegistry_GetMetadata(t *testing.T) {
 			Name:        "Alpha Toolset",
 			Description: "First in alphabetical order",
 			Tools: []ToolDefinition{
-				{Tool: mcp.Tool{Annotations: mcp.ToolAnnotation{ReadOnlyHint: func() *bool { b := true; return &b }()}}},
+				{Tool: mcp.Tool{Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}}},
 				{Tool: mcp.Tool{}},
 			},
 		}
@@ -536,8 +530,8 @@ func TestToolsetRegistry_GetRequiredScopes(t *testing.T) {
 		assert := require.New(t)
 		readOnlyTool := ToolDefinition{
 			Tool: mcp.Tool{
-				Annotations: mcp.ToolAnnotation{
-					ReadOnlyHint: func() *bool { b := true; return &b }(),
+				Annotations: &mcp.ToolAnnotations{
+					ReadOnlyHint: true,
 				},
 			},
 			RequiredScopes: []string{"read_only"},
@@ -563,17 +557,15 @@ func TestToolsetRegistry_GetRequiredScopes(t *testing.T) {
 func TestNewTool(t *testing.T) {
 	assert := require.New(t)
 
-	mockHandler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{}, nil
-	}
+	mockRegister := func(s *mcp.Server) {}
 
 	tool := mcp.Tool{Name: "test-tool"}
 	scopes := []string{"read_test", "write_test"}
 
-	toolDef := NewTool(tool, mockHandler, scopes)
+	toolDef := NewTool(tool, mockRegister, scopes)
 
 	assert.Equal(tool, toolDef.Tool)
-	assert.NotNil(toolDef.Handler)
+	assert.NotNil(toolDef.Register)
 	assert.Equal(scopes, toolDef.RequiredScopes)
 }
 
@@ -632,10 +624,8 @@ func TestValidateToolsets(t *testing.T) {
 func TestCreateBuiltinToolsets(t *testing.T) {
 	assert := require.New(t)
 
-	client := &gobuildkite.Client{}
-
 	registry := NewToolsetRegistry()
-	builtin := CreateBuiltinToolsets(client, nil)
+	builtin := CreateBuiltinToolsets()
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered

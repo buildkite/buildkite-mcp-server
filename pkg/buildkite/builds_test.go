@@ -4,9 +4,10 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -42,8 +43,6 @@ var _ BuildsClient = (*MockBuildsClient)(nil)
 func TestWaitForBuildCompletes(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
-
 	// Track call count to simulate state changes
 	callCount := 0
 	client := &MockBuildsClient{
@@ -53,7 +52,7 @@ func TestWaitForBuildCompletes(t *testing.T) {
 			// First call returns running build, second call returns finished build
 			state := "running"
 			if callCount >= 2 {
-				state = "finished"
+				state = "passed"
 			}
 
 			return buildkite.Build{
@@ -69,34 +68,31 @@ func TestWaitForBuildCompletes(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := WaitForBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := WaitForBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test with short timeout to make test fast
-	request := mcp.CallToolRequest{
-		Params: struct {
-			Name      string    `json:"name"`
-			Arguments any       `json:"arguments,omitempty"`
-			Meta      *mcp.Meta `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]any{
-				"org_slug":      "org",
-				"pipeline_slug": "pipeline",
-				"build_number":  "1",
-				"wait_timeout":  10,
-			},
-			Meta: &mcp.Meta{}, // Add empty Meta to avoid nil pointer
-		},
-	}
-	result, err := handler(ctx, request)
+	request := createMCPRequest(t, map[string]any{
+		"org_slug":      "org",
+		"pipeline_slug": "pipeline",
+		"build_number":  "1",
+		"wait_timeout":  10,
+	})
+
+	result, _, err := handler(ctx, request, WaitForBuildArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
+	})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
 	assert.Contains(textContent.Text, `"id":"123"`)
 	assert.Contains(textContent.Text, `"number":1`)
-	assert.Contains(textContent.Text, `"state":"finished"`)
+	assert.Contains(textContent.Text, `"state":"passed"`)
 
 	// Should have been called at least twice (initial + polling)
 	assert.GreaterOrEqual(callCount, 2)
@@ -104,8 +100,6 @@ func TestWaitForBuildCompletes(t *testing.T) {
 
 func TestWaitForBuildTimeout(t *testing.T) {
 	assert := require.New(t)
-
-	ctx := context.Background()
 
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -115,6 +109,7 @@ func TestWaitForBuildTimeout(t *testing.T) {
 					Number:    1,
 					State:     "running",
 					CreatedAt: &buildkite.Timestamp{},
+					Jobs:      []buildkite.Job{{ID: "j1", State: "running"}, {ID: "j2", State: "passed"}},
 				}, &buildkite.Response{
 					Response: &http.Response{
 						StatusCode: 200,
@@ -123,82 +118,72 @@ func TestWaitForBuildTimeout(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := WaitForBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	// Use a short-lived context to simulate the MCP client timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ctx = ContextWithDeps(ctx, ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := WaitForBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	// Test with very short timeout (1 second)
-	request := mcp.CallToolRequest{
-		Params: struct {
-			Name      string    `json:"name"`
-			Arguments any       `json:"arguments,omitempty"`
-			Meta      *mcp.Meta `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]any{
-				"org_slug":      "org",
-				"pipeline_slug": "pipeline",
-				"build_number":  "1",
-				"wait_timeout":  1,
-			},
-			Meta: &mcp.Meta{}, // Add empty Meta to avoid nil pointer
-		},
-	}
-	result, err := handler(ctx, request)
+	request := createMCPRequest(t, map[string]any{})
+
+	result, _, err := handler(ctx, request, WaitForBuildArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
+	})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	// Should still return the build even if timeout occurs
-	assert.Contains(textContent.Text, `"id":"123"`)
-	assert.Contains(textContent.Text, `"state":"running"`)
+	// Should return a retry message when build is still running
+	assert.True(result.IsError)
+	assert.Contains(textContent.Text, `still "running"`)
+	assert.Contains(textContent.Text, "Call wait_for_build again")
 }
 
 func TestWaitForBuildMissingParameters(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
-	client := &MockBuildsClient{}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: &MockBuildsClient{}})
 
-	tool, typedHandler, _ := WaitForBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	tool, handler, _ := WaitForBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test missing org_slug
-	request := createMCPRequest(t, map[string]any{
-		"pipeline_slug": "pipeline",
-		"build_number":  "1",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, WaitForBuildArgs{
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "org_slug parameter is required")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org_slug parameter is required")
 
 	// Test missing pipeline_slug
-	request = createMCPRequest(t, map[string]any{
-		"org_slug":     "org",
-		"build_number": "1",
+	result, _, err = handler(ctx, request, WaitForBuildArgs{
+		OrgSlug:     "org",
+		BuildNumber: "1",
 	})
-	result, err = handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "pipeline_slug parameter is required")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "pipeline_slug parameter is required")
 
 	// Test missing build_number
-	request = createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
+	result, _, err = handler(ctx, request, WaitForBuildArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
 	})
-	result, err = handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "build_number parameter is required")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "build_number parameter is required")
 }
 
 func TestGetBuildDefault(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 			// Return build without jobs
@@ -215,18 +200,19 @@ func TestGetBuildDefault(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := GetBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := GetBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test default behavior - jobs always excluded, summary always included
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
-		"build_number":  "1",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetBuildArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -241,7 +227,6 @@ func TestGetBuildDefault(t *testing.T) {
 func TestGetBuildWithJobSummary(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 			// Create a build with some jobs to test summary functionality
@@ -264,18 +249,19 @@ func TestGetBuildWithJobSummary(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := GetBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := GetBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test behavior - jobs always excluded, summary always shown
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
-		"build_number":  "1",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetBuildArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -288,7 +274,6 @@ func TestGetBuildWithJobSummary(t *testing.T) {
 func TestListBuilds(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	var capturedOptions *buildkite.BuildsListOptions
 	client := &MockBuildsClient{
 		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
@@ -308,16 +293,17 @@ func TestListBuilds(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := ListBuilds(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := ListBuilds()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, ListBuildsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -340,7 +326,6 @@ func TestListBuilds(t *testing.T) {
 func TestListBuildsWithCustomPagination(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	var capturedOptions *buildkite.BuildsListOptions
 	client := &MockBuildsClient{
 		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
@@ -360,19 +345,20 @@ func TestListBuildsWithCustomPagination(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := ListBuilds(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := ListBuilds()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test with custom pagination parameters
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
-		"page":          float64(3),
-		"per_page":      float64(50),
+	request := createMCPRequest(t, map[string]any{})
+	_, _, err := handler(ctx, request, ListBuildsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		Page:         3,
+		PerPage:      50,
 	})
-	_, err := handler(ctx, request)
 	assert.NoError(err)
 
 	// Verify custom pagination parameters were used
@@ -385,7 +371,6 @@ func TestListBuildsWithCustomPagination(t *testing.T) {
 func TestListBuildsWithBranchFilter(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	var capturedOptions *buildkite.BuildsListOptions
 	client := &MockBuildsClient{
 		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
@@ -405,18 +390,19 @@ func TestListBuildsWithBranchFilter(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := ListBuilds(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := ListBuilds()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test with branch filter
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
-		"branch":        "main",
+	request := createMCPRequest(t, map[string]any{})
+	_, _, err := handler(ctx, request, ListBuildsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		Branch:       "main",
 	})
-	_, err := handler(ctx, request)
 	assert.NoError(err)
 
 	// Verify branch filter was applied
@@ -429,7 +415,6 @@ func TestListBuildsWithBranchFilter(t *testing.T) {
 func TestGetBuildTestEngineRuns(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 			// Return build with test engine data
@@ -462,8 +447,9 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := GetBuildTestEngineRuns(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := GetBuildTestEngineRuns()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
@@ -472,12 +458,12 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 	assert.Contains(tool.Description, "test engine runs")
 
 	// Test successful request
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
-		"build_number":  "1",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetBuildTestEngineRunsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -490,7 +476,6 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 			// Return build without test engine data
@@ -506,15 +491,16 @@ func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
 		},
 	}
 
-	_, typedHandler, _ := GetBuildTestEngineRuns(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
 
-	request := createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
-		"build_number":  "1",
+	_, handler, _ := GetBuildTestEngineRuns()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetBuildTestEngineRunsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -525,47 +511,42 @@ func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
 func TestGetBuildTestEngineRunsMissingParameters(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
-	client := &MockBuildsClient{}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: &MockBuildsClient{}})
 
-	_, typedHandler, _ := GetBuildTestEngineRuns(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	_, handler, _ := GetBuildTestEngineRuns()
 
 	// Test missing org parameter
-	request := createMCPRequest(t, map[string]any{
-		"pipeline_slug": "pipeline",
-		"build_number":  "1",
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetBuildTestEngineRunsArgs{
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
 	})
-	result, err := handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "org_slug")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org_slug")
 
 	// Test missing pipeline_slug parameter
-	request = createMCPRequest(t, map[string]any{
-		"org_slug":     "org",
-		"build_number": "1",
+	result, _, err = handler(ctx, request, GetBuildTestEngineRunsArgs{
+		OrgSlug:     "org",
+		BuildNumber: "1",
 	})
-	result, err = handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "pipeline_slug")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "pipeline_slug")
 
 	// Test missing build_number parameter
-	request = createMCPRequest(t, map[string]any{
-		"org_slug":      "org",
-		"pipeline_slug": "pipeline",
+	result, _, err = handler(ctx, request, GetBuildTestEngineRunsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
 	})
-	result, err = handler(ctx, request)
 	assert.NoError(err)
 	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(mcp.TextContent).Text, "build_number")
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "build_number")
 }
 
 func TestCreateBuild(t *testing.T) {
 	assert := require.New(t)
 
-	ctx := context.Background()
 	client := &MockBuildsClient{
 		CreateFunc: func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error) {
 			// Validate required fields
@@ -595,7 +576,9 @@ func TestCreateBuild(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := CreateBuild(client)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := CreateBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
@@ -616,40 +599,15 @@ func TestCreateBuild(t *testing.T) {
 		},
 	}
 
-	result, err := handler(ctx, request, args)
+	result, _, err := handler(ctx, request, args)
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
 	assert.JSONEq(`{"id":"123","number":1,"state":"created","blocked":false,"author":{},"env":{"ENV_VAR":"value"},"created_at":"0001-01-01T00:00:00Z","meta_data":{"meta_key":"meta_value"},"creator":{"avatar_url":"","created_at":null,"email":"","id":"","name":""}}`, textContent.Text)
 }
 
-func TestCalculatePercentage(t *testing.T) {
-	assert := require.New(t)
-
-	// Test zero division case - should return 0 instead of panicking
-	result := calculatePercentage(0, 0)
-	assert.Equal(0, result)
-
-	// Test normal completion percentage calculations
-	result = calculatePercentage(10, 3)
-	assert.Equal(70, result) // (10-3)*100/10 = 70%
-
-	// Test 100% completion
-	result = calculatePercentage(5, 0)
-	assert.Equal(100, result) // (5-0)*100/5 = 100%
-
-	// Test 0% completion
-	result = calculatePercentage(8, 8)
-	assert.Equal(0, result) // (8-8)*100/8 = 0%
-
-	// Test with single item
-	result = calculatePercentage(1, 0)
-	assert.Equal(100, result) // (1-0)*100/1 = 100%
-}
-
 func TestGetBuildWithJobStateFilter(t *testing.T) {
 	assert := require.New(t)
-	ctx := context.Background()
 
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -669,28 +627,21 @@ func TestGetBuildWithJobStateFilter(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := GetBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := GetBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	t.Run("filter by single state", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
-				Arguments: map[string]any{
-					"org_slug":      "org",
-					"pipeline_slug": "pipeline",
-					"build_number":  "1",
-					"detail_level":  "full",
-					"job_state":     "failed",
-				},
-			},
-		}
-		result, err := handler(ctx, request)
+		request := createMCPRequest(t, map[string]any{})
+		result, _, err := handler(ctx, request, GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+			DetailLevel:  "full",
+			JobState:     "failed",
+		})
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
@@ -701,22 +652,14 @@ func TestGetBuildWithJobStateFilter(t *testing.T) {
 	})
 
 	t.Run("filter by multiple states", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
-				Arguments: map[string]any{
-					"org_slug":      "org",
-					"pipeline_slug": "pipeline",
-					"build_number":  "1",
-					"detail_level":  "full",
-					"job_state":     "failed,broken",
-				},
-			},
-		}
-		result, err := handler(ctx, request)
+		request := createMCPRequest(t, map[string]any{})
+		result, _, err := handler(ctx, request, GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+			DetailLevel:  "full",
+			JobState:     "failed,broken",
+		})
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
@@ -727,22 +670,14 @@ func TestGetBuildWithJobStateFilter(t *testing.T) {
 	})
 
 	t.Run("filter with whitespace handling", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
-				Arguments: map[string]any{
-					"org_slug":      "org",
-					"pipeline_slug": "pipeline",
-					"build_number":  "1",
-					"detail_level":  "full",
-					"job_state":     "failed, broken",
-				},
-			},
-		}
-		result, err := handler(ctx, request)
+		request := createMCPRequest(t, map[string]any{})
+		result, _, err := handler(ctx, request, GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+			DetailLevel:  "full",
+			JobState:     "failed, broken",
+		})
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
@@ -754,7 +689,6 @@ func TestGetBuildWithJobStateFilter(t *testing.T) {
 
 func TestGetBuildWithAgentStripping(t *testing.T) {
 	assert := require.New(t)
-	ctx := context.Background()
 
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -771,28 +705,21 @@ func TestGetBuildWithAgentStripping(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := GetBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := GetBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	t.Run("include_agent false strips details", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
-				Arguments: map[string]any{
-					"org_slug":      "org",
-					"pipeline_slug": "pipeline",
-					"build_number":  "1",
-					"detail_level":  "full",
-					"include_agent": false,
-				},
-			},
-		}
-		result, err := handler(ctx, request)
+		request := createMCPRequest(t, map[string]any{})
+		result, _, err := handler(ctx, request, GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+			DetailLevel:  "full",
+			IncludeAgent: false,
+		})
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
@@ -802,22 +729,14 @@ func TestGetBuildWithAgentStripping(t *testing.T) {
 	})
 
 	t.Run("include_agent true keeps details", func(t *testing.T) {
-		request := mcp.CallToolRequest{
-			Params: struct {
-				Name      string    `json:"name"`
-				Arguments any       `json:"arguments,omitempty"`
-				Meta      *mcp.Meta `json:"_meta,omitempty"`
-			}{
-				Arguments: map[string]any{
-					"org_slug":      "org",
-					"pipeline_slug": "pipeline",
-					"build_number":  "1",
-					"detail_level":  "full",
-					"include_agent": true,
-				},
-			},
-		}
-		result, err := handler(ctx, request)
+		request := createMCPRequest(t, map[string]any{})
+		result, _, err := handler(ctx, request, GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+			DetailLevel:  "full",
+			IncludeAgent: true,
+		})
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
@@ -829,7 +748,6 @@ func TestGetBuildWithAgentStripping(t *testing.T) {
 
 func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
 	assert := require.New(t)
-	ctx := context.Background()
 
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -849,27 +767,20 @@ func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := GetBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := GetBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := mcp.CallToolRequest{
-		Params: struct {
-			Name      string    `json:"name"`
-			Arguments any       `json:"arguments,omitempty"`
-			Meta      *mcp.Meta `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]any{
-				"org_slug":      "org",
-				"pipeline_slug": "pipeline",
-				"build_number":  "1",
-				"detail_level":  "detailed",
-				"job_state":     "failed",
-			},
-		},
-	}
-	result, err := handler(ctx, request)
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetBuildArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
+		DetailLevel:  "detailed",
+		JobState:     "failed",
+	})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
@@ -883,7 +794,6 @@ func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
 
 func TestGetBuildSummaryIgnoresJobFiltering(t *testing.T) {
 	assert := require.New(t)
-	ctx := context.Background()
 
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -901,27 +811,20 @@ func TestGetBuildSummaryIgnoresJobFiltering(t *testing.T) {
 		},
 	}
 
-	tool, typedHandler, _ := GetBuild(client)
-	handler := mcp.NewTypedToolHandler(typedHandler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+
+	tool, handler, _ := GetBuild()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
-	request := mcp.CallToolRequest{
-		Params: struct {
-			Name      string    `json:"name"`
-			Arguments any       `json:"arguments,omitempty"`
-			Meta      *mcp.Meta `json:"_meta,omitempty"`
-		}{
-			Arguments: map[string]any{
-				"org_slug":      "org",
-				"pipeline_slug": "pipeline",
-				"build_number":  "1",
-				"detail_level":  "summary",
-				"job_state":     "failed", // should be ignored
-			},
-		},
-	}
-	result, err := handler(ctx, request)
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetBuildArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
+		DetailLevel:  "summary",
+		JobState:     "failed", // should be ignored
+	})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)

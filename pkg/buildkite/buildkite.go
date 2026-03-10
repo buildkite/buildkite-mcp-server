@@ -5,8 +5,9 @@ import (
 	"fmt"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -16,27 +17,22 @@ type PaginatedResult[T any] struct {
 	Items   []T               `json:"items"`
 }
 
-func optionalPaginationParams(r mcp.CallToolRequest) (buildkite.ListOptions, error) {
-	page := r.GetInt("page", 1)
-	perPage := r.GetInt("perPage", 100)
+// PaginationParams is embedded in tool args structs to provide pagination fields.
+type PaginationParams struct {
+	Page    int `json:"page"`
+	PerPage int `json:"per_page"`
+}
+
+func paginationFromArgs(page, perPage int) buildkite.ListOptions {
+	if page == 0 {
+		page = 1
+	}
+	if perPage == 0 {
+		perPage = 100
+	}
 	return buildkite.ListOptions{
 		Page:    page,
 		PerPage: perPage,
-	}, nil
-}
-
-func withPagination() mcp.ToolOption {
-	return func(tool *mcp.Tool) {
-		mcp.WithNumber("page",
-			mcp.Description("Page number for pagination (min 1)"),
-			mcp.Min(1),
-		)(tool)
-
-		mcp.WithNumber("perPage",
-			mcp.Description("Results per page for pagination (min 1, max 100)"),
-			mcp.Min(1),
-			mcp.Max(100),
-		)(tool)
 	}
 }
 
@@ -57,28 +53,13 @@ type ClientSidePaginatedResult[T any] struct {
 	HasPrev    bool `json:"has_prev"`
 }
 
-// withClientSidePagination adds client-side pagination options to a tool
-func withClientSidePagination() mcp.ToolOption {
-	return func(tool *mcp.Tool) {
-		mcp.WithNumber("page",
-			mcp.Description("Page number for pagination (min 1)"),
-			mcp.Min(1),
-		)(tool)
-
-		mcp.WithNumber("perPage",
-			mcp.Description("Results per page for pagination (min 1, max 100)"),
-			mcp.Min(1),
-			mcp.Max(100),
-		)(tool)
+func clientSidePaginationFromArgs(page, perPage int) ClientSidePaginationParams {
+	if page == 0 {
+		page = 1
 	}
-}
-
-// getClientSidePaginationParams extracts client-side pagination parameters from request
-// Always returns pagination params with sensible defaults
-func getClientSidePaginationParams(r mcp.CallToolRequest) ClientSidePaginationParams {
-	page := r.GetInt("page", 1)
-	perPage := r.GetInt("perPage", 25) // Default page size for client-side pagination
-
+	if perPage == 0 {
+		perPage = 25
+	}
 	return ClientSidePaginationParams{
 		Page:    page,
 		PerPage: perPage,
@@ -117,15 +98,15 @@ func applyClientSidePagination[T any](items []T, params ClientSidePaginationPara
 	}
 }
 
-func mcpTextResult(span trace.Span, result any) (*mcp.CallToolResult, error) {
+func mcpTextResult(span trace.Span, result any) (*mcp.CallToolResult, any, error) {
 	r, err := json.Marshal(result)
 	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil
+		return utils.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil, nil
 	}
 
 	span.SetAttributes(
 		attribute.Int("estimated_tokens", tokens.EstimateTokens(string(r))),
 	)
 
-	return mcp.NewToolResultText(string(r)), nil
+	return utils.NewToolResultText(string(r)), nil, nil
 }

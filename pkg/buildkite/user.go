@@ -4,34 +4,38 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type UserClient interface {
 	CurrentUser(ctx context.Context) (buildkite.User, *buildkite.Response, error)
 }
 
-func CurrentUser(client UserClient) (tool mcp.Tool, handler server.ToolHandlerFunc, scopes []string) {
-	tool = mcp.NewTool("current_user",
-		mcp.WithDescription("Get details about the user account that owns the API token, including name, email, avatar, and account creation date"),
-		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+type CurrentUserArgs struct{}
+
+func CurrentUser() (mcp.Tool, mcp.ToolHandlerFor[CurrentUserArgs, any], []string) {
+	tool := mcp.Tool{
+		Name:        "current_user",
+		Description: "Get details about the user account that owns the API token, including name, email, avatar, and account creation date",
+		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Current User",
-			ReadOnlyHint: mcp.ToBoolPtr(true),
-		}),
-	)
-	handler = func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			ReadOnlyHint: true,
+		},
+	}
+	handler := func(ctx context.Context, request *mcp.CallToolRequest, args CurrentUserArgs) (*mcp.CallToolResult, any, error) {
 		ctx, span := trace.Start(ctx, "buildkite.CurrentUser")
 		defer span.End()
 
-		user, _, err := client.CurrentUser(ctx)
+		deps := DepsFromContext(ctx)
+		user, _, err := deps.UserClient.CurrentUser(ctx)
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return utils.NewToolResultError(err.Error()), nil, nil
 		}
 
 		return mcpTextResult(span, &user)
 	}
-	scopes = []string{"read_user"}
-	return
+	scopes := []string{"read_user"}
+	return tool, handler, scopes
 }

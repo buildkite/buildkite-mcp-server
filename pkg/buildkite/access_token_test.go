@@ -27,7 +27,6 @@ func TestAccessToken(t *testing.T) {
 	assert := require.New(t)
 	testTime := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	ctx := context.Background()
 	client := &MockAccessTokenClient{
 		GetFunc: func(ctx context.Context) (buildkite.AccessToken, *buildkite.Response, error) {
 			return buildkite.AccessToken{
@@ -53,12 +52,14 @@ func TestAccessToken(t *testing.T) {
 		},
 	}
 
-	tool, handler, _ := AccessToken(client)
-	assert.NotNil(t, tool)
-	assert.NotNil(t, handler)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{AccessTokensClient: client})
+
+	tool, handler, _ := AccessToken()
+	assert.NotNil(tool)
+	assert.NotNil(handler)
 
 	request := createMCPRequest(t, map[string]any{})
-	result, err := handler(ctx, request)
+	result, _, err := handler(ctx, request, AccessTokenArgs{})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
