@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/alecthomas/kong v1.14.0
 	github.com/buildkite/buildkite-logs v0.6.7
-	github.com/buildkite/go-buildkite/v4 v4.14.1
+	github.com/buildkite/go-buildkite/v4 v4.16.0
 	github.com/google/jsonschema-go v0.4.2
 	github.com/mattn/go-isatty v0.0.20
 	github.com/modelcontextprotocol/go-sdk v1.4.0
