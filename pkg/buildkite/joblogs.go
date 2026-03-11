@@ -85,7 +85,7 @@ func newParquetReader(ctx context.Context, client BuildkiteLogsClient, params Jo
 		return nil, fmt.Errorf("failed to download/cache logs: %w", err)
 	}
 
-	return buildkitelogs.NewParquetReader(cacheFilePath), nil
+	return buildkitelogs.NewParquetReader(ctx, cacheFilePath), nil
 }
 
 func parseCacheTTL(ttlStr string) time.Duration {
