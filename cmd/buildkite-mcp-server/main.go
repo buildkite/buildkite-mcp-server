@@ -27,6 +27,7 @@ var (
 		APITokenFrom1Password string            `help:"The 1Password item to read the Buildkite API token from. Format: 'op://vault/item/field'" env:"BUILDKITE_API_TOKEN_FROM_1PASSWORD"`
 		BaseURL               string            `help:"The base URL of the Buildkite API to use." env:"BUILDKITE_BASE_URL" default:"https://api.buildkite.com/"`
 		CacheURL              string            `help:"The blob storage URL for job logs cache." env:"BKLOG_CACHE_URL"`
+		MaxLogBytes           *int64            `help:"Maximum log size in bytes. Set to 0 to disable the limit." env:"BKLOG_MAX_LOG_BYTES" default:"104857600"`
 		Debug                 bool              `help:"Enable debug mode." env:"DEBUG"`
 		OTELExporter          string            `help:"OpenTelemetry exporter to enable. Options are 'http/protobuf', 'grpc', or 'noop'." enum:"http/protobuf, grpc, noop" env:"OTEL_EXPORTER_OTLP_PROTOCOL" default:"noop"`
 		HTTPHeaders           []string          `help:"Additional HTTP headers to send with every request. Format: 'Key: Value'" name:"http-header" env:"BUILDKITE_HTTP_HEADERS"`
@@ -82,7 +83,12 @@ func run(ctx context.Context, cmd *kong.Context) error {
 	}
 
 	// Create ParquetClient with cache URL from flag/env (uses upstream library's high-level client)
-	buildkiteLogsClient, err := buildkitelogs.NewClient(ctx, client, cli.CacheURL)
+	var clientOpts []buildkitelogs.ClientOption
+	if cli.MaxLogBytes != nil {
+		clientOpts = append(clientOpts, buildkitelogs.WithMaxLogBytes(*cli.MaxLogBytes))
+	}
+
+	buildkiteLogsClient, err := buildkitelogs.NewClient(ctx, client, cli.CacheURL, clientOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create buildkite logs client: %w", err)
 	}
