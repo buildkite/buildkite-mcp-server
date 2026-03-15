@@ -92,6 +92,7 @@ func run(ctx context.Context, cmd *kong.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create buildkite logs client: %w", err)
 	}
+	defer buildkiteLogsClient.Close()
 
 	buildkiteLogsClient.Hooks().AddAfterCacheCheck(func(ctx context.Context, result *buildkitelogs.CacheCheckResult) {
 		log.Ctx(ctx).Debug().Str("org", result.Org).Str("pipeline", result.Pipeline).Str("build", result.Build).Str("job", result.Job).Dur("time_taken", result.Duration).Msg("Checked job logs cache")

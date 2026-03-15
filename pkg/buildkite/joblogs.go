@@ -16,7 +16,7 @@ import (
 
 // BuildkiteLogsClient interface for dependency injection (matches upstream library interface)
 type BuildkiteLogsClient interface {
-	DownloadAndCache(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error)
+	NewReader(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error)
 }
 
 // Verify that upstream BuildkiteLogsClient implements our interface
@@ -76,16 +76,16 @@ type LogResponse struct {
 // Use the library's SearchOptions
 type SearchOptions = buildkitelogs.SearchOptions
 
-// Real implementation using buildkite-logs-parquet library with injected client
+// Real implementation using buildkite-logs library with injected client
 func newParquetReader(ctx context.Context, client BuildkiteLogsClient, params JobLogsBaseParams) (*buildkitelogs.ParquetReader, error) {
 	ttl := parseCacheTTL(params.CacheTTL)
 
-	cacheFilePath, err := client.DownloadAndCache(ctx, params.OrgSlug, params.PipelineSlug, params.BuildNumber, params.JobID, ttl, params.ForceRefresh)
+	reader, err := client.NewReader(ctx, params.OrgSlug, params.PipelineSlug, params.BuildNumber, params.JobID, ttl, params.ForceRefresh)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download/cache logs: %w", err)
+		return nil, fmt.Errorf("failed to create log reader: %w", err)
 	}
 
-	return buildkitelogs.NewParquetReader(ctx, cacheFilePath), nil
+	return reader, nil
 }
 
 func parseCacheTTL(ttlStr string) time.Duration {
@@ -160,6 +160,7 @@ func SearchLogs() (mcp.Tool, mcp.ToolHandlerFor[SearchLogsParams, any], []string
 			if err != nil {
 				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
 			}
+			defer reader.Close()
 
 			opts := SearchOptions{
 				Pattern:       params.Pattern,
@@ -237,6 +238,7 @@ func TailLogs() (mcp.Tool, mcp.ToolHandlerFor[TailLogsParams, any], []string) {
 			if err != nil {
 				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
 			}
+			defer reader.Close()
 
 			fileInfo, err := reader.GetFileInfo()
 			if err != nil {
@@ -301,6 +303,7 @@ func ReadLogs() (mcp.Tool, mcp.ToolHandlerFor[ReadLogsParams, any], []string) {
 			if err != nil {
 				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
 			}
+			defer reader.Close()
 
 			var entries []buildkitelogs.ParquetLogEntry
 			count := 0
