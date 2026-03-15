@@ -6,20 +6,21 @@ import (
 	"testing"
 	"time"
 
+	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
 // MockBuildkiteLogsClient for testing
 type MockBuildkiteLogsClient struct {
-	DownloadAndCacheFunc func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error)
+	NewReaderFunc func(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error)
 }
 
-func (m *MockBuildkiteLogsClient) DownloadAndCache(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
-	if m.DownloadAndCacheFunc != nil {
-		return m.DownloadAndCacheFunc(ctx, org, pipeline, build, job, cacheTTL, forceRefresh)
+func (m *MockBuildkiteLogsClient) NewReader(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
+	if m.NewReaderFunc != nil {
+		return m.NewReaderFunc(ctx, org, pipeline, build, job, ttl, forceRefresh)
 	}
-	return "/tmp/test.parquet", nil
+	return buildkitelogs.NewParquetReader(ctx, "/tmp/test.parquet"), nil
 }
 
 var _ BuildkiteLogsClient = (*MockBuildkiteLogsClient)(nil)
@@ -104,12 +105,12 @@ func TestSearchLogsHandler(t *testing.T) {
 	assert := require.New(t)
 
 	mockClient := &MockBuildkiteLogsClient{
-		DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
+		NewReaderFunc: func(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
 			assert.Equal("test-org", org)
 			assert.Equal("test-pipeline", pipeline)
 			assert.Equal("123", build)
 			assert.Equal("job-456", job)
-			return "/tmp/test.parquet", nil
+			return buildkitelogs.NewParquetReader(ctx, "/tmp/test.parquet"), nil
 		},
 	}
 
@@ -136,8 +137,8 @@ func TestSearchLogsHandler(t *testing.T) {
 
 	t.Run("client error", func(t *testing.T) {
 		errorClient := &MockBuildkiteLogsClient{
-			DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
-				return "", errors.New("download failed")
+			NewReaderFunc: func(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
+				return nil, errors.New("download failed")
 			},
 		}
 
@@ -165,8 +166,8 @@ func TestTailLogsHandler(t *testing.T) {
 	assert := require.New(t)
 
 	mockClient := &MockBuildkiteLogsClient{
-		DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
-			return "/tmp/test.parquet", nil
+		NewReaderFunc: func(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
+			return buildkitelogs.NewParquetReader(ctx, "/tmp/test.parquet"), nil
 		},
 	}
 
@@ -197,8 +198,8 @@ func TestReadLogsHandler(t *testing.T) {
 	assert := require.New(t)
 
 	mockClient := &MockBuildkiteLogsClient{
-		DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
-			return "/tmp/test.parquet", nil
+		NewReaderFunc: func(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
+			return buildkitelogs.NewParquetReader(ctx, "/tmp/test.parquet"), nil
 		},
 	}
 
@@ -230,14 +231,14 @@ func TestNewParquetReader(t *testing.T) {
 
 	t.Run("successful creation", func(t *testing.T) {
 		mockClient := &MockBuildkiteLogsClient{
-			DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
+			NewReaderFunc: func(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
 				assert.Equal("test-org", org)
 				assert.Equal("test-pipeline", pipeline)
 				assert.Equal("123", build)
 				assert.Equal("job-456", job)
-				assert.Equal(5*time.Minute, cacheTTL)
+				assert.Equal(5*time.Minute, ttl)
 				assert.True(forceRefresh)
-				return "/tmp/test.parquet", nil
+				return buildkitelogs.NewParquetReader(ctx, "/tmp/test.parquet"), nil
 			},
 		}
 
@@ -259,8 +260,8 @@ func TestNewParquetReader(t *testing.T) {
 
 	t.Run("client error", func(t *testing.T) {
 		mockClient := &MockBuildkiteLogsClient{
-			DownloadAndCacheFunc: func(ctx context.Context, org, pipeline, build, job string, cacheTTL time.Duration, forceRefresh bool) (string, error) {
-				return "", errors.New("download failed")
+			NewReaderFunc: func(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
+				return nil, errors.New("download failed")
 			},
 		}
 
@@ -274,6 +275,6 @@ func TestNewParquetReader(t *testing.T) {
 		reader, err := newParquetReader(ctx, mockClient, params)
 		assert.Error(err)
 		assert.Nil(reader)
-		assert.Contains(err.Error(), "failed to download/cache logs")
+		assert.Contains(err.Error(), "failed to create log reader")
 	})
 }
