@@ -2,9 +2,7 @@ package buildkite
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
@@ -271,12 +269,7 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				}
 			}
 
-			r, err := json.Marshal(result)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to marshal builds: %w", err)
-			}
-
-			return utils.NewToolResultText(string(r)), nil, nil
+			return mcpTextResult(span, result)
 		}, []string{"read_builds"}
 }
 

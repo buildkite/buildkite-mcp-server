@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/buildkite/buildkite-mcp-server/pkg/sanitize"
 	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
@@ -104,9 +105,14 @@ func mcpTextResult(span trace.Span, result any) (*mcp.CallToolResult, any, error
 		return utils.NewToolResultError(fmt.Sprintf("failed to marshal result: %v", err)), nil, nil
 	}
 
+	sanitized, err := sanitize.SanitizeJSONBytes(r)
+	if err != nil {
+		return utils.NewToolResultError(fmt.Sprintf("failed to sanitize result: %v", err)), nil, nil
+	}
+
 	span.SetAttributes(
-		attribute.Int("estimated_tokens", tokens.EstimateTokens(string(r))),
+		attribute.Int("estimated_tokens", tokens.EstimateTokens(string(sanitized))),
 	)
 
-	return utils.NewToolResultText(string(r)), nil, nil
+	return utils.NewToolResultText(string(sanitized)), nil, nil
 }

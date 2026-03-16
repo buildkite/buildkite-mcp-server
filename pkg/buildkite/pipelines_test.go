@@ -208,7 +208,9 @@ steps:
 
 	textContent := getTextResult(t, result)
 	assert.Contains(textContent.Text, `"webhook":{"created":true,"note":"Pipeline and webhook created successfully."}`)
-	assert.Contains(textContent.Text, `"pipeline":{"id":"123","name":"Test Pipeline","slug":"test-pipeline"`)
+	assert.Contains(textContent.Text, `"id":"123"`)
+	assert.Contains(textContent.Text, `"name":"Test Pipeline"`)
+	assert.Contains(textContent.Text, `"slug":"test-pipeline"`)
 }
 
 func TestCreatePipelineWithWebhook(t *testing.T) {
@@ -287,7 +289,9 @@ steps:
 
 	textContent := getTextResult(t, result)
 	assert.Contains(textContent.Text, `"webhook":{"created":true,"note":"Pipeline and webhook created successfully."}`)
-	assert.Contains(textContent.Text, `"pipeline":{"id":"123","name":"Test Pipeline","slug":"test-pipeline"`)
+	assert.Contains(textContent.Text, `"id":"123"`)
+	assert.Contains(textContent.Text, `"name":"Test Pipeline"`)
+	assert.Contains(textContent.Text, `"slug":"test-pipeline"`)
 }
 
 func TestCreatePipelineWithWebhookError(t *testing.T) {

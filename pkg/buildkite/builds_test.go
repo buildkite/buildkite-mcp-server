@@ -86,7 +86,8 @@ func TestGetBuildDefault(t *testing.T) {
 	assert.Contains(textContent.Text, `"id":"123"`)
 	assert.Contains(textContent.Text, `"number":1`)
 	assert.Contains(textContent.Text, `"state":"running"`)
-	assert.Contains(textContent.Text, `"job_summary":{"total":0,"by_state":{}}`)
+	assert.Contains(textContent.Text, `"total":0`)
+	assert.Contains(textContent.Text, `"by_state":{}`)
 	assert.Contains(textContent.Text, `"jobs_total":0`)
 }
 
