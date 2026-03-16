@@ -65,10 +65,6 @@ func ListClusterQueues() (mcp.Tool, mcp.ToolHandlerFor[ListClusterQueuesArgs, an
 				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
-			if len(queues) == 0 {
-				return utils.NewToolResultText("No queues found"), nil, nil
-			}
-
 			result := PaginatedResult[buildkite.ClusterQueue]{
 				Items: queues,
 				Headers: map[string]string{

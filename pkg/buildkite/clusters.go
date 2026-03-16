@@ -58,10 +58,6 @@ func ListClusters() (mcp.Tool, mcp.ToolHandlerFor[ListClustersArgs, any], []stri
 				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
-			if len(clusters) == 0 {
-				return utils.NewToolResultText("No clusters found"), nil, nil
-			}
-
 			result := PaginatedResult[buildkite.Cluster]{
 				Items: clusters,
 				Headers: map[string]string{
