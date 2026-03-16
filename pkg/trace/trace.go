@@ -131,18 +131,18 @@ func NewMiddleware() mcp.Middleware {
 			ctx, span := Start(ctx, fmt.Sprintf("mcp.%s", method))
 			defer span.End()
 
-			span.SetAttributes(attribute.String("mcp.method", method))
+			span.SetAttributes(attribute.String("mcp.method", method), attribute.String("mcp.session_id", req.GetSession().ID()))
 
-			log.Debug().Str("mcp.method", method).Msg("Handling MCP request")
+			log.Debug().Str("mcp.method", method).Str("mcp.session_id", req.GetSession().ID()).Msg("Handling MCP request")
 
 			res, err := next(ctx, method, req)
 			if err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, err.Error())
-				log.Error().Err(err).Str("mcp.method", method).Msg("Error in MCP request")
+				log.Error().Err(err).Str("mcp.method", method).Str("mcp.session_id", req.GetSession().ID()).Msg("Error in MCP request")
 			} else {
 				span.SetStatus(codes.Ok, "OK")
-				log.Debug().Str("mcp.method", method).Msg("Completed MCP request successfully")
+				log.Debug().Str("mcp.method", method).Str("mcp.session_id", req.GetSession().ID()).Msg("Completed MCP request successfully")
 			}
 
 			return res, err
