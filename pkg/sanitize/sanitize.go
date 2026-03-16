@@ -214,8 +214,8 @@ var llmDelimiterRules = []delimiterRule{
 	{pattern: regexp.MustCompile(`<\|im_end\|>`), replacement: "<|_im_end_|>"},
 	{pattern: regexp.MustCompile(`<\|endoftext\|>`), replacement: "<|_endoftext_|>"},
 	// Anthropic-style (these appear as plain text in data)
-	{pattern: regexp.MustCompile(`(?m)^\s*\nHuman:\s`), replacement: "\nHuman: "},
-	{pattern: regexp.MustCompile(`(?m)^\s*\nAssistant:\s`), replacement: "\nAssistant: "},
+	{pattern: regexp.MustCompile(`(?m)^\s*\nHuman:\s`), replacement: "\nHuman_: "},
+	{pattern: regexp.MustCompile(`(?m)^\s*\nAssistant:\s`), replacement: "\nAssistant_: "},
 	// XML-style role tags — wrap tag name in underscores
 	{pattern: regexp.MustCompile(`(?i)</?(system|user|assistant|human|tool_result|function_call|function_result)>`), replaceFunc: true},
 }
