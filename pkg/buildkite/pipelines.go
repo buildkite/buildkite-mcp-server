@@ -3,8 +3,6 @@ package buildkite
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net/url"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
@@ -308,11 +306,6 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 				return utils.NewToolResultError("configuration is required"), nil, nil
 			}
 
-			// parse the URL to ensure it's valid
-			if _, err := url.Parse(args.RepositoryURL); err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("invalid repository URL: %s", err.Error())), nil, nil
-			}
-
 			span.SetAttributes(
 				attribute.String("name", args.Name),
 				attribute.String("repository_url", args.RepositoryURL),
@@ -409,11 +402,6 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 			}
 			if args.Configuration == "" {
 				return utils.NewToolResultError("configuration is required"), nil, nil
-			}
-
-			// parse the URL to ensure it's valid
-			if _, err := url.Parse(args.RepositoryURL); err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("invalid repository URL: %s", err.Error())), nil, nil
 			}
 
 			span.SetAttributes(
