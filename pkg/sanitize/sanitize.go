@@ -23,6 +23,17 @@ func Sanitize(s string) string {
 	return s
 }
 
+// SanitizePlainText applies the sanitization pipeline without HTML filtering.
+// Use this for plain text strings (e.g. error messages) that are not expected
+// to contain HTML and where angle brackets should be preserved literally.
+func SanitizePlainText(s string) string {
+	s = FilterInvisibleCharacters(s)
+	s = FilterControlCharacters(s)
+	s = FilterCodeFenceMetadata(s)
+	s = FilterLLMDelimiters(s)
+	return s
+}
+
 // invisibleRe matches zero-width characters, BiDi controls, Unicode tag characters,
 // and other invisible modifiers that can be used for prompt injection.
 var invisibleRe = regexp.MustCompile("[\u200B-\u200F\u2028-\u202F\u2060-\u2069\u206A-\u206F\uFEFF\uFFF9-\uFFFB" +
@@ -137,13 +148,22 @@ func getHTMLPolicy() *bluemonday.Policy {
 			"caption", "colgroup", "col")
 		p.AllowAttrs("colspan", "rowspan", "align", "valign").OnElements("th", "td")
 
-		// Spans with class (Buildkite uses CSS utility classes)
+		// Class attribute (Buildkite uses CSS utility classes on many elements)
 		p.AllowAttrs("class").OnElements("span", "div", "p", "td", "th", "tr", "table",
-			"pre", "code", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6")
+			"pre", "code", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6",
+			"dl", "dt", "dd", "details", "summary", "blockquote",
+			"b", "strong", "i", "em", "u", "s", "del", "ins",
+			"sub", "sup", "small", "mark", "abbr", "cite", "q",
+			"kbd", "samp", "var", "tt",
+			"thead", "tbody", "tfoot", "caption", "colgroup", "col")
+
+		// Title attribute (used for tooltips, e.g. timestamps)
+		p.AllowAttrs("title").OnElements("span", "div", "p", "abbr", "dfn",
+			"td", "th", "details", "summary")
 
 		// Images
 		p.AllowImages()
-		p.AllowAttrs("alt", "title").OnElements("img")
+		p.AllowAttrs("alt", "title", "draggable").OnElements("img")
 
 		// Links
 		p.AllowAttrs("href", "title", "rel").OnElements("a")
@@ -174,50 +194,42 @@ func FilterHTMLTags(s string) string {
 	return getHTMLPolicy().Sanitize(s)
 }
 
-// llmDelimiterPatterns matches common LLM prompt format markers that could be
-// used to break out of data context into prompt instructions.
-var llmDelimiterPatterns = []*regexp.Regexp{
-	// Llama/Mistral-style
-	regexp.MustCompile(`(?i)\[INST\]`),
-	regexp.MustCompile(`(?i)\[/INST\]`),
-	regexp.MustCompile(`(?i)<<SYS>>`),
-	regexp.MustCompile(`(?i)<</SYS>>`),
-	// ChatML-style
-	regexp.MustCompile(`<\|im_start\|>`),
-	regexp.MustCompile(`<\|im_end\|>`),
-	regexp.MustCompile(`<\|endoftext\|>`),
-	// Anthropic-style (these appear as plain text in data)
-	regexp.MustCompile(`(?m)^\s*\nHuman:\s`),
-	regexp.MustCompile(`(?m)^\s*\nAssistant:\s`),
-	// XML-style role tags that could be injected
-	regexp.MustCompile(`(?i)</?(system|user|assistant|human|tool_result|function_call|function_result)>`),
+// delimiterRule defines a pattern to match and how to replace it.
+type delimiterRule struct {
+	pattern     *regexp.Regexp
+	replacement string // used when replaceFunc is false
+	replaceFunc bool   // if true, use func-based replacement instead of static string
 }
 
-// llmDelimiterReplacements maps each pattern to its safe replacement.
-var llmDelimiterReplacements = []string{
-	"[_INST_]",
-	"[_/INST_]",
-	"<<_SYS_>>",
-	"<<_/SYS_>>",
-	"<|_im_start_|>",
-	"<|_im_end_|>",
-	"<|_endoftext_|>",
-	"\nHuman: ", // Remove leading newline that makes it look like a turn
-	"\nAssistant: ",
-	"", // XML role tags are stripped by the replacement function below
+// llmDelimiterRules matches common LLM prompt format markers that could be
+// used to break out of data context into prompt instructions.
+var llmDelimiterRules = []delimiterRule{
+	// Llama/Mistral-style
+	{pattern: regexp.MustCompile(`(?i)\[INST\]`), replacement: "[_INST_]"},
+	{pattern: regexp.MustCompile(`(?i)\[/INST\]`), replacement: "[_/INST_]"},
+	{pattern: regexp.MustCompile(`(?i)<<SYS>>`), replacement: "<<_SYS_>>"},
+	{pattern: regexp.MustCompile(`(?i)<</SYS>>`), replacement: "<<_/SYS_>>"},
+	// ChatML-style
+	{pattern: regexp.MustCompile(`<\|im_start\|>`), replacement: "<|_im_start_|>"},
+	{pattern: regexp.MustCompile(`<\|im_end\|>`), replacement: "<|_im_end_|>"},
+	{pattern: regexp.MustCompile(`<\|endoftext\|>`), replacement: "<|_endoftext_|>"},
+	// Anthropic-style (these appear as plain text in data)
+	{pattern: regexp.MustCompile(`(?m)^\s*\nHuman:\s`), replacement: "\nHuman: "},
+	{pattern: regexp.MustCompile(`(?m)^\s*\nAssistant:\s`), replacement: "\nAssistant: "},
+	// XML-style role tags — wrap tag name in underscores
+	{pattern: regexp.MustCompile(`(?i)</?(system|user|assistant|human|tool_result|function_call|function_result)>`), replaceFunc: true},
 }
 
 // FilterLLMDelimiters detects and neutralizes model prompt format markers
 // that attempt to break out of data context into prompt instructions.
 func FilterLLMDelimiters(s string) string {
-	for i, pattern := range llmDelimiterPatterns {
-		if i < len(llmDelimiterReplacements)-1 {
-			s = pattern.ReplaceAllString(s, llmDelimiterReplacements[i])
-		} else {
-			// For XML role tags, wrap the tag name in underscores
-			s = pattern.ReplaceAllStringFunc(s, func(match string) string {
+	for _, rule := range llmDelimiterRules {
+		if rule.replaceFunc {
+			s = rule.pattern.ReplaceAllStringFunc(s, func(match string) string {
 				return strings.ReplaceAll(strings.ReplaceAll(match, "<", "<_"), ">", "_>")
 			})
+		} else {
+			s = rule.pattern.ReplaceAllString(s, rule.replacement)
 		}
 	}
 	return s
