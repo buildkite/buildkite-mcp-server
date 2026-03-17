@@ -28,32 +28,32 @@ type JobLogsBaseParams struct {
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
 	JobID        string `json:"job_id"`
-	CacheTTL     string `json:"cache_ttl"`
-	ForceRefresh bool   `json:"force_refresh"`
+	CacheTTL     string `json:"cache_ttl,omitempty"`
+	ForceRefresh bool   `json:"force_refresh,omitempty"`
 }
 
 type SearchLogsParams struct {
 	JobLogsBaseParams
 	Pattern       string `json:"pattern"`
-	Context       int    `json:"context"`
-	BeforeContext int    `json:"before_context"`
-	AfterContext  int    `json:"after_context"`
-	CaseSensitive bool   `json:"case_sensitive"`
-	InvertMatch   bool   `json:"invert_match"`
-	Reverse       bool   `json:"reverse"`
-	SeekStart     int    `json:"seek_start"`
-	Limit         int    `json:"limit"`
+	Context       int    `json:"context,omitempty"`
+	BeforeContext int    `json:"before_context,omitempty"`
+	AfterContext  int    `json:"after_context,omitempty"`
+	CaseSensitive bool   `json:"case_sensitive,omitempty"`
+	InvertMatch   bool   `json:"invert_match,omitempty"`
+	Reverse       bool   `json:"reverse,omitempty"`
+	SeekStart     int    `json:"seek_start,omitempty"`
+	Limit         int    `json:"limit,omitempty"`
 }
 
 type TailLogsParams struct {
 	JobLogsBaseParams
-	Tail int `json:"tail"`
+	Tail int `json:"tail,omitempty"`
 }
 
 type ReadLogsParams struct {
 	JobLogsBaseParams
-	Seek  int `json:"seek"`
-	Limit int `json:"limit"`
+	Seek  int `json:"seek,omitempty"`
+	Limit int `json:"limit,omitempty"`
 }
 
 type TerseLogEntry struct {
