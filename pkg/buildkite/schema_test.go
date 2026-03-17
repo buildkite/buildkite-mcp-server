@@ -101,3 +101,36 @@ func TestGetFailedTestExecutionsArgsSchema(t *testing.T) {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
 }
+
+func TestReadLogsParamsSchema(t *testing.T) {
+	s := schemaFor[ReadLogsParams](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"cache_ttl", "force_refresh", "seek", "limit"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestSearchLogsParamsSchema(t *testing.T) {
+	s := schemaFor[SearchLogsParams](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pattern", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"cache_ttl", "force_refresh", "context", "before_context", "after_context", "case_sensitive", "invert_match", "reverse", "seek_start", "limit"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestTailLogsParamsSchema(t *testing.T) {
+	s := schemaFor[TailLogsParams](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"cache_ttl", "force_refresh", "tail"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
