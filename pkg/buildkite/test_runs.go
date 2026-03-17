@@ -45,14 +45,6 @@ func ListTestRuns() (mcp.Tool, mcp.ToolHandlerFor[ListTestRunsArgs, any], []stri
 			ctx, span := trace.Start(ctx, "buildkite.ListTestRuns")
 			defer span.End()
 
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-
-			if args.TestSuiteSlug == "" {
-				return utils.NewToolResultError("test_suite_slug is required"), nil, nil
-			}
-
 			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(
@@ -99,18 +91,6 @@ func GetTestRun() (mcp.Tool, mcp.ToolHandlerFor[GetTestRunArgs, any], []string) 
 		func(ctx context.Context, request *mcp.CallToolRequest, args GetTestRunArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetTestRun")
 			defer span.End()
-
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-
-			if args.TestSuiteSlug == "" {
-				return utils.NewToolResultError("test_suite_slug is required"), nil, nil
-			}
-
-			if args.RunID == "" {
-				return utils.NewToolResultError("run_id is required"), nil, nil
-			}
 
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),

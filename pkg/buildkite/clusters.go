@@ -38,10 +38,6 @@ func ListClusters() (mcp.Tool, mcp.ToolHandlerFor[ListClustersArgs, any], []stri
 			ctx, span := trace.Start(ctx, "buildkite.ListClusters")
 			defer span.End()
 
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-
 			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(
@@ -84,14 +80,6 @@ func GetCluster() (mcp.Tool, mcp.ToolHandlerFor[GetClusterArgs, any], []string) 
 		}, func(ctx context.Context, request *mcp.CallToolRequest, args GetClusterArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetCluster")
 			defer span.End()
-
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-
-			if args.ClusterID == "" {
-				return utils.NewToolResultError("cluster_id is required"), nil, nil
-			}
 
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),

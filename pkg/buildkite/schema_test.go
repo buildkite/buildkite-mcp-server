@@ -134,3 +134,110 @@ func TestTailLogsParamsSchema(t *testing.T) {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
 }
+
+func TestListArtifactsForBuildArgsSchema(t *testing.T) {
+	s := schemaFor[ListArtifactsForBuildArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"page", "per_page"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestListArtifactsForJobArgsSchema(t *testing.T) {
+	s := schemaFor[ListArtifactsForJobArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"page", "per_page"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestGetArtifactArgsSchema(t *testing.T) {
+	req := sortedRequired[GetArtifactArgs](t)
+	require.Equal(t, []string{"url"}, req)
+}
+
+func TestGetTestArgsSchema(t *testing.T) {
+	req := sortedRequired[GetTestArgs](t)
+	require.Equal(t, []string{"org_slug", "test_id", "test_suite_slug"}, req)
+}
+
+func TestListTestRunsArgsSchema(t *testing.T) {
+	s := schemaFor[ListTestRunsArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"org_slug", "test_suite_slug"}, req)
+
+	for _, opt := range []string{"page", "per_page"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestGetTestRunArgsSchema(t *testing.T) {
+	req := sortedRequired[GetTestRunArgs](t)
+	require.Equal(t, []string{"org_slug", "run_id", "test_suite_slug"}, req)
+}
+
+func TestListPipelinesArgsSchema(t *testing.T) {
+	s := schemaFor[ListPipelinesArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"org_slug"}, req)
+
+	for _, opt := range []string{"name", "repository", "page", "per_page", "detail_level"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestUnblockJobArgsSchema(t *testing.T) {
+	s := schemaFor[UnblockJobArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"fields"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestListClustersArgsSchema(t *testing.T) {
+	s := schemaFor[ListClustersArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"org_slug"}, req)
+
+	for _, opt := range []string{"page", "per_page"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestGetClusterArgsSchema(t *testing.T) {
+	req := sortedRequired[GetClusterArgs](t)
+	require.Equal(t, []string{"cluster_id", "org_slug"}, req)
+}
+
+func TestListClusterQueuesArgsSchema(t *testing.T) {
+	s := schemaFor[ListClusterQueuesArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"cluster_id", "org_slug"}, req)
+
+	for _, opt := range []string{"page", "per_page"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestGetClusterQueueArgsSchema(t *testing.T) {
+	req := sortedRequired[GetClusterQueueArgs](t)
+	require.Equal(t, []string{"cluster_id", "org_slug", "queue_id"}, req)
+}
+
+func TestGetBuildTestEngineRunsArgsSchema(t *testing.T) {
+	req := sortedRequired[GetBuildTestEngineRunsArgs](t)
+	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
+}

@@ -44,20 +44,6 @@ func UnblockJob() (mcp.Tool, mcp.ToolHandlerFor[UnblockJobArgs, any], []string) 
 			ctx, span := trace.Start(ctx, "buildkite.UnblockJob")
 			defer span.End()
 
-			// Validate required parameters
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug parameter is required"), nil, nil
-			}
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug parameter is required"), nil, nil
-			}
-			if args.BuildNumber == "" {
-				return utils.NewToolResultError("build_number parameter is required"), nil, nil
-			}
-			if args.JobID == "" {
-				return utils.NewToolResultError("job_id parameter is required"), nil, nil
-			}
-
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),

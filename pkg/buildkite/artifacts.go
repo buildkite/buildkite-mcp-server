@@ -112,16 +112,6 @@ func ListArtifactsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForBuild
 			ctx, span := trace.Start(ctx, "buildkite.ListArtifactsForBuild")
 			defer span.End()
 
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
-			}
-			if args.BuildNumber == "" {
-				return utils.NewToolResultError("build_number is required"), nil, nil
-			}
-
 			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(
@@ -167,19 +157,6 @@ func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs
 		func(ctx context.Context, request *mcp.CallToolRequest, args ListArtifactsForJobArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.ListArtifactsForJob")
 			defer span.End()
-
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
-			}
-			if args.BuildNumber == "" {
-				return utils.NewToolResultError("build_number is required"), nil, nil
-			}
-			if args.JobID == "" {
-				return utils.NewToolResultError("job_id is required"), nil, nil
-			}
 
 			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
@@ -228,10 +205,6 @@ func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string
 		func(ctx context.Context, request *mcp.CallToolRequest, args GetArtifactArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetArtifact")
 			defer span.End()
-
-			if args.URL == "" {
-				return utils.NewToolResultError("url is required"), nil, nil
-			}
 
 			artifactURL := args.URL
 

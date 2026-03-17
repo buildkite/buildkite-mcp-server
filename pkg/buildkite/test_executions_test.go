@@ -91,63 +91,6 @@ func TestGetFailedExecutions(t *testing.T) {
 	assert.Contains(textContent.Text, `"total":2`)
 }
 
-func TestGetFailedExecutionsMissingOrg(t *testing.T) {
-	assert := require.New(t)
-
-	mockClient := &MockTestExecutionsClient{}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
-
-	_, handler, _ := GetFailedTestExecutions()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
-		TestSuiteSlug: "suite1",
-		RunID:         "run1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org")
-}
-
-func TestGetFailedExecutionsMissingTestSuiteSlug(t *testing.T) {
-	assert := require.New(t)
-
-	mockClient := &MockTestExecutionsClient{}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
-
-	_, handler, _ := GetFailedTestExecutions()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
-		OrgSlug: "org",
-		RunID:   "run1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "test_suite_slug")
-}
-
-func TestGetFailedExecutionsMissingRunID(t *testing.T) {
-	assert := require.New(t)
-
-	mockClient := &MockTestExecutionsClient{}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestExecutionsClient: mockClient})
-
-	_, handler, _ := GetFailedTestExecutions()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetFailedTestExecutionsArgs{
-		OrgSlug:       "org",
-		TestSuiteSlug: "suite1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "run_id")
-}
-
 func TestGetFailedExecutionsWithError(t *testing.T) {
 	assert := require.New(t)
 

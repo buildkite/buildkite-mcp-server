@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v4"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -464,42 +463,6 @@ func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
 	textContent := getTextResult(t, result)
 	// Should return empty array when no test engine data
 	assert.Equal("null", textContent.Text)
-}
-
-func TestGetBuildTestEngineRunsMissingParameters(t *testing.T) {
-	assert := require.New(t)
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: &MockBuildsClient{}})
-
-	_, handler, _ := GetBuildTestEngineRuns()
-
-	// Test missing org parameter
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetBuildTestEngineRunsArgs{
-		PipelineSlug: "pipeline",
-		BuildNumber:  "1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org_slug")
-
-	// Test missing pipeline_slug parameter
-	result, _, err = handler(ctx, request, GetBuildTestEngineRunsArgs{
-		OrgSlug:     "org",
-		BuildNumber: "1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "pipeline_slug")
-
-	// Test missing build_number parameter
-	result, _, err = handler(ctx, request, GetBuildTestEngineRunsArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "build_number")
 }
 
 func TestCreateBuild(t *testing.T) {
