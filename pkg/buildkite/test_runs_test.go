@@ -125,42 +125,6 @@ func TestListTestRunsWithError(t *testing.T) {
 	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
 }
 
-func TestListTestRunsMissingOrg(t *testing.T) {
-	assert := require.New(t)
-
-	mockClient := &MockTestRunsClient{}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
-
-	_, handler, _ := ListTestRuns()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, ListTestRunsArgs{
-		TestSuiteSlug: "suite1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org")
-}
-
-func TestListTestRunsMissingTestSuiteSlug(t *testing.T) {
-	assert := require.New(t)
-
-	mockClient := &MockTestRunsClient{}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
-
-	_, handler, _ := ListTestRuns()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, ListTestRunsArgs{
-		OrgSlug: "org",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "test_suite_slug")
-}
-
 func TestGetTestRun(t *testing.T) {
 	assert := require.New(t)
 
@@ -230,63 +194,6 @@ func TestGetTestRunWithError(t *testing.T) {
 	assert.NoError(err)
 	assert.True(result.IsError)
 	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
-}
-
-func TestGetTestRunMissingOrg(t *testing.T) {
-	assert := require.New(t)
-
-	mockClient := &MockTestRunsClient{}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
-
-	_, handler, _ := GetTestRun()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetTestRunArgs{
-		TestSuiteSlug: "suite1",
-		RunID:         "run1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "org")
-}
-
-func TestGetTestRunMissingTestSuiteSlug(t *testing.T) {
-	assert := require.New(t)
-
-	mockClient := &MockTestRunsClient{}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
-
-	_, handler, _ := GetTestRun()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetTestRunArgs{
-		OrgSlug: "org",
-		RunID:   "run1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "test_suite_slug")
-}
-
-func TestGetTestRunMissingRunID(t *testing.T) {
-	assert := require.New(t)
-
-	mockClient := &MockTestRunsClient{}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestRunsClient: mockClient})
-
-	_, handler, _ := GetTestRun()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetTestRunArgs{
-		OrgSlug:       "org",
-		TestSuiteSlug: "suite1",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "run_id")
 }
 
 func TestGetTestRunReturnsBuildID(t *testing.T) {

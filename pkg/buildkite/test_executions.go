@@ -36,18 +36,6 @@ func GetFailedTestExecutions() (mcp.Tool, mcp.ToolHandlerFor[GetFailedTestExecut
 			ctx, span := trace.Start(ctx, "buildkite.GetFailedExecutions")
 			defer span.End()
 
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-
-			if args.TestSuiteSlug == "" {
-				return utils.NewToolResultError("test_suite_slug is required"), nil, nil
-			}
-
-			if args.RunID == "" {
-				return utils.NewToolResultError("run_id is required"), nil, nil
-			}
-
 			// Get client-side pagination parameters (always enabled)
 			paginationParams := clientSidePaginationFromArgs(args.Page, args.PerPage)
 

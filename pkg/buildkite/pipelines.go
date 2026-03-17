@@ -51,10 +51,6 @@ func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []st
 			ctx, span := trace.Start(ctx, "buildkite.ListPipelines")
 			defer span.End()
 
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-
 			// Set defaults
 			if args.DetailLevel == "" {
 				args.DetailLevel = "summary"
@@ -133,13 +129,6 @@ func GetPipeline() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineArgs, any], []string
 		func(ctx context.Context, request *mcp.CallToolRequest, args GetPipelineArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetPipeline")
 			defer span.End()
-
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
-			}
 
 			// Set default
 			if args.DetailLevel == "" {
@@ -290,22 +279,6 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 			ctx, span := trace.Start(ctx, "buildkite.CreatePipeline")
 			defer span.End()
 
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-			if args.Name == "" {
-				return utils.NewToolResultError("name is required"), nil, nil
-			}
-			if args.RepositoryURL == "" {
-				return utils.NewToolResultError("repository_url is required"), nil, nil
-			}
-			if args.ClusterID == "" {
-				return utils.NewToolResultError("cluster_id is required"), nil, nil
-			}
-			if args.Configuration == "" {
-				return utils.NewToolResultError("configuration is required"), nil, nil
-			}
-
 			span.SetAttributes(
 				attribute.String("name", args.Name),
 				attribute.String("repository_url", args.RepositoryURL),
@@ -389,20 +362,6 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 		}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.UpdatePipeline")
 			defer span.End()
-
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-			if args.RepositoryURL == "" {
-				return utils.NewToolResultError("repository_url is required"), nil, nil
-			}
-
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
-			}
-			if args.Configuration == "" {
-				return utils.NewToolResultError("configuration is required"), nil, nil
-			}
 
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),

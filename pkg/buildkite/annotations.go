@@ -36,18 +36,6 @@ func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], 
 			ctx, span := trace.Start(ctx, "buildkite.ListAnnotations")
 			defer span.End()
 
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug is required"), nil, nil
-			}
-
-			if args.BuildNumber == "" {
-				return utils.NewToolResultError("build_number is required"), nil, nil
-			}
-
 			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 			span.SetAttributes(

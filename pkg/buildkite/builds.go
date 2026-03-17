@@ -156,11 +156,6 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			ctx, span := trace.Start(ctx, "buildkite.ListBuilds")
 			defer span.End()
 
-			// Validate required parameters
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug parameter is required"), nil, nil
-			}
-
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),
@@ -286,17 +281,6 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 			ctx, span := trace.Start(ctx, "buildkite.GetBuildTestEngineRuns")
 			defer span.End()
 
-			// Validate required parameters
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug parameter is required"), nil, nil
-			}
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug parameter is required"), nil, nil
-			}
-			if args.BuildNumber == "" {
-				return utils.NewToolResultError("build_number parameter is required"), nil, nil
-			}
-
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),
@@ -340,17 +324,6 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 		func(ctx context.Context, request *mcp.CallToolRequest, args GetBuildArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetBuild")
 			defer span.End()
-
-			// Validate required parameters
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug parameter is required"), nil, nil
-			}
-			if args.PipelineSlug == "" {
-				return utils.NewToolResultError("pipeline_slug parameter is required"), nil, nil
-			}
-			if args.BuildNumber == "" {
-				return utils.NewToolResultError("build_number parameter is required"), nil, nil
-			}
 
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),

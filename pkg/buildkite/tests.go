@@ -33,18 +33,6 @@ func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {
 			ctx, span := trace.Start(ctx, "buildkite.GetTest")
 			defer span.End()
 
-			if args.OrgSlug == "" {
-				return utils.NewToolResultError("org_slug is required"), nil, nil
-			}
-
-			if args.TestSuiteSlug == "" {
-				return utils.NewToolResultError("test_suite_slug is required"), nil, nil
-			}
-
-			if args.TestID == "" {
-				return utils.NewToolResultError("test_id is required"), nil, nil
-			}
-
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("test_suite_slug", args.TestSuiteSlug),
