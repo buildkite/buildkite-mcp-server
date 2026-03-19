@@ -55,7 +55,9 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 
 	mux.HandleFunc("/health", healthHandler)
 
-	handler := mcp.NewStreamableHTTPHandler(factory, nil)
+	handler := mcp.NewStreamableHTTPHandler(factory, &mcp.StreamableHTTPOptions{
+		Stateless: true,
+	})
 	mux.Handle("/mcp", handler)
 
 	log.Ctx(ctx).Info().
