@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -122,30 +119,5 @@ func newExporter(ctx context.Context, exporter string) (sdktrace.SpanExporter, e
 		return otlptracegrpc.New(ctx)
 	default:
 		return tracetest.NewNoopExporter(), nil
-	}
-}
-
-func NewMiddleware() mcp.Middleware {
-	return func(next mcp.MethodHandler) mcp.MethodHandler {
-		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			ctx, span := Start(ctx, fmt.Sprintf("mcp.%s", method))
-			defer span.End()
-
-			span.SetAttributes(attribute.String("mcp.method", method), attribute.String("mcp.session_id", req.GetSession().ID()))
-
-			log.Debug().Str("mcp.method", method).Str("mcp.session_id", req.GetSession().ID()).Msg("Handling MCP request")
-
-			res, err := next(ctx, method, req)
-			if err != nil {
-				span.RecordError(err)
-				span.SetStatus(codes.Error, err.Error())
-				log.Error().Err(err).Str("mcp.method", method).Str("mcp.session_id", req.GetSession().ID()).Msg("Error in MCP request")
-			} else {
-				span.SetStatus(codes.Ok, "OK")
-				log.Debug().Str("mcp.method", method).Str("mcp.session_id", req.GetSession().ID()).Msg("Completed MCP request successfully")
-			}
-
-			return res, err
-		}
 	}
 }
