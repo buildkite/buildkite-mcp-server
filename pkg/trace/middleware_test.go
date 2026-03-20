@@ -80,6 +80,7 @@ func TestNewMiddleware(t *testing.T) {
 	assert.Contains(attrs, "mcp.session_id", "mcp.session_id attribute should be set")
 	assert.Equal("test-client", attrs["mcp.client.name"], "mcp.client.name should be captured from initialize handshake")
 	assert.Equal("v0.0.1", attrs["mcp.client.version"], "mcp.client.version should be captured from initialize handshake")
+	assert.Equal("ping", attrs["mcp.tool_name"], "mcp.tool_name should be set for tools/call requests")
 }
 
 func TestNewMiddlewareHTTP(t *testing.T) {
@@ -109,4 +110,5 @@ func TestNewMiddlewareHTTP(t *testing.T) {
 	assert.NotEmpty(attrs["mcp.session_id"], "mcp.session_id should be non-empty over HTTP transport")
 	assert.Equal("test-client", attrs["mcp.client.name"], "mcp.client.name should be captured from initialize handshake")
 	assert.Equal("v0.0.1", attrs["mcp.client.version"], "mcp.client.version should be captured from initialize handshake")
+	assert.Equal("ping", attrs["mcp.tool_name"], "mcp.tool_name should be set for tools/call requests")
 }
