@@ -18,8 +18,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// set a default tracer name
-var tracerName = "buildkite-mcp-server"
+// tracerName is the instrumentation library name, fixed for this package.
+const tracerName = "buildkite-mcp-server"
 
 func NewProvider(ctx context.Context, exporter, name, version string) (*sdktrace.TracerProvider, error) {
 	exp, err := newExporter(ctx, exporter)
@@ -44,8 +44,6 @@ func NewProvider(ctx context.Context, exporter, name, version string) (*sdktrace
 			propagation.Baggage{},
 		),
 	)
-
-	tracerName = name
 
 	return tp, nil
 }
@@ -100,6 +98,7 @@ func newResource(cxt context.Context, name, version string) (*resource.Resource,
 	options = append(options, resource.WithHost())
 	options = append(options, resource.WithFromEnv())
 	options = append(options, resource.WithAttributes(
+		semconv.ServiceNameKey.String(name),
 		semconv.TelemetrySDKNameKey.String("otelconfig"),
 		semconv.TelemetrySDKLanguageGo,
 		semconv.TelemetrySDKVersionKey.String(version),

@@ -22,6 +22,10 @@ func NewMiddleware() mcp.Middleware {
 				attribute.String("mcp.session_id", sessionID),
 			}
 
+			if params, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok && params != nil {
+				attrs = append(attrs, attribute.String("mcp.tool_name", params.Name))
+			}
+
 			var clientName, clientVersion string
 			if ss, ok := req.GetSession().(*mcp.ServerSession); ok {
 				if ip := ss.InitializeParams(); ip != nil && ip.ClientInfo != nil && ip.ClientInfo.Name != "" {
