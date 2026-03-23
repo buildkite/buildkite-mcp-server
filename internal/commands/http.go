@@ -59,6 +59,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		mcp.NewStreamableHTTPHandler(factory, &mcp.StreamableHTTPOptions{
 			Stateless: true,
 		}),
+		`Bearer realm="buildkite"`,
 	)
 	mux.Handle("/mcp", handler)
 

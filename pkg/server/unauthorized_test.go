@@ -16,7 +16,7 @@ func TestNewHTTPUnauthorizedHandler_NormalRequest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"result":"ok"}`))
 	})
 
-	handler := NewHTTPUnauthorizedHandler(inner)
+	handler := NewHTTPUnauthorizedHandler(inner, `Bearer realm="buildkite"`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 
@@ -37,7 +37,7 @@ func TestNewHTTPUnauthorizedHandler_UnauthorizedSignal(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
 	})
 
-	handler := NewHTTPUnauthorizedHandler(inner)
+	handler := NewHTTPUnauthorizedHandler(inner, `Bearer realm="buildkite"`)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 

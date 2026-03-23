@@ -19,7 +19,10 @@ func signalUnauthorized(ctx context.Context) {
 // NewHTTPUnauthorizedHandler wraps an HTTP handler to return HTTP 401 when the
 // Buildkite API returns a 401, instead of a 200 with a JSON-RPC error body.
 // Works for both JSON and SSE transport modes in stateless operation.
-func NewHTTPUnauthorizedHandler(handler http.Handler) http.Handler {
+//
+// wwwAuthenticate is the value of the WWW-Authenticate header sent on 401
+// responses (e.g. `Bearer realm="buildkite"`).
+func NewHTTPUnauthorizedHandler(handler http.Handler, wwwAuthenticate string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flag := &atomic.Bool{}
 		ctx := context.WithValue(r.Context(), unauthorizedContextKey{}, flag)
@@ -34,7 +37,7 @@ func NewHTTPUnauthorizedHandler(handler http.Handler) http.Handler {
 			for k := range h {
 				delete(h, k)
 			}
-			h.Set("WWW-Authenticate", `Bearer realm="buildkite"`)
+			h.Set("WWW-Authenticate", wwwAuthenticate)
 			w.WriteHeader(http.StatusUnauthorized)
 		}
 	})
