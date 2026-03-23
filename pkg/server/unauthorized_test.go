@@ -30,7 +30,7 @@ func TestNewHTTPUnauthorizedHandler_UnauthorizedSignal(t *testing.T) {
 	// An inner handler that signals unauthorized via the context flag.
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Simulate the MCP middleware detecting ErrUnauthorized.
-		signalUnauthorized(r.Context())
+		SignalUnauthorized(r.Context())
 		// The interceptingWriter will discard these writes.
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -52,7 +52,7 @@ func TestNewHTTPUnauthorizedHandler_UnauthorizedSignal(t *testing.T) {
 func TestSignalUnauthorized_NoopWithoutContext(t *testing.T) {
 	// Should not panic when the context key is absent.
 	require.NotPanics(t, func() {
-		signalUnauthorized(context.Background())
+		SignalUnauthorized(context.Background())
 	})
 }
 
@@ -61,7 +61,7 @@ func TestSignalUnauthorized_SetsFlag(t *testing.T) {
 	ctx := context.WithValue(context.Background(), unauthorizedContextKey{}, flag)
 
 	require.False(t, flag.Load())
-	signalUnauthorized(ctx)
+	SignalUnauthorized(ctx)
 	require.True(t, flag.Load())
 }
 
