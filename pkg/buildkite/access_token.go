@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -30,7 +29,7 @@ func AccessToken() (mcp.Tool, mcp.ToolHandlerFor[AccessTokenArgs, any], []string
 			deps := DepsFromContext(ctx)
 			token, _, err := deps.AccessTokensClient.Get(ctx)
 			if err != nil {
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			return mcpTextResult(span, &token)

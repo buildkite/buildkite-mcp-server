@@ -158,7 +158,7 @@ func SearchLogs() (mcp.Tool, mcp.ToolHandlerFor[SearchLogsParams, any], []string
 			deps := DepsFromContext(ctx)
 			reader, err := newParquetReader(ctx, deps.BuildkiteLogsClient, params.JobLogsBaseParams)
 			if err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
+				return handleBuildkiteError(err)
 			}
 			defer reader.Close()
 
@@ -236,7 +236,7 @@ func TailLogs() (mcp.Tool, mcp.ToolHandlerFor[TailLogsParams, any], []string) {
 			deps := DepsFromContext(ctx)
 			reader, err := newParquetReader(ctx, deps.BuildkiteLogsClient, params.JobLogsBaseParams)
 			if err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
+				return handleBuildkiteError(err)
 			}
 			defer reader.Close()
 
@@ -301,7 +301,7 @@ func ReadLogs() (mcp.Tool, mcp.ToolHandlerFor[ReadLogsParams, any], []string) {
 			deps := DepsFromContext(ctx)
 			reader, err := newParquetReader(ctx, deps.BuildkiteLogsClient, params.JobLogsBaseParams)
 			if err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("Failed to create log reader: %v", err)), nil, nil
+				return handleBuildkiteError(err)
 			}
 			defer reader.Close()
 

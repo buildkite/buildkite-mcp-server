@@ -2,10 +2,8 @@ package buildkite
 
 import (
 	"context"
-	"errors"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
@@ -61,14 +59,7 @@ func UnblockJob() (mcp.Tool, mcp.ToolHandlerFor[UnblockJobArgs, any], []string) 
 			deps := DepsFromContext(ctx)
 			job, _, err := deps.JobsClient.UnblockJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, &unblockOptions)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			return mcpTextResult(span, &job)

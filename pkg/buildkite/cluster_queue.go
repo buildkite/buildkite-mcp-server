@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
@@ -54,7 +53,7 @@ func ListClusterQueues() (mcp.Tool, mcp.ToolHandlerFor[ListClusterQueuesArgs, an
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			result := PaginatedResult[buildkite.ClusterQueue]{
@@ -93,7 +92,7 @@ func GetClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[GetClusterQueueArgs, any], 
 			deps := DepsFromContext(ctx)
 			queue, _, err := deps.ClusterQueuesClient.Get(ctx, args.OrgSlug, args.ClusterID, args.QueueID)
 			if err != nil {
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			return mcpTextResult(span, &queue)

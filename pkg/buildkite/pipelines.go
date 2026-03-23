@@ -2,10 +2,8 @@ package buildkite
 
 import (
 	"context"
-	"errors"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
@@ -81,14 +79,7 @@ func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []st
 				Repository: args.Repository,
 			})
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			headers := map[string]string{"Link": resp.Header.Get("Link")}
@@ -144,14 +135,7 @@ func GetPipeline() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineArgs, any], []string
 			deps := DepsFromContext(ctx)
 			pipeline, _, err := deps.PipelinesClient.Get(ctx, args.OrgSlug, args.PipelineSlug)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			var result any
@@ -303,14 +287,7 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 			deps := DepsFromContext(ctx)
 			pipeline, _, err := deps.PipelinesClient.Create(ctx, args.OrgSlug, create)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			if args.CreateWebhook {
@@ -386,14 +363,7 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 			deps := DepsFromContext(ctx)
 			pipeline, _, err := deps.PipelinesClient.Update(ctx, args.OrgSlug, args.PipelineSlug, update)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			return mcpTextResult(span, &pipeline)

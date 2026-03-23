@@ -2,7 +2,6 @@ package buildkite
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
@@ -234,14 +233,7 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				builds, resp, err = deps.BuildsClient.ListByOrg(ctx, args.OrgSlug, options)
 			}
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			headers := map[string]string{
@@ -292,14 +284,7 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 				IncludeTestEngine: true,
 			})
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			// Extract just the test engine runs data
@@ -348,14 +333,7 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 			deps := DepsFromContext(ctx)
 			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			// Parse job states filter
@@ -470,14 +448,7 @@ func CreateBuild() (mcp.Tool, mcp.ToolHandlerFor[CreateBuildArgs, any], []string
 			deps := DepsFromContext(ctx)
 			build, _, err := deps.BuildsClient.Create(ctx, args.OrgSlug, args.PipelineSlug, createBuild)
 			if err != nil {
-				var errResp *buildkite.ErrorResponse
-				if errors.As(err, &errResp) {
-					if errResp.RawBody != nil {
-						return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
-					}
-				}
-
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			return mcpTextResult(span, &build)

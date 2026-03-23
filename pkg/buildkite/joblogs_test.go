@@ -158,7 +158,7 @@ func TestSearchLogsHandler(t *testing.T) {
 		result, _, err := errorHandler(errorCtx, createMCPRequest(t, map[string]any{}), params)
 		assert.NoError(err)
 		textContent := result.Content[0].(*mcp.TextContent)
-		assert.Contains(textContent.Text, "Failed to create log reader")
+		assert.Contains(textContent.Text, "failed to create log reader")
 	})
 }
 

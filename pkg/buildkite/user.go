@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v4"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -31,7 +30,7 @@ func CurrentUser() (mcp.Tool, mcp.ToolHandlerFor[CurrentUserArgs, any], []string
 		deps := DepsFromContext(ctx)
 		user, _, err := deps.UserClient.CurrentUser(ctx)
 		if err != nil {
-			return utils.NewToolResultError(err.Error()), nil, nil
+			return handleBuildkiteError(err)
 		}
 
 		return mcpTextResult(span, &user)
