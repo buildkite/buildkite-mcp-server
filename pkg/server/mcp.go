@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
@@ -18,6 +19,7 @@ type ToolsetOption func(*ToolsetConfig)
 type ToolsetConfig struct {
 	EnabledToolsets []string
 	ReadOnly        bool
+	OnUnauthorized  func()
 }
 
 // WithToolsets enables specific toolsets
@@ -31,6 +33,32 @@ func WithToolsets(toolsets ...string) ToolsetOption {
 func WithReadOnly(readOnly bool) ToolsetOption {
 	return func(cfg *ToolsetConfig) {
 		cfg.ReadOnly = readOnly
+	}
+}
+
+// WithOnUnauthorized registers a callback that fires when the Buildkite API returns a
+// 401. Library consumers use this to invalidate stored tokens and trigger reauth.
+func WithOnUnauthorized(cb func()) ToolsetOption {
+	return func(cfg *ToolsetConfig) {
+		cfg.OnUnauthorized = cb
+	}
+}
+
+// unauthorizedMiddleware intercepts ErrUnauthorized propagated from tool handlers.
+// It signals the HTTP layer (if present) and calls the optional library callback.
+func unauthorizedMiddleware(cb func()) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			result, err := next(ctx, method, req)
+			if err != nil && errors.Is(err, buildkite.ErrUnauthorized) {
+				log.Ctx(ctx).Warn().Msg("Buildkite API returned 401 unauthorized; token may be invalid or expired")
+				signalUnauthorized(ctx)
+				if cb != nil {
+					cb()
+				}
+			}
+			return result, err
+		}
 	}
 }
 
@@ -57,6 +85,7 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 		injectLoggerMiddleware(log.Logger),
 		trace.NewMiddleware(),
 		buildkite.InjectDepsMiddleware(deps),
+		unauthorizedMiddleware(cfg.OnUnauthorized),
 	)
 
 	// Register tools

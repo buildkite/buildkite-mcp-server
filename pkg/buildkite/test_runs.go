@@ -61,7 +61,7 @@ func ListTestRuns() (mcp.Tool, mcp.ToolHandlerFor[ListTestRunsArgs, any], []stri
 			deps := DepsFromContext(ctx)
 			testRuns, resp, err := deps.TestRunsClient.List(ctx, args.OrgSlug, args.TestSuiteSlug, options)
 			if err != nil {
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			result := PaginatedResult[buildkite.TestRun]{
@@ -101,7 +101,7 @@ func GetTestRun() (mcp.Tool, mcp.ToolHandlerFor[GetTestRunArgs, any], []string) 
 			deps := DepsFromContext(ctx)
 			testRun, resp, err := deps.TestRunsClient.Get(ctx, args.OrgSlug, args.TestSuiteSlug, args.RunID)
 			if err != nil {
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			if resp.StatusCode != http.StatusOK {

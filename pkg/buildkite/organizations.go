@@ -30,7 +30,7 @@ func UserTokenOrganization() (mcp.Tool, mcp.ToolHandlerFor[UserTokenOrganization
 			deps := DepsFromContext(ctx)
 			orgs, _, err := deps.OrganizationsClient.List(ctx, &buildkite.OrganizationListOptions{})
 			if err != nil {
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			if len(orgs) == 0 {

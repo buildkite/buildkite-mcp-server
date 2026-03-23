@@ -127,7 +127,7 @@ func ListArtifactsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForBuild
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			result := PaginatedResult[buildkite.Artifact]{
@@ -174,7 +174,7 @@ func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs
 				ListOptions: paginationParams,
 			})
 			if err != nil {
-				return utils.NewToolResultError(err.Error()), nil, nil
+				return handleBuildkiteError(err)
 			}
 
 			result := PaginatedResult[buildkite.Artifact]{
