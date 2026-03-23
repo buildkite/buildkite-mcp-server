@@ -8,9 +8,9 @@ import (
 
 type unauthorizedContextKey struct{}
 
-// signalUnauthorized sets the unauthorized flag in the context, if present.
+// SignalUnauthorized sets the unauthorized flag in the context, if present.
 // It is a no-op when not running in HTTP mode (i.e., when the context key is absent).
-func signalUnauthorized(ctx context.Context) {
+func SignalUnauthorized(ctx context.Context) {
 	if flag, ok := ctx.Value(unauthorizedContextKey{}).(*atomic.Bool); ok {
 		flag.Store(true)
 	}

@@ -52,7 +52,7 @@ func unauthorizedMiddleware(cb func()) mcp.Middleware {
 			result, err := next(ctx, method, req)
 			if err != nil && errors.Is(err, buildkite.ErrUnauthorized) {
 				log.Ctx(ctx).Warn().Msg("Buildkite API returned 401 unauthorized; token may be invalid or expired")
-				signalUnauthorized(ctx)
+				SignalUnauthorized(ctx)
 				if cb != nil {
 					cb()
 				}
