@@ -12,6 +12,9 @@ import (
 type ClustersClient interface {
 	List(ctx context.Context, org string, opts *buildkite.ClustersListOptions) ([]buildkite.Cluster, *buildkite.Response, error)
 	Get(ctx context.Context, org, id string) (buildkite.Cluster, *buildkite.Response, error)
+	Create(ctx context.Context, org string, cc buildkite.ClusterCreate) (buildkite.Cluster, *buildkite.Response, error)
+	Update(ctx context.Context, org, id string, cu buildkite.ClusterUpdate) (buildkite.Cluster, *buildkite.Response, error)
+	Delete(ctx context.Context, org, id string) (*buildkite.Response, error)
 }
 
 type ListClustersArgs struct {
@@ -21,6 +24,29 @@ type ListClustersArgs struct {
 }
 
 type GetClusterArgs struct {
+	OrgSlug   string `json:"org_slug"`
+	ClusterID string `json:"cluster_id"`
+}
+
+type CreateClusterArgs struct {
+	OrgSlug     string `json:"org_slug"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty" jsonschema:"Description of the cluster"`
+	Emoji       string `json:"emoji,omitempty" jsonschema:"Emoji for the cluster (e.g. :toolbox:)"`
+	Color       string `json:"color,omitempty" jsonschema:"Hex color code for the cluster (e.g. #A9CCE3)"`
+}
+
+type UpdateClusterArgs struct {
+	OrgSlug        string `json:"org_slug"`
+	ClusterID      string `json:"cluster_id"`
+	Name           string `json:"name,omitempty" jsonschema:"New name for the cluster"`
+	Description    string `json:"description,omitempty" jsonschema:"New description for the cluster"`
+	Emoji          string `json:"emoji,omitempty" jsonschema:"New emoji for the cluster"`
+	Color          string `json:"color,omitempty" jsonschema:"New hex color code for the cluster"`
+	DefaultQueueID string `json:"default_queue_id,omitempty" jsonschema:"ID of the default queue for the cluster"`
+}
+
+type DeleteClusterArgs struct {
 	OrgSlug   string `json:"org_slug"`
 	ClusterID string `json:"cluster_id"`
 }
@@ -93,4 +119,96 @@ func GetCluster() (mcp.Tool, mcp.ToolHandlerFor[GetClusterArgs, any], []string) 
 
 			return mcpTextResult(span, &cluster)
 		}, []string{"read_clusters"}
+}
+
+func CreateCluster() (mcp.Tool, mcp.ToolHandlerFor[CreateClusterArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "create_cluster",
+			Description: "Create a new cluster in an organization",
+			Annotations: &mcp.ToolAnnotations{
+				Title:           "Create Cluster",
+				DestructiveHint: boolPtr(false),
+			},
+		}, func(ctx context.Context, request *mcp.CallToolRequest, args CreateClusterArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.CreateCluster")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("name", args.Name),
+			)
+
+			deps := DepsFromContext(ctx)
+			cluster, _, err := deps.ClustersClient.Create(ctx, args.OrgSlug, buildkite.ClusterCreate{
+				Name:        args.Name,
+				Description: args.Description,
+				Emoji:       args.Emoji,
+				Color:       args.Color,
+			})
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			return mcpTextResult(span, &cluster)
+		}, []string{"write_clusters"}
+}
+
+func UpdateCluster() (mcp.Tool, mcp.ToolHandlerFor[UpdateClusterArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "update_cluster",
+			Description: "Update an existing cluster's name, description, emoji, color, or default queue",
+			Annotations: &mcp.ToolAnnotations{
+				Title:           "Update Cluster",
+				DestructiveHint: boolPtr(false),
+			},
+		}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdateClusterArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.UpdateCluster")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("cluster_id", args.ClusterID),
+			)
+
+			deps := DepsFromContext(ctx)
+			cluster, _, err := deps.ClustersClient.Update(ctx, args.OrgSlug, args.ClusterID, buildkite.ClusterUpdate{
+				Name:           args.Name,
+				Description:    args.Description,
+				Emoji:          args.Emoji,
+				Color:          args.Color,
+				DefaultQueueID: args.DefaultQueueID,
+			})
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			return mcpTextResult(span, &cluster)
+		}, []string{"write_clusters"}
+}
+
+func DeleteCluster() (mcp.Tool, mcp.ToolHandlerFor[DeleteClusterArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "delete_cluster",
+			Description: "Delete a cluster from an organization. This is a destructive operation that cannot be undone.",
+			Annotations: &mcp.ToolAnnotations{
+				Title:           "Delete Cluster",
+				DestructiveHint: boolPtr(true),
+			},
+		}, func(ctx context.Context, request *mcp.CallToolRequest, args DeleteClusterArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.DeleteCluster")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("cluster_id", args.ClusterID),
+			)
+
+			deps := DepsFromContext(ctx)
+			_, err := deps.ClustersClient.Delete(ctx, args.OrgSlug, args.ClusterID)
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			return mcpTextResult(span, "Cluster deleted successfully")
+		}, []string{"write_clusters"}
 }

@@ -99,6 +99,10 @@ func applyClientSidePagination[T any](items []T, params ClientSidePaginationPara
 	}
 }
 
+func boolPtr(b bool) *bool {
+	return &b
+}
+
 func mcpTextResult(span trace.Span, result any) (*mcp.CallToolResult, any, error) {
 	r, err := json.Marshal(result)
 	if err != nil {
