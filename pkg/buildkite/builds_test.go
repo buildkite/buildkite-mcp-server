@@ -134,7 +134,14 @@ func TestGetBuildWithJobSummary(t *testing.T) {
 	assert.Contains(textContent.Text, `"job_summary"`)
 	assert.Contains(textContent.Text, `"total":4`)
 	assert.Contains(textContent.Text, `"by_state":{"failed":1,"passed":1,"running":1,"waiting":1}`)
-	assert.NotContains(textContent.Text, `"jobs"`) // Jobs always excluded
+	// Lightweight job entries included with correct id, name, and state
+	assert.Contains(textContent.Text, `"jobs":[{"id":"job1"`)
+	assert.Contains(textContent.Text, `{"id":"job1","name":"","state":"passed"}`)
+	assert.Contains(textContent.Text, `{"id":"job2","name":"","state":"failed"}`)
+	assert.Contains(textContent.Text, `{"id":"job3","name":"","state":"running"}`)
+	assert.Contains(textContent.Text, `{"id":"job4","name":"","state":"waiting"}`)
+	// Full job objects should NOT be present (no agent, command, etc.)
+	assert.NotContains(textContent.Text, `"agent"`)
 }
 
 func TestListBuilds(t *testing.T) {
@@ -711,9 +718,14 @@ func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
 	assert.Contains(textContent.Text, `"total":2`)
 	// job_summary.by_state should only show failed count
 	assert.Contains(textContent.Text, `"failed":2`)
+	// jobs array should contain only the filtered entries
+	assert.Contains(textContent.Text, `{"id":"job2","name":"Test 2","state":"failed"}`)
+	assert.Contains(textContent.Text, `{"id":"job3","name":"Test 3","state":"failed"}`)
+	assert.NotContains(textContent.Text, `{"id":"job1"`)
+	assert.NotContains(textContent.Text, `{"id":"job4"`)
 }
 
-func TestGetBuildSummaryIgnoresJobFiltering(t *testing.T) {
+func TestGetBuildInvalidDetailLevel(t *testing.T) {
 	assert := require.New(t)
 
 	client := &MockBuildsClient{
@@ -722,10 +734,6 @@ func TestGetBuildSummaryIgnoresJobFiltering(t *testing.T) {
 					ID:     "123",
 					Number: 1,
 					State:  "failed",
-					Jobs: []buildkite.Job{
-						{ID: "job1", Name: "Test 1", State: "passed"},
-						{ID: "job2", Name: "Test 2", State: "failed"},
-					},
 				}, &buildkite.Response{
 					Response: &http.Response{StatusCode: 200},
 				}, nil
@@ -734,9 +742,7 @@ func TestGetBuildSummaryIgnoresJobFiltering(t *testing.T) {
 
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
 
-	tool, handler, _ := GetBuild()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
+	_, handler, _ := GetBuild()
 
 	request := createMCPRequest(t, map[string]any{})
 	result, _, err := handler(ctx, request, GetBuildArgs{
@@ -744,13 +750,10 @@ func TestGetBuildSummaryIgnoresJobFiltering(t *testing.T) {
 		PipelineSlug: "pipeline",
 		BuildNumber:  "1",
 		DetailLevel:  "summary",
-		JobState:     "failed", // should be ignored
 	})
 	assert.NoError(err)
+	assert.True(result.IsError)
 
 	textContent := getTextResult(t, result)
-	// jobs_total should reflect ALL jobs (2)
-	assert.Contains(textContent.Text, `"jobs_total":2`)
-	// No job_summary in summary level
-	assert.NotContains(textContent.Text, `"job_summary"`)
+	assert.Contains(textContent.Text, "detail_level must be 'detailed' or 'full'")
 }
