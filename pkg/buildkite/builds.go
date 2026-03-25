@@ -24,7 +24,7 @@ type JobSummary struct {
 	ByState map[string]int `json:"by_state"`
 }
 
-// BuildSummary - Essential fields (~85% token reduction)
+// BuildSummary - Essential build fields for list responses
 type BuildSummary struct {
 	ID        string               `json:"id"`
 	Number    int                  `json:"number"`
@@ -37,7 +37,14 @@ type BuildSummary struct {
 	JobsTotal int                  `json:"jobs_total"`
 }
 
-// BuildDetail - Medium detail (~60% token reduction)
+// JobEntry represents a lightweight job reference with just enough info to identify and filter jobs
+type JobEntry struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// BuildDetail - Medium detail with lightweight job listing
 type BuildDetail struct {
 	BuildSummary                      // Embed summary fields
 	Source       string               `json:"source"`
@@ -45,7 +52,7 @@ type BuildDetail struct {
 	StartedAt    *buildkite.Timestamp `json:"started_at"`
 	FinishedAt   *buildkite.Timestamp `json:"finished_at"`
 	JobSummary   *JobSummary          `json:"job_summary"`
-	// Exclude: Jobs[], Env{}, MetaData{}, Pipeline{}, TestEngine{}
+	Jobs         []JobEntry           `json:"jobs"`
 }
 
 // BuildWithSummary represents a build with job summary and optionally full job details
@@ -72,7 +79,7 @@ type GetBuildArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
-	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary'\\, 'detailed' (default)\\, or 'full'"`
+	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'detailed' (default) or 'full'. Detailed includes job IDs/names/states; full includes complete job objects"`
 	JobState     string `json:"job_state,omitempty" jsonschema:"Filter jobs by state. Comma-separated for multiple states (e.g.\\, 'failed\\,broken\\,canceled')"`
 	IncludeAgent bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default)\\, only agent.id is included"`
 }
@@ -106,17 +113,22 @@ func summarizeBuild(build buildkite.Build) BuildSummary {
 func detailBuild(build buildkite.Build, filteredJobs []buildkite.Job) BuildDetail {
 	summary := summarizeBuild(build)
 
-	// Create job summary from filtered jobs
+	// Create job summary and lightweight job entries from filtered jobs
 	jobSummary := &JobSummary{
 		Total:   len(filteredJobs),
 		ByState: make(map[string]int),
 	}
+	jobEntries := make([]JobEntry, len(filteredJobs))
 
-	for _, job := range filteredJobs {
-		if job.State == "" {
-			continue
+	for i, job := range filteredJobs {
+		if job.State != "" {
+			jobSummary.ByState[job.State]++
 		}
-		jobSummary.ByState[job.State]++
+		jobEntries[i] = JobEntry{
+			ID:    job.ID,
+			Name:  job.Name,
+			State: job.State,
+		}
 	}
 
 	return BuildDetail{
@@ -126,6 +138,7 @@ func detailBuild(build buildkite.Build, filteredJobs []buildkite.Job) BuildDetai
 		StartedAt:    build.StartedAt,
 		FinishedAt:   build.FinishedAt,
 		JobSummary:   jobSummary, // job_summary reflects filtered jobs
+		Jobs:         jobEntries,
 	}
 }
 
@@ -300,7 +313,7 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build",
-			Description: "Get detailed information about a specific build including its jobs, timing, and execution details",
+			Description: "Get build information including job IDs, names, and states. Use job_state to filter (e.g. 'failed,broken'). Returns enough detail to identify which jobs to investigate with log and artifact tools",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build",
 				ReadOnlyHint: true,
@@ -372,11 +385,7 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 
 			var result any
 			switch detailLevel {
-			case "summary":
-				// Summary level ignores job filtering
-				result = summarizeBuild(build)
 			case "detailed":
-				// Detailed level uses filtered jobs for job_summary
 				result = detailBuild(build, jobs)
 			case "full":
 				// Full level returns build with filtered jobs
@@ -395,7 +404,7 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 				buildCopy.Jobs = jobs
 				result = buildCopy
 			default:
-				return utils.NewToolResultError("detail_level must be 'summary', 'detailed', or 'full'"), nil, nil
+				return utils.NewToolResultError("detail_level must be 'detailed' or 'full'"), nil, nil
 			}
 
 			return mcpTextResult(span, &result)
