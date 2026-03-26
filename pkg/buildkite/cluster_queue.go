@@ -14,7 +14,6 @@ type ClusterQueuesClient interface {
 	Get(ctx context.Context, org, clusterID, queueID string) (buildkite.ClusterQueue, *buildkite.Response, error)
 	Create(ctx context.Context, org, clusterID string, qc buildkite.ClusterQueueCreate) (buildkite.ClusterQueue, *buildkite.Response, error)
 	Update(ctx context.Context, org, clusterID, queueID string, qu buildkite.ClusterQueueUpdate) (buildkite.ClusterQueue, *buildkite.Response, error)
-	Delete(ctx context.Context, org, clusterID, queueID string) (*buildkite.Response, error)
 	Pause(ctx context.Context, org, clusterID, queueID string, qp buildkite.ClusterQueuePause) (buildkite.ClusterQueue, *buildkite.Response, error)
 	Resume(ctx context.Context, org, clusterID, queueID string) (*buildkite.Response, error)
 }
@@ -45,12 +44,6 @@ type UpdateClusterQueueArgs struct {
 	QueueID            string `json:"queue_id"`
 	Description        string `json:"description,omitempty" jsonschema:"New description for the queue"`
 	RetryAgentAffinity string `json:"retry_agent_affinity,omitempty" jsonschema:"Agent retry affinity: prefer-warmest or prefer-different"`
-}
-
-type DeleteClusterQueueArgs struct {
-	OrgSlug   string `json:"org_slug"`
-	ClusterID string `json:"cluster_id"`
-	QueueID   string `json:"queue_id"`
 }
 
 type PauseClusterQueueDispatchArgs struct {
@@ -197,34 +190,6 @@ func UpdateClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[UpdateClusterQueueArgs, 
 			}
 
 			return mcpTextResult(span, &queue)
-		}, []string{"write_clusters"}
-}
-
-func DeleteClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[DeleteClusterQueueArgs, any], []string) {
-	return mcp.Tool{
-			Name:        "delete_cluster_queue",
-			Description: "Delete a queue from a cluster. This is a destructive operation that cannot be undone.",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Delete Cluster Queue",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args DeleteClusterQueueArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.DeleteClusterQueue")
-			defer span.End()
-
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("cluster_id", args.ClusterID),
-				attribute.String("queue_id", args.QueueID),
-			)
-
-			deps := DepsFromContext(ctx)
-			_, err := deps.ClusterQueuesClient.Delete(ctx, args.OrgSlug, args.ClusterID, args.QueueID)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
-
-			return mcpTextResult(span, "Cluster queue deleted successfully")
 		}, []string{"write_clusters"}
 }
 

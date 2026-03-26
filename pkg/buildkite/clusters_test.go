@@ -18,7 +18,6 @@ type mockClustersClient struct {
 	GetFunc    func(ctx context.Context, org, id string) (buildkite.Cluster, *buildkite.Response, error)
 	CreateFunc func(ctx context.Context, org string, cc buildkite.ClusterCreate) (buildkite.Cluster, *buildkite.Response, error)
 	UpdateFunc func(ctx context.Context, org, id string, cu buildkite.ClusterUpdate) (buildkite.Cluster, *buildkite.Response, error)
-	DeleteFunc func(ctx context.Context, org, id string) (*buildkite.Response, error)
 }
 
 func (m *mockClustersClient) List(ctx context.Context, org string, opts *buildkite.ClustersListOptions) ([]buildkite.Cluster, *buildkite.Response, error) {
@@ -47,13 +46,6 @@ func (m *mockClustersClient) Update(ctx context.Context, org, id string, cu buil
 		return m.UpdateFunc(ctx, org, id, cu)
 	}
 	return buildkite.Cluster{}, nil, nil
-}
-
-func (m *mockClustersClient) Delete(ctx context.Context, org, id string) (*buildkite.Response, error) {
-	if m.DeleteFunc != nil {
-		return m.DeleteFunc(ctx, org, id)
-	}
-	return nil, nil
 }
 
 func TestListClusters(t *testing.T) {
@@ -192,37 +184,6 @@ func TestUpdateCluster(t *testing.T) {
 	assert.JSONEq(`{"id":"cluster-id","name":"updated-name","created_by":{},"maintainers":{}}`, textContent.Text)
 }
 
-func TestDeleteCluster(t *testing.T) {
-	assert := require.New(t)
-
-	client := &mockClustersClient{
-		DeleteFunc: func(ctx context.Context, org, id string) (*buildkite.Response, error) {
-			return &buildkite.Response{
-				Response: &http.Response{
-					StatusCode: 204,
-				},
-			}, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClustersClient: client})
-
-	tool, handler, scopes := DeleteCluster()
-	assert.Equal("delete_cluster", tool.Name)
-	assert.Equal(boolPtr(true), tool.Annotations.DestructiveHint)
-	assert.Contains(scopes, "write_clusters")
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, DeleteClusterArgs{
-		OrgSlug:   "org",
-		ClusterID: "cluster-id",
-	})
-	assert.NoError(err)
-
-	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, "Cluster deleted successfully")
-}
-
 func TestCreateClusterWithError(t *testing.T) {
 	assert := require.New(t)
 
@@ -264,29 +225,6 @@ func TestUpdateClusterWithError(t *testing.T) {
 		OrgSlug:   "org",
 		ClusterID: "cluster-id",
 		Name:      "updated-name",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
-}
-
-func TestDeleteClusterWithError(t *testing.T) {
-	assert := require.New(t)
-
-	client := &mockClustersClient{
-		DeleteFunc: func(ctx context.Context, org, id string) (*buildkite.Response, error) {
-			return &buildkite.Response{}, fmt.Errorf("API error")
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClustersClient: client})
-
-	_, handler, _ := DeleteCluster()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, DeleteClusterArgs{
-		OrgSlug:   "org",
-		ClusterID: "cluster-id",
 	})
 	assert.NoError(err)
 	assert.True(result.IsError)
