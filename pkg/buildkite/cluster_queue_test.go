@@ -16,7 +16,6 @@ type mockClusterQueuesClient struct {
 	GetFunc    func(ctx context.Context, org, clusterID, queueID string) (buildkite.ClusterQueue, *buildkite.Response, error)
 	CreateFunc func(ctx context.Context, org, clusterID string, qc buildkite.ClusterQueueCreate) (buildkite.ClusterQueue, *buildkite.Response, error)
 	UpdateFunc func(ctx context.Context, org, clusterID, queueID string, qu buildkite.ClusterQueueUpdate) (buildkite.ClusterQueue, *buildkite.Response, error)
-	DeleteFunc func(ctx context.Context, org, clusterID, queueID string) (*buildkite.Response, error)
 	PauseFunc  func(ctx context.Context, org, clusterID, queueID string, qp buildkite.ClusterQueuePause) (buildkite.ClusterQueue, *buildkite.Response, error)
 	ResumeFunc func(ctx context.Context, org, clusterID, queueID string) (*buildkite.Response, error)
 }
@@ -47,13 +46,6 @@ func (m *mockClusterQueuesClient) Update(ctx context.Context, org, clusterID, qu
 		return m.UpdateFunc(ctx, org, clusterID, queueID, qu)
 	}
 	return buildkite.ClusterQueue{}, nil, nil
-}
-
-func (m *mockClusterQueuesClient) Delete(ctx context.Context, org, clusterID, queueID string) (*buildkite.Response, error) {
-	if m.DeleteFunc != nil {
-		return m.DeleteFunc(ctx, org, clusterID, queueID)
-	}
-	return nil, nil
 }
 
 func (m *mockClusterQueuesClient) Pause(ctx context.Context, org, clusterID, queueID string, qp buildkite.ClusterQueuePause) (buildkite.ClusterQueue, *buildkite.Response, error) {
@@ -210,38 +202,6 @@ func TestUpdateClusterQueue(t *testing.T) {
 	assert.JSONEq(`{"id":"queue-id","description":"updated description","dispatch_paused":false,"created_by":{}}`, textContent.Text)
 }
 
-func TestDeleteClusterQueue(t *testing.T) {
-	assert := require.New(t)
-
-	client := &mockClusterQueuesClient{
-		DeleteFunc: func(ctx context.Context, org, clusterID, queueID string) (*buildkite.Response, error) {
-			return &buildkite.Response{
-				Response: &http.Response{
-					StatusCode: 204,
-				},
-			}, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClusterQueuesClient: client})
-
-	tool, handler, scopes := DeleteClusterQueue()
-	assert.Equal("delete_cluster_queue", tool.Name)
-	assert.Equal(boolPtr(true), tool.Annotations.DestructiveHint)
-	assert.Contains(scopes, "write_clusters")
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, DeleteClusterQueueArgs{
-		OrgSlug:   "org",
-		ClusterID: "cluster-id",
-		QueueID:   "queue-id",
-	})
-	assert.NoError(err)
-
-	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, "Cluster queue deleted successfully")
-}
-
 func TestPauseClusterQueueDispatch(t *testing.T) {
 	assert := require.New(t)
 
@@ -353,30 +313,6 @@ func TestUpdateClusterQueueWithError(t *testing.T) {
 		ClusterID:   "cluster-id",
 		QueueID:     "queue-id",
 		Description: "updated",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
-}
-
-func TestDeleteClusterQueueWithError(t *testing.T) {
-	assert := require.New(t)
-
-	client := &mockClusterQueuesClient{
-		DeleteFunc: func(ctx context.Context, org, clusterID, queueID string) (*buildkite.Response, error) {
-			return &buildkite.Response{}, fmt.Errorf("API error")
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClusterQueuesClient: client})
-
-	_, handler, _ := DeleteClusterQueue()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, DeleteClusterQueueArgs{
-		OrgSlug:   "org",
-		ClusterID: "cluster-id",
-		QueueID:   "queue-id",
 	})
 	assert.NoError(err)
 	assert.True(result.IsError)

@@ -14,7 +14,6 @@ type ClustersClient interface {
 	Get(ctx context.Context, org, id string) (buildkite.Cluster, *buildkite.Response, error)
 	Create(ctx context.Context, org string, cc buildkite.ClusterCreate) (buildkite.Cluster, *buildkite.Response, error)
 	Update(ctx context.Context, org, id string, cu buildkite.ClusterUpdate) (buildkite.Cluster, *buildkite.Response, error)
-	Delete(ctx context.Context, org, id string) (*buildkite.Response, error)
 }
 
 type ListClustersArgs struct {
@@ -44,11 +43,6 @@ type UpdateClusterArgs struct {
 	Emoji          string `json:"emoji,omitempty" jsonschema:"New emoji for the cluster"`
 	Color          string `json:"color,omitempty" jsonschema:"New hex color code for the cluster"`
 	DefaultQueueID string `json:"default_queue_id,omitempty" jsonschema:"ID of the default queue for the cluster"`
-}
-
-type DeleteClusterArgs struct {
-	OrgSlug   string `json:"org_slug"`
-	ClusterID string `json:"cluster_id"`
 }
 
 func ListClusters() (mcp.Tool, mcp.ToolHandlerFor[ListClustersArgs, any], []string) {
@@ -183,32 +177,5 @@ func UpdateCluster() (mcp.Tool, mcp.ToolHandlerFor[UpdateClusterArgs, any], []st
 			}
 
 			return mcpTextResult(span, &cluster)
-		}, []string{"write_clusters"}
-}
-
-func DeleteCluster() (mcp.Tool, mcp.ToolHandlerFor[DeleteClusterArgs, any], []string) {
-	return mcp.Tool{
-			Name:        "delete_cluster",
-			Description: "Delete a cluster from an organization. This is a destructive operation that cannot be undone.",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Delete Cluster",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args DeleteClusterArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.DeleteCluster")
-			defer span.End()
-
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("cluster_id", args.ClusterID),
-			)
-
-			deps := DepsFromContext(ctx)
-			_, err := deps.ClustersClient.Delete(ctx, args.OrgSlug, args.ClusterID)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
-
-			return mcpTextResult(span, "Cluster deleted successfully")
 		}, []string{"write_clusters"}
 }
