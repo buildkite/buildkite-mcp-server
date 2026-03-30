@@ -87,7 +87,7 @@ func TestGetBuildDefault(t *testing.T) {
 	assert.Contains(textContent.Text, `"state":"running"`)
 	assert.Contains(textContent.Text, `"total":0`)
 	assert.Contains(textContent.Text, `"by_state":{}`)
-	assert.Contains(textContent.Text, `"jobs_total":0`)
+	assert.NotContains(textContent.Text, `"jobs_total"`)
 }
 
 func TestGetBuildWithJobSummary(t *testing.T) {
@@ -187,7 +187,7 @@ func TestListBuilds(t *testing.T) {
 	assert.Contains(textContent.Text, `"id":"123"`)
 	assert.Contains(textContent.Text, `"number":1`)
 	assert.Contains(textContent.Text, `"state":"running"`)
-	assert.Contains(textContent.Text, `"jobs_total":0`)
+	assert.NotContains(textContent.Text, `"jobs_total"`)
 
 	// Verify default pagination parameters - new defaults
 	assert.NotNil(capturedOptions)
@@ -537,18 +537,38 @@ func TestCreateBuild(t *testing.T) {
 func TestGetBuildWithJobStateFilter(t *testing.T) {
 	assert := require.New(t)
 
+	// Mock returns jobs matching the requested states (simulating API-side filtering)
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			// Simulate API-side job state filtering
+			allJobs := []buildkite.Job{
+				{ID: "job1", Name: "Test 1", State: "passed", Agent: buildkite.Agent{ID: "agent1", Name: "Agent 1"}},
+				{ID: "job2", Name: "Test 2", State: "failed", Agent: buildkite.Agent{ID: "agent2", Name: "Agent 2"}},
+				{ID: "job3", Name: "Test 3", State: "failed", Agent: buildkite.Agent{ID: "agent3", Name: "Agent 3"}},
+				{ID: "job4", Name: "Test 4", State: "broken", Agent: buildkite.Agent{ID: "agent4", Name: "Agent 4"}},
+			}
+
+			// Filter jobs based on requested states (simulating what the API does)
+			var jobs []buildkite.Job
+			if len(opt.JobStates) > 0 {
+				stateSet := make(map[string]bool, len(opt.JobStates))
+				for _, s := range opt.JobStates {
+					stateSet[s] = true
+				}
+				for _, job := range allJobs {
+					if stateSet[job.State] {
+						jobs = append(jobs, job)
+					}
+				}
+			} else {
+				jobs = allJobs
+			}
+
 			return buildkite.Build{
 					ID:     "123",
 					Number: 1,
 					State:  "failed",
-					Jobs: []buildkite.Job{
-						{ID: "job1", Name: "Test 1", State: "passed", Agent: buildkite.Agent{ID: "agent1", Name: "Agent 1"}},
-						{ID: "job2", Name: "Test 2", State: "failed", Agent: buildkite.Agent{ID: "agent2", Name: "Agent 2"}},
-						{ID: "job3", Name: "Test 3", State: "failed", Agent: buildkite.Agent{ID: "agent3", Name: "Agent 3"}},
-						{ID: "job4", Name: "Test 4", State: "broken", Agent: buildkite.Agent{ID: "agent4", Name: "Agent 4"}},
-					},
+					Jobs:   jobs,
 				}, &buildkite.Response{
 					Response: &http.Response{StatusCode: 200},
 				}, nil
@@ -679,15 +699,16 @@ func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
 
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			assert.Equal([]string{"failed"}, opt.JobStates, "JobStates should be passed to the API")
+
+			// API returns only the filtered jobs
 			return buildkite.Build{
 					ID:     "123",
 					Number: 1,
 					State:  "failed",
 					Jobs: []buildkite.Job{
-						{ID: "job1", Name: "Test 1", State: "passed"},
 						{ID: "job2", Name: "Test 2", State: "failed"},
 						{ID: "job3", Name: "Test 3", State: "failed"},
-						{ID: "job4", Name: "Test 4", State: "broken"},
 					},
 				}, &buildkite.Response{
 					Response: &http.Response{StatusCode: 200},
@@ -712,8 +733,7 @@ func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	// jobs_total should reflect ALL jobs (4)
-	assert.Contains(textContent.Text, `"jobs_total":4`)
+	assert.NotContains(textContent.Text, `"jobs_total"`)
 	// job_summary.total should reflect filtered jobs (2)
 	assert.Contains(textContent.Text, `"total":2`)
 	// job_summary.by_state should only show failed count
@@ -721,8 +741,6 @@ func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
 	// jobs array should contain only the filtered entries
 	assert.Contains(textContent.Text, `{"id":"job2","name":"Test 2","state":"failed"}`)
 	assert.Contains(textContent.Text, `{"id":"job3","name":"Test 3","state":"failed"}`)
-	assert.NotContains(textContent.Text, `{"id":"job1"`)
-	assert.NotContains(textContent.Text, `{"id":"job4"`)
 }
 
 func TestGetBuildInvalidDetailLevel(t *testing.T) {
