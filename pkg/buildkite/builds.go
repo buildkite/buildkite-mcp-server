@@ -16,6 +16,8 @@ type BuildsClient interface {
 	ListByOrg(ctx context.Context, org string, options *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	ListByPipeline(ctx context.Context, org, pipelineSlug string, options *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	Create(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error)
+	Cancel(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error)
+	Rebuild(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error)
 }
 
 // JobSummary represents a summary of jobs grouped by state, with finished jobs classified as passed/failed
@@ -456,6 +458,74 @@ func CreateBuild() (mcp.Tool, mcp.ToolHandlerFor[CreateBuildArgs, any], []string
 
 			deps := DepsFromContext(ctx)
 			build, _, err := deps.BuildsClient.Create(ctx, args.OrgSlug, args.PipelineSlug, createBuild)
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			return mcpTextResult(span, &build)
+		}, []string{"write_builds"}
+}
+
+type CancelBuildArgs struct {
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
+}
+
+func CancelBuild() (mcp.Tool, mcp.ToolHandlerFor[CancelBuildArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "cancel_build",
+			Description: "Cancel a running build on a Buildkite pipeline",
+			Annotations: &mcp.ToolAnnotations{
+				Title: "Cancel Build",
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args CancelBuildArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.CancelBuild")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("build_number", args.BuildNumber),
+			)
+
+			deps := DepsFromContext(ctx)
+			build, err := deps.BuildsClient.Cancel(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber)
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			return mcpTextResult(span, &build)
+		}, []string{"write_builds"}
+}
+
+type RebuildBuildArgs struct {
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
+}
+
+func RebuildBuild() (mcp.Tool, mcp.ToolHandlerFor[RebuildBuildArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "rebuild_build",
+			Description: "Rebuild/retry an entire build on a Buildkite pipeline",
+			Annotations: &mcp.ToolAnnotations{
+				Title: "Rebuild Build",
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args RebuildBuildArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.RebuildBuild")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("build_number", args.BuildNumber),
+			)
+
+			deps := DepsFromContext(ctx)
+			build, err := deps.BuildsClient.Rebuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber)
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
