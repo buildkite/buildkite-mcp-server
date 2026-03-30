@@ -33,3 +33,8 @@ Development guidelines are in [`DEVELOPMENT.md`](DEVELOPMENT.md).
 MIT © Buildkite
 
 SPDX-License-Identifier: MIT
+
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/buildkite-buildkite-mcp-server).
+
