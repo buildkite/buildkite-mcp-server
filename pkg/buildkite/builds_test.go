@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -14,6 +15,8 @@ type MockBuildsClient struct {
 	ListByPipelineFunc func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	GetFunc            func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
 	CreateFunc         func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error)
+	CancelFunc         func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error)
+	RebuildFunc        func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error)
 }
 
 func (m *MockBuildsClient) Get(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -42,6 +45,20 @@ func (m *MockBuildsClient) Create(ctx context.Context, org string, pipeline stri
 		return m.CreateFunc(ctx, org, pipeline, b)
 	}
 	return buildkite.Build{}, nil, nil
+}
+
+func (m *MockBuildsClient) Cancel(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error) {
+	if m.CancelFunc != nil {
+		return m.CancelFunc(ctx, org, pipeline, buildNumber)
+	}
+	return buildkite.Build{}, nil
+}
+
+func (m *MockBuildsClient) Rebuild(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error) {
+	if m.RebuildFunc != nil {
+		return m.RebuildFunc(ctx, org, pipeline, buildNumber)
+	}
+	return buildkite.Build{}, nil
 }
 
 var _ BuildsClient = (*MockBuildsClient)(nil)
@@ -756,4 +773,130 @@ func TestGetBuildInvalidDetailLevel(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 	assert.Contains(textContent.Text, "detail_level must be 'detailed' or 'full'")
+}
+
+func TestCancelBuild(t *testing.T) {
+	t.Run("ToolDefinition", func(t *testing.T) {
+		tool, _, _ := CancelBuild()
+		require.Equal(t, "cancel_build", tool.Name)
+		require.Contains(t, tool.Description, "Cancel")
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		assert := require.New(t)
+
+		client := &MockBuildsClient{
+			CancelFunc: func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error) {
+				assert.Equal("test-org", org)
+				assert.Equal("test-pipeline", pipeline)
+				assert.Equal("42", buildNumber)
+				return buildkite.Build{
+					ID:     "123",
+					Number: 42,
+					State:  "canceling",
+				}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := CancelBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CancelBuildArgs{
+			OrgSlug:      "test-org",
+			PipelineSlug: "test-pipeline",
+			BuildNumber:  "42",
+		})
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"id":"123"`)
+		assert.Contains(textContent.Text, `"state":"canceling"`)
+	})
+
+	t.Run("Error", func(t *testing.T) {
+		assert := require.New(t)
+
+		client := &MockBuildsClient{
+			CancelFunc: func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error) {
+				return buildkite.Build{}, errors.New("build not found")
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := CancelBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CancelBuildArgs{
+			OrgSlug:      "test-org",
+			PipelineSlug: "test-pipeline",
+			BuildNumber:  "42",
+		})
+		assert.NoError(err)
+		assert.True(result.IsError)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, "build not found")
+	})
+}
+
+func TestRebuildBuild(t *testing.T) {
+	t.Run("ToolDefinition", func(t *testing.T) {
+		tool, _, _ := RebuildBuild()
+		require.Equal(t, "rebuild_build", tool.Name)
+		require.Contains(t, tool.Description, "Rebuild")
+	})
+
+	t.Run("Success", func(t *testing.T) {
+		assert := require.New(t)
+
+		client := &MockBuildsClient{
+			RebuildFunc: func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error) {
+				assert.Equal("test-org", org)
+				assert.Equal("test-pipeline", pipeline)
+				assert.Equal("42", buildNumber)
+				return buildkite.Build{
+					ID:     "456",
+					Number: 43,
+					State:  "scheduled",
+				}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := RebuildBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), RebuildBuildArgs{
+			OrgSlug:      "test-org",
+			PipelineSlug: "test-pipeline",
+			BuildNumber:  "42",
+		})
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, `"id":"456"`)
+		assert.Contains(textContent.Text, `"state":"scheduled"`)
+	})
+
+	t.Run("Error", func(t *testing.T) {
+		assert := require.New(t)
+
+		client := &MockBuildsClient{
+			RebuildFunc: func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error) {
+				return buildkite.Build{}, errors.New("build not found")
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := RebuildBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), RebuildBuildArgs{
+			OrgSlug:      "test-org",
+			PipelineSlug: "test-pipeline",
+			BuildNumber:  "42",
+		})
+		assert.NoError(err)
+		assert.True(result.IsError)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, "build not found")
+	})
 }
