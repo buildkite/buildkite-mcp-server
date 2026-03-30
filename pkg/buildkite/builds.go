@@ -36,7 +36,6 @@ type BuildSummary struct {
 	Message   string               `json:"message"`
 	WebURL    string               `json:"web_url"`
 	CreatedAt *buildkite.Timestamp `json:"created_at"`
-	JobsTotal int                  `json:"jobs_total"`
 }
 
 // JobEntry represents a lightweight job reference with just enough info to identify and filter jobs
@@ -106,12 +105,11 @@ func summarizeBuild(build buildkite.Build) BuildSummary {
 		Message:   build.Message,
 		WebURL:    build.WebURL,
 		CreatedAt: build.CreatedAt,
-		JobsTotal: len(build.Jobs),
 	}
 }
 
 // detailBuild converts a buildkite.Build to BuildDetail with job summary
-// filteredJobs is used for job_summary stats, while build.Jobs is used for jobs_total
+// filteredJobs is used for job_summary stats and lightweight job entries
 func detailBuild(build buildkite.Build, filteredJobs []buildkite.Job) BuildDetail {
 	summary := summarizeBuild(build)
 
@@ -134,7 +132,7 @@ func detailBuild(build buildkite.Build, filteredJobs []buildkite.Job) BuildDetai
 	}
 
 	return BuildDetail{
-		BuildSummary: summary, // jobs_total reflects ALL jobs (unfiltered)
+		BuildSummary: summary,
 		Source:       build.Source,
 		Author:       build.Author,
 		StartedAt:    build.StartedAt,
@@ -345,33 +343,23 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 				IncludeTestEngine: true,
 			}
 
+			// Push job state filtering down to the API
+			if args.JobState != "" {
+				states := strings.Split(args.JobState, ",")
+				jobStates := make([]string, len(states))
+				for i, state := range states {
+					jobStates[i] = strings.TrimSpace(state)
+				}
+				options.JobStates = jobStates
+			}
+
 			deps := DepsFromContext(ctx)
 			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
 
-			// Parse job states filter
-			var requestedStates map[string]bool
-			if args.JobState != "" {
-				states := strings.Split(args.JobState, ",")
-				requestedStates = make(map[string]bool, len(states))
-				for _, state := range states {
-					requestedStates[strings.TrimSpace(state)] = true
-				}
-			}
-
-			// Filter jobs if states specified
 			jobs := build.Jobs
-			if requestedStates != nil {
-				filteredJobs := make([]buildkite.Job, 0)
-				for _, job := range build.Jobs {
-					if job.State != "" && requestedStates[job.State] {
-						filteredJobs = append(filteredJobs, job)
-					}
-				}
-				jobs = filteredJobs
-			}
 
 			// Strip agent details if not requested
 			if !args.IncludeAgent && len(jobs) > 0 {
