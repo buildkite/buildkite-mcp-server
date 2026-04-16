@@ -1,5 +1,5 @@
-FROM golang:1.26.1@sha256:c7e98cc0fd4dfb71ee7465fee6c9a5f079163307e4bf141b336bb9dae00159a5
+FROM golang:1.26.2@sha256:5f3787b7f902c07c7ec4f3aa91a301a3eda8133aa32661a3b3a3a86ab3a68a36
 
-COPY --from=goreleaser/goreleaser-pro:v2.13.3@sha256:34eed2b04907d777ed443e4190262f0d9882b4b03c61a9783eee996ac8b7c657 /usr/bin/goreleaser /usr/local/bin/goreleaser
-COPY --from=golangci/golangci-lint:v2.9.0@sha256:dbe337da33f7d649126107cd2cf0375e932c156c1e20e32a2d5205a79ba8c7a8 /usr/bin/golangci-lint /usr/local/bin/golangci-lint
-COPY --from=ghcr.io/ko-build/ko:fc0e4c0582f0801600929b5aaf6981aabdf47148 /ko-app/ko /usr/local/bin/ko
+COPY --from=goreleaser/goreleaser-pro:v2.15.3@sha256:7d24915bf657b184e4478b9ec89c53a7052e4084a37c6d94b84c19769f6d05b1 /usr/bin/goreleaser /usr/local/bin/goreleaser
+COPY --from=golangci/golangci-lint:v2.11.4@sha256:67dfc9eeeb0eb13fc1a36329c2c378197dc561f1edf1a7792e3f771606bb0e15 /usr/bin/golangci-lint /usr/local/bin/golangci-lint
+COPY --from=ghcr.io/ko-build/ko:latest@sha256:16b0c2b077c30e0162289fdfa55fc9df97bbe8ad2888747a7194b07f36e45da5 /ko-app/ko /usr/local/bin/ko
