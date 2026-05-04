@@ -1,33 +1,26 @@
+image: "buildkite/hosted-agent-base-images:ubuntu-jammy"
+
 agents:
   queue: hosted
 
 steps:
   - label: ":terminal: build ({{matrix}})"
+    command: ".buildkite/release.sh release --clean --split"
     matrix:
       - "darwin"
       - "linux"
       - "windows"
+    env:
+      - GOOS={{matrix}}
     artifact_paths:
       - dist/**/*
     plugins:
-      - docker-compose#v5.10.0:
-          command:
-            - .buildkite/release.sh
-            - release
-            - --clean
-            - --split
-          config: .buildkite/docker-compose.yaml
-          env:
-            - GOOS={{matrix}}
-          mount-buildkite-agent: true
-          run: goreleaser
-          shell: false
-          tty: true
-          progress: plain
+      - mise#v1.1.1: ~
 
   - wait: ~
 
   - label: ":rocket: :github: MCP Release"
+    command: ".buildkite/release.sh continue --merge"
     artifact_paths:
       - dist/**/*
     env:
@@ -48,19 +41,4 @@ steps:
       - artifacts#v1.9.3:
           download:
             - dist/**/*
-      - docker-compose#v5.10.0:
-          command:
-            - .buildkite/release.sh
-            - continue
-            - --merge
-          config: .buildkite/docker-compose.yaml
-          env:
-            - GITHUB_USER
-            - GITHUB_TOKEN
-            - DOCKERHUB_USER
-            - DOCKERHUB_PASSWORD
-          mount-buildkite-agent: true
-          run: goreleaser
-          shell: false
-          tty: true
-          progress: plain
+      - mise#v1.1.1: ~
