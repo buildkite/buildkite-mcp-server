@@ -1,7 +1,6 @@
 # Variables
 BINARY_NAME := buildkite-mcp-server
 CMD_PACKAGE := ./cmd/$(BINARY_NAME)
-DOCS_PACKAGE := ./cmd/update-docs
 COVERAGE_FILE := coverage.out
 
 # Default target
@@ -24,10 +23,6 @@ install: ## Install the binary
 .PHONY: snapshot
 snapshot: ## Build snapshot with goreleaser
 	goreleaser build --snapshot --clean --single-target
-
-.PHONY: update-docs
-update-docs: ## Update documentation
-	go run $(DOCS_PACKAGE)
 
 .PHONY: run
 run: ## Run the application with stdio

@@ -5,7 +5,7 @@
 #
 
 # NOTE: do not exit on non-zero returns codes
-set -uo pipefail
+set -euo pipefail
 
 export GORELEASER_KEY=""
 GORELEASER_KEY=$(buildkite-agent secret get goreleaser_key)
