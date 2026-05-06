@@ -21,20 +21,21 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 
 	deps := buildkite.ToolDependencies{
-		BuildsClient:         globals.Client.Builds,
-		PipelinesClient:      globals.Client.Pipelines,
-		ClustersClient:       globals.Client.Clusters,
-		ClusterQueuesClient:  globals.Client.ClusterQueues,
-		ArtifactsClient:      &buildkite.BuildkiteClientAdapter{Client: globals.Client},
-		AnnotationsClient:    globals.Client.Annotations,
-		OrganizationsClient:  globals.Client.Organizations,
-		UserClient:           globals.Client.User,
-		AccessTokensClient:   globals.Client.AccessTokens,
-		JobsClient:           globals.Client.Jobs,
-		TestRunsClient:       globals.Client.TestRuns,
-		TestExecutionsClient: globals.Client.TestRuns,
-		TestsClient:          globals.Client.Tests,
-		BuildkiteLogsClient:  globals.BuildkiteLogsClient,
+		BuildsClient:            globals.Client.Builds,
+		PipelinesClient:         globals.Client.Pipelines,
+		PipelineSchedulesClient: globals.Client.PipelineSchedules,
+		ClustersClient:          globals.Client.Clusters,
+		ClusterQueuesClient:     globals.Client.ClusterQueues,
+		ArtifactsClient:         &buildkite.BuildkiteClientAdapter{Client: globals.Client},
+		AnnotationsClient:       globals.Client.Annotations,
+		OrganizationsClient:     globals.Client.Organizations,
+		UserClient:              globals.Client.User,
+		AccessTokensClient:      globals.Client.AccessTokens,
+		JobsClient:              globals.Client.Jobs,
+		TestRunsClient:          globals.Client.TestRuns,
+		TestExecutionsClient:    globals.Client.TestRuns,
+		TestsClient:             globals.Client.Tests,
+		BuildkiteLogsClient:     globals.BuildkiteLogsClient,
 	}
 
 	log.Info().Msg("Starting MCP server over stdio")

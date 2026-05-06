@@ -310,12 +310,16 @@ func CreateBuiltinToolsets() map[string]Toolset {
 		},
 		ToolsetPipelines: {
 			Name:        "Pipeline Management",
-			Description: "Tools for managing Buildkite pipelines",
+			Description: "Tools for managing Buildkite pipelines and pipeline schedules",
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.GetPipeline),
 				newToolDef(buildkite.ListPipelines),
 				newToolDef(buildkite.CreatePipeline),
 				newToolDef(buildkite.UpdatePipeline),
+				newToolDef(buildkite.ListPipelineSchedules),
+				newToolDef(buildkite.GetPipelineSchedule),
+				newToolDef(buildkite.CreatePipelineSchedule),
+				newToolDef(buildkite.UpdatePipelineSchedule),
 			},
 		},
 		ToolsetBuilds: {

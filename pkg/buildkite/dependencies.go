@@ -8,20 +8,21 @@ import (
 
 // ToolDependencies holds all client interfaces needed by tool handlers.
 type ToolDependencies struct {
-	BuildsClient         BuildsClient
-	PipelinesClient      PipelinesClient
-	ClustersClient       ClustersClient
-	ClusterQueuesClient  ClusterQueuesClient
-	ArtifactsClient      ArtifactsClient
-	AnnotationsClient    AnnotationsClient
-	OrganizationsClient  OrganizationsClient
-	UserClient           UserClient
-	AccessTokensClient   AccessTokenClient
-	JobsClient           JobsClient
-	TestRunsClient       TestRunsClient
-	TestExecutionsClient TestExecutionsClient
-	TestsClient          TestsClient
-	BuildkiteLogsClient  BuildkiteLogsClient
+	BuildsClient            BuildsClient
+	PipelinesClient         PipelinesClient
+	PipelineSchedulesClient PipelineSchedulesClient
+	ClustersClient          ClustersClient
+	ClusterQueuesClient     ClusterQueuesClient
+	ArtifactsClient         ArtifactsClient
+	AnnotationsClient       AnnotationsClient
+	OrganizationsClient     OrganizationsClient
+	UserClient              UserClient
+	AccessTokensClient      AccessTokenClient
+	JobsClient              JobsClient
+	TestRunsClient          TestRunsClient
+	TestExecutionsClient    TestExecutionsClient
+	TestsClient             TestsClient
+	BuildkiteLogsClient     BuildkiteLogsClient
 }
 
 type contextKey struct{}
