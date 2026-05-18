@@ -363,9 +363,14 @@ func CreateBuiltinToolsets() map[string]Toolset {
 		},
 		ToolsetAnnotations: {
 			Name:        "Annotation Management",
-			Description: "Tools for managing build annotations",
+			Description: "Tools for managing build and job annotations",
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.ListAnnotations),
+				newToolDef(buildkite.CreateAnnotation),
+				newToolDef(buildkite.DeleteAnnotation),
+				newToolDef(buildkite.ListJobAnnotations),
+				newToolDef(buildkite.CreateJobAnnotation),
+				newToolDef(buildkite.DeleteJobAnnotation),
 			},
 		},
 		ToolsetUser: {
