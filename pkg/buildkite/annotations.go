@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"errors"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
@@ -27,7 +28,7 @@ type ListAnnotationsArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
-	Scope        string `json:"scope,omitempty" jsonschema:"Annotation scope: build or job (defaults to build)"`
+	Scope        string `json:"scope,omitempty" jsonschema:"Annotation scope: 'build' (default) or 'job'. When 'job', job_id is required."`
 	JobID        string `json:"job_id,omitempty" jsonschema:"Job ID required when scope is job"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
@@ -37,7 +38,7 @@ type CreateAnnotationArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
-	Scope        string `json:"scope,omitempty" jsonschema:"Annotation scope: build or job (defaults to build)"`
+	Scope        string `json:"scope,omitempty" jsonschema:"Annotation scope: 'build' (default) or 'job'. When 'job', job_id is required."`
 	JobID        string `json:"job_id,omitempty" jsonschema:"Job ID required when scope is job"`
 	Body         string `json:"body" jsonschema:"The annotation body as HTML or Markdown"`
 	Style        string `json:"style,omitempty" jsonschema:"Optional annotation style: success, info, warning, or error"`
@@ -46,21 +47,17 @@ type CreateAnnotationArgs struct {
 	Append       bool   `json:"append,omitempty" jsonschema:"Append the body to an existing annotation with the same context"`
 }
 
-func normalizeAnnotationScope(scope, jobID string) (string, string) {
-	if scope == "" {
-		scope = annotationScopeBuild
-	}
-
+func normalizeAnnotationScope(scope, jobID string) (string, error) {
 	switch scope {
-	case annotationScopeBuild:
-		return scope, ""
+	case "", annotationScopeBuild:
+		return annotationScopeBuild, nil
 	case annotationScopeJob:
 		if jobID == "" {
-			return "", "job_id is required when scope is 'job'"
+			return "", errors.New("job_id is required when scope is 'job'")
 		}
-		return scope, ""
+		return annotationScopeJob, nil
 	default:
-		return "", "scope must be 'build' or 'job'"
+		return "", errors.New("scope must be 'build' or 'job'")
 	}
 }
 
@@ -77,9 +74,9 @@ func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], 
 			ctx, span := trace.Start(ctx, "buildkite.ListAnnotations")
 			defer span.End()
 
-			scope, validationErr := normalizeAnnotationScope(args.Scope, args.JobID)
-			if validationErr != "" {
-				return utils.NewToolResultError(validationErr), nil, nil
+			scope, scopeErr := normalizeAnnotationScope(args.Scope, args.JobID)
+			if scopeErr != nil {
+				return utils.NewToolResultError(scopeErr.Error()), nil, nil
 			}
 
 			paginationParams := paginationFromArgs(args.Page, args.PerPage)
@@ -142,9 +139,9 @@ func CreateAnnotation() (mcp.Tool, mcp.ToolHandlerFor[CreateAnnotationArgs, any]
 			ctx, span := trace.Start(ctx, "buildkite.CreateAnnotation")
 			defer span.End()
 
-			scope, validationErr := normalizeAnnotationScope(args.Scope, args.JobID)
-			if validationErr != "" {
-				return utils.NewToolResultError(validationErr), nil, nil
+			scope, scopeErr := normalizeAnnotationScope(args.Scope, args.JobID)
+			if scopeErr != nil {
+				return utils.NewToolResultError(scopeErr.Error()), nil, nil
 			}
 
 			span.SetAttributes(
