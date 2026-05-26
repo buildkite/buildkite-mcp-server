@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -39,11 +39,11 @@ type CreateClusterQueueArgs struct {
 }
 
 type UpdateClusterQueueArgs struct {
-	OrgSlug            string `json:"org_slug"`
-	ClusterID          string `json:"cluster_id"`
-	QueueID            string `json:"queue_id"`
-	Description        string `json:"description,omitempty" jsonschema:"New description for the queue"`
-	RetryAgentAffinity string `json:"retry_agent_affinity,omitempty" jsonschema:"Agent retry affinity: prefer-warmest or prefer-different"`
+	OrgSlug            string  `json:"org_slug"`
+	ClusterID          string  `json:"cluster_id"`
+	QueueID            string  `json:"queue_id"`
+	Description        *string `json:"description,omitempty" jsonschema:"New description for the queue"`
+	RetryAgentAffinity *string `json:"retry_agent_affinity,omitempty" jsonschema:"Agent retry affinity: prefer-warmest or prefer-different"`
 }
 
 type PauseClusterQueueDispatchArgs struct {
@@ -181,9 +181,15 @@ func UpdateClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[UpdateClusterQueueArgs, 
 			)
 
 			deps := DepsFromContext(ctx)
+			var retryAgentAffinity *buildkite.RetryAgentAffinity
+			if args.RetryAgentAffinity != nil {
+				value := buildkite.RetryAgentAffinity(*args.RetryAgentAffinity)
+				retryAgentAffinity = &value
+			}
+
 			queue, _, err := deps.ClusterQueuesClient.Update(ctx, args.OrgSlug, args.ClusterID, args.QueueID, buildkite.ClusterQueueUpdate{
-				Description:        args.Description,
-				RetryAgentAffinity: buildkite.RetryAgentAffinity(args.RetryAgentAffinity),
+				Description:        optionalValue(args.Description),
+				RetryAgentAffinity: optionalValue(retryAgentAffinity),
 			})
 			if err != nil {
 				return handleBuildkiteError(err)

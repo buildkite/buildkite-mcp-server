@@ -249,3 +249,7 @@ func getTextResult(t *testing.T, result *mcp.CallToolResult) *mcp.TextContent {
 
 	return textContent
 }
+
+func testPtr[T any](value T) *T {
+	return &value
+}

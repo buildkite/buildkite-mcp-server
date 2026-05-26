@@ -7,7 +7,7 @@ import (
 	"github.com/buildkite/buildkite-mcp-server/pkg/sanitize"
 	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -101,6 +101,20 @@ func applyClientSidePagination[T any](items []T, params ClientSidePaginationPara
 
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+func optionalValue[T any](value *T) buildkite.Optional[T] {
+	if value == nil {
+		return buildkite.Optional[T]{}
+	}
+	return buildkite.Some(*value)
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func mcpTextResult(span trace.Span, result any) (*mcp.CallToolResult, any, error) {

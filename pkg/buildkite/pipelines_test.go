@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/stretchr/testify/require"
 )
 
@@ -384,7 +384,21 @@ steps:
 			assert.Equal("org", org)
 			assert.Equal("test-pipeline", pipeline)
 
-			assert.Equal(testPipelineDefinition, p.Configuration)
+			configuration, ok := p.Configuration.Value()
+			assert.True(ok)
+			assert.Equal(testPipelineDefinition, configuration)
+
+			name, ok := p.Name.Value()
+			assert.True(ok)
+			assert.Equal("Test Pipeline", name)
+
+			skipQueuedBranchBuilds, ok := p.SkipQueuedBranchBuilds.Value()
+			assert.True(ok)
+			assert.False(skipQueuedBranchBuilds)
+
+			tags, ok := p.Tags.Value()
+			assert.True(ok)
+			assert.Equal([]string{"tag1", "tag2"}, tags)
 
 			return buildkite.Pipeline{
 					ID:        "123",
@@ -410,17 +424,58 @@ steps:
 	request := createMCPRequest(t, map[string]any{})
 
 	args := UpdatePipelineArgs{
-		OrgSlug:       "org",
-		PipelineSlug:  "test-pipeline",
-		Name:          "Test Pipeline",
-		ClusterID:     "abc-123",
-		Description:   "A test pipeline",
-		Configuration: testPipelineDefinition,
-		RepositoryURL: "https://example.com/repo.git",
-		Tags:          []string{"tag1", "tag2"},
+		OrgSlug:                "org",
+		PipelineSlug:           "test-pipeline",
+		Name:                   testPtr("Test Pipeline"),
+		ClusterID:              testPtr("abc-123"),
+		Description:            testPtr("A test pipeline"),
+		Configuration:          testPtr(testPipelineDefinition),
+		RepositoryURL:          testPtr("https://example.com/repo.git"),
+		SkipQueuedBranchBuilds: testPtr(false),
+		Tags:                   []string{"tag1", "tag2"},
 	}
 	result, _, err := handler(ctx, request, args)
 	assert.NoError(err)
 	textContent := getTextResult(t, result)
 	assert.JSONEq(`{"id":"123","name":"Test Pipeline","slug":"test-pipeline","created_at":"0001-01-01T00:00:00Z","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"cluster_id":"abc-123","tags":["tag1","tag2"],"provider":{"id":"","webhook_url":"","settings":null}}`, textContent.Text)
+}
+
+func TestUpdatePipelineOmittedFieldsAndEmptyTags(t *testing.T) {
+	assert := require.New(t)
+
+	client := &MockPipelinesClient{
+		UpdateFunc: func(ctx context.Context, org string, pipeline string, p buildkite.UpdatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
+			assert.True(p.Name.IsZero())
+			assert.True(p.Configuration.IsZero())
+
+			cancelRunningBranchBuilds, ok := p.CancelRunningBranchBuilds.Value()
+			assert.True(ok)
+			assert.False(cancelRunningBranchBuilds)
+
+			tags, ok := p.Tags.Value()
+			assert.True(ok)
+			assert.Empty(tags)
+
+			return buildkite.Pipeline{
+					ID: "123",
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+
+	_, handler, _ := UpdatePipeline()
+
+	request := createMCPRequest(t, map[string]any{})
+	_, _, err := handler(ctx, request, UpdatePipelineArgs{
+		OrgSlug:                   "org",
+		PipelineSlug:              "test-pipeline",
+		CancelRunningBranchBuilds: testPtr(false),
+		Tags:                      []string{},
+	})
+	assert.NoError(err)
 }

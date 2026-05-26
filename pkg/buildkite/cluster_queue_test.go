@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
@@ -171,9 +171,14 @@ func TestUpdateClusterQueue(t *testing.T) {
 
 	client := &mockClusterQueuesClient{
 		UpdateFunc: func(ctx context.Context, org, clusterID, queueID string, qu buildkite.ClusterQueueUpdate) (buildkite.ClusterQueue, *buildkite.Response, error) {
+			description, ok := qu.Description.Value()
+			assert.True(ok)
+			assert.Equal("updated description", description)
+			assert.True(qu.RetryAgentAffinity.IsZero())
+
 			return buildkite.ClusterQueue{
 					ID:          queueID,
-					Description: qu.Description,
+					Description: description,
 				}, &buildkite.Response{
 					Response: &http.Response{
 						StatusCode: 200,
@@ -194,12 +199,47 @@ func TestUpdateClusterQueue(t *testing.T) {
 		OrgSlug:     "org",
 		ClusterID:   "cluster-id",
 		QueueID:     "queue-id",
-		Description: "updated description",
+		Description: testPtr("updated description"),
 	})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
 	assert.JSONEq(`{"id":"queue-id","description":"updated description","dispatch_paused":false,"created_by":{}}`, textContent.Text)
+}
+
+func TestUpdateClusterQueueSendsRetryAgentAffinity(t *testing.T) {
+	assert := require.New(t)
+
+	client := &mockClusterQueuesClient{
+		UpdateFunc: func(ctx context.Context, org, clusterID, queueID string, qu buildkite.ClusterQueueUpdate) (buildkite.ClusterQueue, *buildkite.Response, error) {
+			retryAgentAffinity, ok := qu.RetryAgentAffinity.Value()
+			assert.True(ok)
+			assert.Equal(buildkite.RetryAgentAffinityPreferDifferent, retryAgentAffinity)
+			assert.True(qu.Description.IsZero())
+
+			return buildkite.ClusterQueue{
+					ID:                 queueID,
+					RetryAgentAffinity: retryAgentAffinity,
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClusterQueuesClient: client})
+
+	_, handler, _ := UpdateClusterQueue()
+
+	request := createMCPRequest(t, map[string]any{})
+	_, _, err := handler(ctx, request, UpdateClusterQueueArgs{
+		OrgSlug:            "org",
+		ClusterID:          "cluster-id",
+		QueueID:            "queue-id",
+		RetryAgentAffinity: testPtr(string(buildkite.RetryAgentAffinityPreferDifferent)),
+	})
+	assert.NoError(err)
 }
 
 func TestPauseClusterQueueDispatch(t *testing.T) {
@@ -312,7 +352,7 @@ func TestUpdateClusterQueueWithError(t *testing.T) {
 		OrgSlug:     "org",
 		ClusterID:   "cluster-id",
 		QueueID:     "queue-id",
-		Description: "updated",
+		Description: testPtr("updated"),
 	})
 	assert.NoError(err)
 	assert.True(result.IsError)

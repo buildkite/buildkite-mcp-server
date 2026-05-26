@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -318,14 +318,14 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 type UpdatePipelineArgs struct {
 	OrgSlug                   string   `json:"org_slug"`
 	PipelineSlug              string   `json:"pipeline_slug"`
-	Name                      string   `json:"name,omitempty"`
-	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
-	ClusterID                 string   `json:"cluster_id,omitempty"`
-	Description               string   `json:"description,omitempty"`
-	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
-	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
-	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
-	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Name                      *string  `json:"name,omitempty"`
+	RepositoryURL             *string  `json:"repository_url,omitempty" jsonschema:"The Git repository URL"`
+	ClusterID                 *string  `json:"cluster_id,omitempty"`
+	Description               *string  `json:"description,omitempty"`
+	Configuration             *string  `json:"configuration,omitempty" jsonschema:"The pipeline configuration in YAML format"`
+	DefaultBranch             *string  `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    *bool    `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds *bool    `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
 	Tags                      []string `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
 }
 
@@ -343,21 +343,23 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("repository_url", args.RepositoryURL),
+				attribute.String("repository_url", stringValue(args.RepositoryURL)),
 			)
 
 			update := buildkite.UpdatePipeline{
-				Name:                      args.Name,
-				Repository:                args.RepositoryURL,
-				ClusterID:                 args.ClusterID,
-				Description:               args.Description,
-				CancelRunningBranchBuilds: args.CancelRunningBranchBuilds,
-				SkipQueuedBranchBuilds:    args.SkipQueuedBranchBuilds,
-				Configuration:             args.Configuration,
-				Tags:                      args.Tags,
+				Name:                      optionalValue(args.Name),
+				Repository:                optionalValue(args.RepositoryURL),
+				ClusterID:                 optionalValue(args.ClusterID),
+				Description:               optionalValue(args.Description),
+				CancelRunningBranchBuilds: optionalValue(args.CancelRunningBranchBuilds),
+				SkipQueuedBranchBuilds:    optionalValue(args.SkipQueuedBranchBuilds),
+				Configuration:             optionalValue(args.Configuration),
 			}
-			if args.DefaultBranch != "" {
-				update.DefaultBranch = args.DefaultBranch
+			if args.DefaultBranch != nil {
+				update.DefaultBranch = buildkite.Some(*args.DefaultBranch)
+			}
+			if args.Tags != nil {
+				update.Tags = buildkite.Some(args.Tags)
 			}
 
 			deps := DepsFromContext(ctx)

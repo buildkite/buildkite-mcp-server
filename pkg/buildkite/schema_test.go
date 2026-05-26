@@ -71,8 +71,7 @@ func TestCreatePipelineArgsSchema(t *testing.T) {
 
 func TestUpdatePipelineArgsSchema(t *testing.T) {
 	req := sortedRequired[UpdatePipelineArgs](t)
-	// Required: org_slug, pipeline_slug, repository_url, configuration
-	require.Equal(t, []string{"configuration", "org_slug", "pipeline_slug", "repository_url"}, req)
+	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
 }
 
 func TestCreateBuildArgsSchema(t *testing.T) {

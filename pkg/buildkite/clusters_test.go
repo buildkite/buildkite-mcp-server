@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
@@ -154,9 +154,14 @@ func TestUpdateCluster(t *testing.T) {
 
 	client := &mockClustersClient{
 		UpdateFunc: func(ctx context.Context, org, id string, cu buildkite.ClusterUpdate) (buildkite.Cluster, *buildkite.Response, error) {
+			name, ok := cu.Name.Value()
+			assert.True(ok)
+			assert.Equal("updated-name", name)
+			assert.True(cu.Description.IsZero())
+
 			return buildkite.Cluster{
 					ID:   id,
-					Name: cu.Name,
+					Name: name,
 				}, &buildkite.Response{
 					Response: &http.Response{
 						StatusCode: 200,
@@ -176,12 +181,46 @@ func TestUpdateCluster(t *testing.T) {
 	result, _, err := handler(ctx, request, UpdateClusterArgs{
 		OrgSlug:   "org",
 		ClusterID: "cluster-id",
-		Name:      "updated-name",
+		Name:      testPtr("updated-name"),
 	})
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
 	assert.JSONEq(`{"id":"cluster-id","name":"updated-name","created_by":{},"maintainers":{}}`, textContent.Text)
+}
+
+func TestUpdateClusterSendsExplicitEmptyString(t *testing.T) {
+	assert := require.New(t)
+
+	client := &mockClustersClient{
+		UpdateFunc: func(ctx context.Context, org, id string, cu buildkite.ClusterUpdate) (buildkite.Cluster, *buildkite.Response, error) {
+			description, ok := cu.Description.Value()
+			assert.True(ok)
+			assert.Empty(description)
+			assert.True(cu.Name.IsZero())
+
+			return buildkite.Cluster{
+					ID:          id,
+					Description: description,
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClustersClient: client})
+
+	_, handler, _ := UpdateCluster()
+
+	request := createMCPRequest(t, map[string]any{})
+	_, _, err := handler(ctx, request, UpdateClusterArgs{
+		OrgSlug:     "org",
+		ClusterID:   "cluster-id",
+		Description: testPtr(""),
+	})
+	assert.NoError(err)
 }
 
 func TestCreateClusterWithError(t *testing.T) {
@@ -224,7 +263,7 @@ func TestUpdateClusterWithError(t *testing.T) {
 	result, _, err := handler(ctx, request, UpdateClusterArgs{
 		OrgSlug:   "org",
 		ClusterID: "cluster-id",
-		Name:      "updated-name",
+		Name:      testPtr("updated-name"),
 	})
 	assert.NoError(err)
 	assert.True(result.IsError)

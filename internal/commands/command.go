@@ -7,7 +7,7 @@ import (
 	"runtime"
 
 	buildkitelogs "github.com/buildkite/buildkite-logs"
-	gobuildkite "github.com/buildkite/go-buildkite/v4"
+	gobuildkite "github.com/buildkite/go-buildkite/v5"
 	"github.com/rs/zerolog/log"
 )
 

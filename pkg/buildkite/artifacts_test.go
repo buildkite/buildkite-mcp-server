@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/buildkite/go-buildkite/v4"
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/stretchr/testify/require"
 )
 
