@@ -74,8 +74,8 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/buildkite/buildkite-logs v0.8.1 h1:cJ9K46Td2FH7M+CjDNM5CN2BHNmztgJu8CeyYOTu6jE=
 github.com/buildkite/buildkite-logs v0.8.1/go.mod h1:ORrtYBhFeN8ETv9Hi8ylugemCKjX+yfpAJslrbWVyDc=
-github.com/buildkite/go-buildkite/v4 v4.21.0 h1:H/aTrPexE035u269mCTJ6v8dHB6oVgWjETc9bEMKgQM=
-github.com/buildkite/go-buildkite/v4 v4.21.0/go.mod h1:t/M4DUcs7qyebtzm3nkyZ1zUB/svWnKtR+uRU2Ca8tQ=
+github.com/buildkite/go-buildkite/v4 v4.23.0 h1:GlLgPzGz/+B/4Fc5CphIxynoQn00SdSu6QQp4PlAI3M=
+github.com/buildkite/go-buildkite/v4 v4.23.0/go.mod h1:t/M4DUcs7qyebtzm3nkyZ1zUB/svWnKtR+uRU2Ca8tQ=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=
 github.com/cenkalti/backoff v2.2.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
