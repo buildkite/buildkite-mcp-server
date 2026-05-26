@@ -165,13 +165,24 @@ func UpdateCluster() (mcp.Tool, mcp.ToolHandlerFor[UpdateClusterArgs, any], []st
 			)
 
 			deps := DepsFromContext(ctx)
-			cluster, _, err := deps.ClustersClient.Update(ctx, args.OrgSlug, args.ClusterID, buildkite.ClusterUpdate{
-				Name:           optionalValue(args.Name),
-				Description:    optionalValue(args.Description),
-				Emoji:          optionalValue(args.Emoji),
-				Color:          optionalValue(args.Color),
-				DefaultQueueID: optionalValue(args.DefaultQueueID),
-			})
+			update := buildkite.ClusterUpdate{}
+			if args.Name != nil {
+				update.Name = buildkite.Some(*args.Name)
+			}
+			if args.Description != nil {
+				update.Description = buildkite.Some(*args.Description)
+			}
+			if args.Emoji != nil {
+				update.Emoji = buildkite.Some(*args.Emoji)
+			}
+			if args.Color != nil {
+				update.Color = buildkite.Some(*args.Color)
+			}
+			if args.DefaultQueueID != nil {
+				update.DefaultQueueID = buildkite.Some(*args.DefaultQueueID)
+			}
+
+			cluster, _, err := deps.ClustersClient.Update(ctx, args.OrgSlug, args.ClusterID, update)
 			if err != nil {
 				return handleBuildkiteError(err)
 			}

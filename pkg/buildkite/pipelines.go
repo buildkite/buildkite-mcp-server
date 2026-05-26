@@ -343,20 +343,33 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("repository_url", stringValue(args.RepositoryURL)),
 			)
 
-			update := buildkite.UpdatePipeline{
-				Name:                      optionalValue(args.Name),
-				Repository:                optionalValue(args.RepositoryURL),
-				ClusterID:                 optionalValue(args.ClusterID),
-				Description:               optionalValue(args.Description),
-				CancelRunningBranchBuilds: optionalValue(args.CancelRunningBranchBuilds),
-				SkipQueuedBranchBuilds:    optionalValue(args.SkipQueuedBranchBuilds),
-				Configuration:             optionalValue(args.Configuration),
+			update := buildkite.UpdatePipeline{}
+			if args.Name != nil {
+				update.Name = buildkite.Some(*args.Name)
+			}
+			if args.RepositoryURL != nil {
+				span.SetAttributes(attribute.String("repository_url", *args.RepositoryURL))
+				update.Repository = buildkite.Some(*args.RepositoryURL)
+			}
+			if args.ClusterID != nil {
+				update.ClusterID = buildkite.Some(*args.ClusterID)
+			}
+			if args.Description != nil {
+				update.Description = buildkite.Some(*args.Description)
+			}
+			if args.Configuration != nil {
+				update.Configuration = buildkite.Some(*args.Configuration)
 			}
 			if args.DefaultBranch != nil {
 				update.DefaultBranch = buildkite.Some(*args.DefaultBranch)
+			}
+			if args.SkipQueuedBranchBuilds != nil {
+				update.SkipQueuedBranchBuilds = buildkite.Some(*args.SkipQueuedBranchBuilds)
+			}
+			if args.CancelRunningBranchBuilds != nil {
+				update.CancelRunningBranchBuilds = buildkite.Some(*args.CancelRunningBranchBuilds)
 			}
 			if args.Tags != nil {
 				update.Tags = buildkite.Some(args.Tags)

@@ -181,16 +181,15 @@ func UpdateClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[UpdateClusterQueueArgs, 
 			)
 
 			deps := DepsFromContext(ctx)
-			var retryAgentAffinity *buildkite.RetryAgentAffinity
+			update := buildkite.ClusterQueueUpdate{}
+			if args.Description != nil {
+				update.Description = buildkite.Some(*args.Description)
+			}
 			if args.RetryAgentAffinity != nil {
-				value := buildkite.RetryAgentAffinity(*args.RetryAgentAffinity)
-				retryAgentAffinity = &value
+				update.RetryAgentAffinity = buildkite.Some(buildkite.RetryAgentAffinity(*args.RetryAgentAffinity))
 			}
 
-			queue, _, err := deps.ClusterQueuesClient.Update(ctx, args.OrgSlug, args.ClusterID, args.QueueID, buildkite.ClusterQueueUpdate{
-				Description:        optionalValue(args.Description),
-				RetryAgentAffinity: optionalValue(retryAgentAffinity),
-			})
+			queue, _, err := deps.ClusterQueuesClient.Update(ctx, args.OrgSlug, args.ClusterID, args.QueueID, update)
 			if err != nil {
 				return handleBuildkiteError(err)
 			}

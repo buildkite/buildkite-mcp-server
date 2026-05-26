@@ -103,20 +103,6 @@ func boolPtr(b bool) *bool {
 	return &b
 }
 
-func optionalValue[T any](value *T) buildkite.Optional[T] {
-	if value == nil {
-		return buildkite.Optional[T]{}
-	}
-	return buildkite.Some(*value)
-}
-
-func stringValue(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
-}
-
 func mcpTextResult(span trace.Span, result any) (*mcp.CallToolResult, any, error) {
 	r, err := json.Marshal(result)
 	if err != nil {
