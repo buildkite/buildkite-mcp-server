@@ -74,6 +74,44 @@ func TestUpdatePipelineArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
 }
 
+func TestListPipelineSchedulesArgsSchema(t *testing.T) {
+	s := schemaFor[ListPipelineSchedulesArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"page", "per_page"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestGetPipelineScheduleArgsSchema(t *testing.T) {
+	req := sortedRequired[GetPipelineScheduleArgs](t)
+	require.Equal(t, []string{"org_slug", "pipeline_slug", "schedule_id"}, req)
+}
+
+func TestCreatePipelineScheduleArgsSchema(t *testing.T) {
+	s := schemaFor[CreatePipelineScheduleArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"cronline", "org_slug", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"label", "message", "commit", "branch", "env", "enabled"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestUpdatePipelineScheduleArgsSchema(t *testing.T) {
+	s := schemaFor[UpdatePipelineScheduleArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"org_slug", "pipeline_slug", "schedule_id"}, req)
+
+	for _, opt := range []string{"cronline", "label", "message", "commit", "branch", "env", "enabled"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
 func TestCreateBuildArgsSchema(t *testing.T) {
 	req := sortedRequired[CreateBuildArgs](t)
 	require.Equal(t, []string{"branch", "commit", "message", "org_slug", "pipeline_slug"}, req)

@@ -184,6 +184,11 @@ func TestUpdatePipelineSchedule(t *testing.T) {
 			gotEnabled, ok := in.Enabled.Value()
 			assert.True(ok)
 			assert.True(gotEnabled)
+			assert.True(in.Cronline.IsZero())
+			assert.True(in.Message.IsZero())
+			assert.True(in.Commit.IsZero())
+			assert.True(in.Branch.IsZero())
+			assert.True(in.Env.IsZero())
 			return buildkite.PipelineSchedule{
 					ID:      "abc",
 					Label:   "Updated label",
