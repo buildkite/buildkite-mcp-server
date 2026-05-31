@@ -62,6 +62,24 @@ func unauthorizedMiddleware(cb func()) mcp.Middleware {
 	}
 }
 
+const buildkiteServerInstructions = `This is the Buildkite MCP Server. It provides access to the Buildkite CI/CD API, enabling you to manage and inspect pipelines, builds, jobs, logs, clusters, tests, artifacts, and annotations.
+
+Start here: Before using most tools, call get_user_token_organization to retrieve the organization slug. Nearly every other tool requires the org parameter, and this call is the fastest way to discover it.
+
+For a detailed log debugging workflow, see the buildkite://debug-logs-guide resource.
+
+Authorization: Tools available depend on the scopes granted to the configured API token. A 401 response from a tool means the token lacks the required scope for that operation.
+
+Common pitfalls:
+
+build_number is a sequential integer string (e.g. "42"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field.
+
+Job state "broken" means the job was never eligible to run due to something inside the pipeline configuration: an if conditional that evaluated to false, or a branch filter that did not match. It does not mean the job failed. Distinguish: broken = configuration prevented execution; failed = job ran but exited non-zero; skipped = external factor (e.g. a newer build superseded it).
+
+Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.
+
+Annotation scope: when creating an annotation with scope "job", job_id is required. If job_id is provided but scope is left as the default "build", the job_id is silently ignored.`
+
 // NewMCPServer creates a new MCP server with the given configuration
 func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...ToolsetOption) *mcp.Server {
 	cfg := &ToolsetConfig{
@@ -76,7 +94,9 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:    "buildkite-mcp-server",
 		Version: version,
-	}, nil)
+	}, &mcp.ServerOptions{
+		Instructions: buildkiteServerInstructions,
+	})
 
 	log.Info().Str("version", version).Msg("Starting Buildkite MCP server")
 
