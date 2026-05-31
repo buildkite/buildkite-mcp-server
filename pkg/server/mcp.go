@@ -66,8 +66,6 @@ const buildkiteServerInstructions = `This is the Buildkite MCP Server. It provid
 
 Start here: Before using most tools, call get_user_token_organization to retrieve the organization slug. Nearly every other tool requires the org parameter, and this call is the fastest way to discover it.
 
-For a detailed log debugging workflow, see the buildkite://debug-logs-guide resource.
-
 Authorization: Tools available depend on the scopes granted to the configured API token. A 401 response from a tool means the token lacks the required scope for that operation.
 
 Common pitfalls:
