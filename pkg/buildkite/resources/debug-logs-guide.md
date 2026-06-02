@@ -8,143 +8,137 @@ This guide explains how to effectively use the Buildkite MCP server's log tools 
 - [Optimizing LLM Usage](#optimizing-llm-usage)
 - [Common Error Patterns](#common-error-patterns)
 - [Example Investigation](#example-investigation)
-- [LLM Prompt Templates](#llm-prompt-templates)
 
 ## Tools Overview
 
-The server provides four powerful tools for log analysis:
+The server provides these tools for log analysis:
 
-### 1. get_logs_info - Start Here
-**Always begin your investigation with this tool** to understand the log file size and scope.
-
-```json
-{
-  "org": "<ORG>",
-  "pipeline": "<PIPELINE>", 
-  "build": "<BUILD>",
-  "job": "<JOB_ID>"
-}
-```
-
-This helps you plan your debugging approach based on log size.
-
-### 2. tail_logs - For Recent Failures
-**Best for finding recent errors** - shows the last N log entries where failures typically appear.
+### 1. tail_logs - Start Here for Failures
+**Best first step for diagnosing failures** — shows the last N log lines where errors typically appear.
 
 ```json
 {
-  "org": "<ORG>",
-  "pipeline": "<PIPELINE>",
-  "build": "<BUILD>", 
-  "job": "<JOB_ID>",
+  "org_slug": "<ORG>",
+  "pipeline_slug": "<PIPELINE>",
+  "build_number": "<BUILD>",
+  "job_id": "<JOB_ID>",
   "tail": 50
 }
 ```
 
-### 3. search_logs - For Specific Issues
+Defaults to 10 lines if `tail` is omitted or zero.
+Use `tail: 50-100` for an initial failure check when you want more than the default.
+
+### 2. search_logs - For Specific Issues
 **Most powerful tool** for finding specific error patterns with context.
 
 **Key Parameters:**
-- `pattern` (required): Regex pattern (POSIX-style, case-insensitive by default)
+- `pattern` (required): Regex pattern (case-insensitive by default)
 - `context`: Lines before/after each match (0-20 recommended)
-- `before_context`/`after_context`: Asymmetric context
+- `before_context` / `after_context`: Asymmetric context
 - `case_sensitive`: Enable case-sensitive matching
-- `invert_match`: Show non-matching lines
+- `invert_match`: Return entries that do not match the regex
 - `reverse`: Search backwards from end
-- `seek_start`: Start from specific row (0-based)
-- `limit`: Max matches (default: 100)
+- `seek_start`: Start search from this row number (0-based)
+- `limit`: Max matches to return (set this to avoid excessive output)
+
+Recommended starting values: use `context: 3`, `limit: 10-20`, and leave boolean options false unless you need them. If `limit` is omitted, search can return every match.
 
 ```json
 {
-  "org": "<ORG>",
-  "pipeline": "<PIPELINE>",
-  "build": "<BUILD>",
-  "job": "<JOB_ID>", 
+  "org_slug": "<ORG>",
+  "pipeline_slug": "<PIPELINE>",
+  "build_number": "<BUILD>",
+  "job_id": "<JOB_ID>",
   "pattern": "error|failed|exception",
   "context": 3,
   "limit": 20
 }
 ```
 
-> ⚠️ **Warning**: Setting `limit` > 200 may exceed LLM context windows.
-
-### 4. read_logs - For Sequential Reading
-**Use when you need to read specific sections** of logs in order.
+### 3. read_logs - For Sequential Reading
+**Use when you need to read a specific section** of logs in order, using a row number found via search_logs.
 
 ```json
 {
-  "org": "<ORG>",
-  "pipeline": "<PIPELINE>",
-  "build": "<BUILD>",
-  "job": "<JOB_ID>",
+  "org_slug": "<ORG>",
+  "pipeline_slug": "<PIPELINE>",
+  "build_number": "<BUILD>",
+  "job_id": "<JOB_ID>",
   "seek": 1000,
   "limit": 100
 }
 ```
 
+Always set `limit` — logs can be very large.
+
 ## Debugging Workflow
 
+### Step 0: Identify the Failing Job
+Before pulling any logs, call `get_build` with `job_state=failed,broken` to narrow down which jobs need attention:
+
+```json
+{
+  "org_slug": "<ORG>",
+  "pipeline_slug": "<PIPELINE>",
+  "build_number": "<BUILD>",
+  "job_state": "failed,broken"
+}
+```
+
+This returns only the jobs that didn't pass. From the results:
+- **`failed`** jobs actually ran and exited non-zero — these are the root cause, start here
+- **`broken`** jobs never ran due to a failed dependency or unmet `if` condition — they are usually downstream victims of the `failed` job
+
+Take the `id` of the `failed` job as your `job_id` for log investigation.
+
 ### Step 1: Quick Assessment
-1. Start with `get_logs_info` to understand log size
-2. Use `tail_logs` with `tail: 50-100` to see recent entries
+Use `tail_logs` with `tail: 50-100` to see the most recent output. Most failures surface here.
 
 ### Step 2: Error Hunting
-3. Use `search_logs` with common error patterns:
-   - `error|failed|exception`
-   - `fatal|panic|abort`
-   - `timeout|cancelled`
-   - `permission denied|access denied`
+Use `search_logs` with common error patterns:
+- `error|failed|exception`
+- `fatal|panic|abort`
+- `timeout|cancelled`
+- `permission denied|access denied`
 
 ### Step 3: Context Investigation
-4. When you find errors, increase `context: 5-10` to see surrounding lines
-5. Use `before_context` and `after_context` for asymmetric context
+When you find errors, increase `context: 5-10` to see surrounding lines. Use `before_context` and `after_context` for asymmetric context (e.g. more lines after a match than before).
 
 ### Step 4: Deep Dive
-6. Use `read_logs` with `seek` to read specific sections around errors
-7. Search for test names, file paths, or specific commands that failed
+Use `read_logs` with the `rn` row number from a `search_logs` result as `seek` to read the section around a specific error.
 
-## Sample Response Format
+## Log Entry Format
 
-The `json-terse` format returns entries like:
+Log entries are returned as JSON objects:
 ```json
 {"ts": 1696168225123, "c": "Test failed: assertion error", "rn": 42}
-{"ts": 1696168225456, "c": "npm test", "rn": 43}
 ```
 - `ts`: Timestamp in Unix milliseconds
 - `c`: Log content (ANSI codes stripped)
-- `rn`: Row number (0-based, use for seeking)
+- `rn`: Row number (0-based) — use this as `seek` in `read_logs` or `seek_start` in `search_logs`
 
 ## Optimizing LLM Usage
 
 ### Token Efficiency
-- **Always use `format: "json-terse"`** (default) for most efficient token usage
-  - Provides both log content (`c`) and row numbers (`rn`) for precise pagination
-  - Automatically strips ANSI escape codes for clean processing
-  - Most compact representation for AI analysis
-- **Always set `limit` parameters** to avoid excessive output
-- Use `raw: true` when you only need log content without metadata
-
-### Progressive Search Strategy
-1. Start broad with low limits (`limit: 10-20`)
-2. Refine patterns based on findings
-3. Use `invert_match: true` to exclude noise
-4. Use `reverse: true` with `seek_start` to search backwards from known failure points
+- **Always set `limit`** on `search_logs` and `read_logs` to avoid excessive output
+- Start with low limits (`limit: 10-20`) and refine based on findings
+- Use `invert_match: true` only with a narrow pattern and a `limit`; it returns entries that do not match the regex
+- Use `reverse: true` with `seek_start` to search backwards from a known failure point
 
 ### Context Guidelines
 - Use `context: 3-5` for general investigation
 - Use `context: 10-20` when you need to understand complex error flows
 - Limit context to avoid token waste on unrelated log entries
 
-### JSON-Terse Format Benefits
-The `json-terse` format is specifically designed for efficient AI processing:
-- **Row Numbers**: `rn` field enables precise seeking with `read_logs` for context around found issues
-- **Clean Content**: Automatically strips ANSI escape codes that would waste tokens
-- **Compact Structure**: Minimal field names (`ts`, `c`, `rn`) reduce overhead
-- **Pagination Support**: Use row numbers to fetch precise context around errors
+**Approximate token cost per call:**
+- `tail_logs` (50 lines): ~800-1200 tokens
+- `search_logs` (20 matches, context 3): ~1000-2000 tokens
+- `read_logs` (100 lines): ~1500-2500 tokens
 
 ## Common Error Patterns
 
-**Build failures:**
+**Build/compile failures:**
 ```
 "pattern": "build failed|compilation error|linking error"
 ```
@@ -166,46 +160,23 @@ The `json-terse` format is specifically designed for efficient AI processing:
 
 ## Example Investigation
 
-```json
-// 1. Get file overview
-{"org": "<ORG>", "pipeline": "<PIPELINE>", "build": "<BUILD>", "job": "<JOB_ID>"}
+```
+// 1. Identify failed or broken jobs first
+get_build: org_slug=<ORG> pipeline_slug=<PIPELINE> build_number=<BUILD> job_state="failed,broken"
 
-// 2. Check recent failures  
-{"org": "<ORG>", "pipeline": "<PIPELINE>", "build": "<BUILD>", "job": "<JOB_ID>", "tail": 50}
+// 2. Use the id from a failed job as job_id, then check recent output
+tail_logs: org_slug=<ORG> pipeline_slug=<PIPELINE> build_number=<BUILD> job_id=<FAILED_JOB_ID> tail=50
 
 // 3. Search for errors with context
-{"org": "<ORG>", "pipeline": "<PIPELINE>", "build": "<BUILD>", "job": "<JOB_ID>", "pattern": "failed|error", "context": 5, "limit": 15}
+search_logs: ...pattern="failed|error" context=5 limit=15
 
-// 4. Deep dive on specific test failures
-{"org": "<ORG>", "pipeline": "<PIPELINE>", "build": "<BUILD>", "job": "<JOB_ID>", "pattern": "TestLoginHandler.*failed", "context": 10, "limit": 5}
+// 4. Deep dive on a specific failure using rn from step 3
+read_logs: ...seek=<rn-10> limit=20
 ```
 
 ## Cache Management
 
 - Completed builds are cached permanently
-- Running builds use 30s TTL by default
-- Use `force_refresh: true` only when you need the absolute latest data
-- Set `cache_ttl` appropriately for your investigation needs
-
-## LLM Prompt Templates
-
-For AI assistants debugging build failures:
-
-```
-Standard debugging workflow:
-1. Call get_logs_info to assess log size
-2. If rows > 1000: use tail_logs with tail=50 first
-3. Search with pattern "(error|failed|timeout)" limit=15 context=3
-4. For each critical error: use read_logs with seek=<rn-10> limit=20
-5. Summarize findings in 3 bullet points max
-```
-
-**Token estimation guide:**
-- `get_logs_info`: ~50 tokens
-- `tail_logs` (50 lines): ~800-1200 tokens  
-- `search_logs` (20 matches): ~1000-2000 tokens
-- `read_logs` (100 lines): ~1500-2500 tokens
-
-> 💡 **Tip**: After collecting log data, summarize key findings to reduce context for follow-up queries.
-
-This systematic approach will help you quickly identify and understand build failures using the available log tools.
+- Running builds use a 30s TTL by default
+- Use `force_refresh: true` only when you need the absolute latest data from a running build
+- Set `cache_ttl` to adjust the TTL for running build investigations
