@@ -152,7 +152,7 @@ func TestGetArtifact(t *testing.T) {
 
 	request := createMCPRequest(t, map[string]any{})
 	result, _, err := handler(ctx, request, GetArtifactArgs{
-		URL: "https://example.com/artifact",
+		URL: "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
 	})
 	assert.NoError(err)
 
@@ -190,11 +190,99 @@ func TestGetArtifact_ErrorResponse(t *testing.T) {
 
 	req := createMCPRequest(t, map[string]any{})
 	result, _, err := handler(ctx, req, GetArtifactArgs{
-		URL: "https://example.com/nonexistent-artifact",
+		URL: "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/missing/download",
 	})
 	assert.NoError(err)
 	assert.NotNil(result)
 	assert.Contains(getTextResult(t, result).Text, `{"message":"Artifact not found"}`)
+}
+
+func TestGetArtifact_RejectsNonArtifactURL(t *testing.T) {
+	assert := require.New(t)
+
+	var called bool
+	client := &MockArtifactsClient{
+		DownloadArtifactByURLFunc: func(ctx context.Context, url string, writer io.Writer) (*buildkite.Response, error) {
+			called = true
+			return &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: client})
+	_, handler, _ := GetArtifact()
+
+	// A URL that the caller's token could otherwise reach, but which is not an
+	// artifact resource, must be rejected before any request is issued.
+	req := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, req, GetArtifactArgs{
+		URL: "https://api.buildkite.com/v2/access-token",
+	})
+	assert.NoError(err)
+	assert.NotNil(result)
+	assert.Contains(getTextResult(t, result).Text, "invalid artifact URL")
+	assert.False(called, "download must not be attempted for a non-artifact URL")
+}
+
+func TestValidateArtifactURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{
+			name: "artifact download URL",
+			url:  "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
+		},
+		{
+			name: "artifact resource URL without /download",
+			url:  "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def",
+		},
+		{
+			name: "proxied install with base path prefix",
+			url:  "https://buildkite.proxy.com/rest/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download",
+		},
+		{
+			name:    "access-token endpoint",
+			url:     "https://api.buildkite.com/v2/access-token",
+			wantErr: true,
+		},
+		{
+			name:    "user endpoint",
+			url:     "https://api.buildkite.com/v2/user",
+			wantErr: true,
+		},
+		{
+			name:    "artifact prefix but trailing different endpoint",
+			url:     "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/download/../../access-token",
+			wantErr: true,
+		},
+		{
+			name:    "extra path segment after artifact id",
+			url:     "https://api.buildkite.com/v2/organizations/myorg/pipelines/my-pipeline/builds/123/jobs/abc/artifacts/def/secrets",
+			wantErr: true,
+		},
+		{
+			name:    "non-http scheme",
+			url:     "file:///etc/passwd",
+			wantErr: true,
+		},
+		{
+			name:    "arbitrary host and path",
+			url:     "https://example.com/artifact",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateArtifactURL(tt.url)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestBuildkiteClientAdapter_URLRewriting(t *testing.T) {

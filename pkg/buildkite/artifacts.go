@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
@@ -193,6 +194,33 @@ func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs
 		}, []string{"read_artifacts"}
 }
 
+// artifactURLPathPattern matches the path of a Buildkite REST API artifact
+// resource, optionally ending in "/download". A leading base-path prefix (used
+// by proxied installations, e.g. "/rest") is permitted, but every segment is a
+// single non-slash component and the pattern is anchored to the end of the path,
+// so the URL cannot be coerced into addressing a different API endpoint such as
+// /v2/access-token.
+var artifactURLPathPattern = regexp.MustCompile(
+	`/v2/organizations/[^/]+/pipelines/[^/]+/builds/[^/]+/jobs/[^/]+/artifacts/[^/]+(?:/download)?$`)
+
+// validateArtifactURL ensures rawURL is an http(s) URL that addresses a Buildkite
+// artifact resource. get_artifact issues an authenticated GET against this URL,
+// so restricting it to the artifact endpoint shape prevents the tool from being
+// used to read unrelated endpoints with the caller's token.
+func validateArtifactURL(rawURL string) (*url.URL, error) {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return nil, fmt.Errorf("invalid URL format: must be an http or https URL")
+	}
+
+	if !artifactURLPathPattern.MatchString(parsedURL.EscapedPath()) {
+		return nil, fmt.Errorf("invalid artifact URL: path must reference a Buildkite artifact " +
+			"(e.g. /v2/organizations/{org}/pipelines/{pipeline}/builds/{build}/jobs/{job}/artifacts/{id}/download)")
+	}
+
+	return parsedURL, nil
+}
+
 func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_artifact",
@@ -208,10 +236,12 @@ func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string
 
 			artifactURL := args.URL
 
-			// Validate the URL format and scheme
-			parsedURL, err := url.Parse(artifactURL)
-			if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-				return utils.NewToolResultError("invalid URL format: must be an http or https URL"), nil, nil
+			// Lock the URL to the Buildkite artifact endpoint shape. The handler
+			// performs an authenticated GET against this URL, so accepting arbitrary
+			// URLs would let get_artifact be used to fetch unrelated API endpoints
+			// with the caller's credentials.
+			if _, err := validateArtifactURL(artifactURL); err != nil {
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			span.SetAttributes(attribute.String("url", artifactURL))
