@@ -6,7 +6,11 @@ vendor/
 *.zip
 .bk.yaml
 /buildkite-mcp-server
-coverage.out
+/coverage.*
+/checkstyle.xml
+/cover-tree.svg
+/cover.out
+/junit.xml
 /specs
 
 # debugger binaries

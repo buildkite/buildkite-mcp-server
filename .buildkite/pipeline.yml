@@ -15,7 +15,9 @@ steps:
     key: quality-checks
     steps:
     - name: ":golangci-lint: lint"
-      command: golangci-lint run --verbose --timeout 3m
+      command: golangci-lint run --output.checkstyle.path checkstyle.xml --verbose --timeout 3m
+      artifact_paths:
+        - checkstyle.xml
       env:
         GOCACHE: /gocache
         GOMODCACHE: /gomodcache
@@ -25,8 +27,9 @@ steps:
     - name: ":go: test"
       artifact_paths:
         - cover-tree.svg
+        - junit.xml
       commands:
-        - go test -coverprofile cover.out ./...
+        - go run gotest.tools/gotestsum@latest --junitfile junit.xml --format testname -- -coverprofile=cover.out ./...
         - go run github.com/nikolaydubina/go-cover-treemap@latest -coverprofile cover.out > cover-tree.svg
         - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
       env:
