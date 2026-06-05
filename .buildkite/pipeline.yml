@@ -4,10 +4,10 @@ agents:
   queue: hosted
 
 cache:
-  name: "golang-cache"
+  name: "build-cache"
   paths:
-    - "~/gocache"
-    - "~/gomodcache"
+    - "/gocache"
+    - "/gomodcache"
   size: "100g"
 
 steps:
@@ -17,8 +17,8 @@ steps:
     - name: ":golangci-lint: lint"
       command: golangci-lint run --verbose --timeout 3m
       env:
-        - GOCACHE=~/gocache
-        - GOMODCACHE=~/gomodcache      
+        GOCACHE: /gocache
+        GOMODCACHE: /gomodcache
       plugins:
         - mise#v1.1.1: ~
 
@@ -30,8 +30,8 @@ steps:
         - go run github.com/nikolaydubina/go-cover-treemap@latest -coverprofile cover.out > cover-tree.svg
         - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
       env:
-        - GOCACHE=~/gocache
-        - GOMODCACHE=~/gomodcache      
+        GOCACHE: /gocache
+        GOMODCACHE: /gomodcache
       plugins:
         - mise#v1.1.1: ~
 
@@ -39,9 +39,9 @@ steps:
     command: ".buildkite/release.sh release --clean --snapshot --split"
     depends_on: quality-checks
     env:
-      - GOCACHE=~/gocache
-      - GOMODCACHE=~/gomodcache      
-      - GOOS={{matrix}}
+      GOOS: "{{matrix}}"
+      GOCACHE: /gocache
+      GOMODCACHE: /gomodcache
     matrix:
       - "darwin"
       - "linux"

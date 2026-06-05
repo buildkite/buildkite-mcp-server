@@ -11,7 +11,7 @@ steps:
       - "linux"
       - "windows"
     env:
-      - GOOS={{matrix}}
+      GOOS: "{{matrix}}"
     artifact_paths:
       - dist/**/*
     plugins:
