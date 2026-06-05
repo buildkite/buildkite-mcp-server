@@ -3,12 +3,22 @@ image: "buildkite/hosted-agent-base-images:ubuntu-jammy"
 agents:
   queue: hosted
 
+cache:
+  name: "build-cache"
+  paths:
+    - "/gocache"
+    - "/gomodcache"
+  size: "100g"
+
 steps:
   - group: ":mag: Quality Checks"
     key: quality-checks
     steps:
     - name: ":golangci-lint: lint"
       command: golangci-lint run --verbose --timeout 3m
+      env:
+        GOCACHE: /gocache
+        GOMODCACHE: /gomodcache
       plugins:
         - mise#v1.1.1: ~
 
@@ -19,6 +29,9 @@ steps:
         - go test -coverprofile cover.out ./...
         - go run github.com/nikolaydubina/go-cover-treemap@latest -coverprofile cover.out > cover-tree.svg
         - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
+      env:
+        GOCACHE: /gocache
+        GOMODCACHE: /gomodcache
       plugins:
         - mise#v1.1.1: ~
 
@@ -27,6 +40,8 @@ steps:
     depends_on: quality-checks
     env:
       GOOS: "{{matrix}}"
+      GOCACHE: /gocache
+      GOMODCACHE: /gomodcache
     matrix:
       - "darwin"
       - "linux"
