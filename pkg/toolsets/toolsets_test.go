@@ -629,7 +629,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered
-	expectedToolsets := []string{"clusters", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "user"}
+	expectedToolsets := []string{"clusters", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "user"}
 	for _, name := range expectedToolsets {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
