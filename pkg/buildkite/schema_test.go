@@ -258,6 +258,25 @@ func TestGetClusterArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"cluster_id", "org_slug"}, req)
 }
 
+func TestListAgentsArgsSchema(t *testing.T) {
+	s := schemaFor[ListAgentsArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"org_slug"}, req)
+
+	for _, opt := range []string{"name", "hostname", "version", "page", "per_page", "detail_level"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestGetAgentArgsSchema(t *testing.T) {
+	s := schemaFor[GetAgentArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"agent_id", "org_slug"}, req)
+	require.NotContains(t, s.Required, "detail_level")
+}
+
 func TestListClusterQueuesArgsSchema(t *testing.T) {
 	s := schemaFor[ListClusterQueuesArgs](t)
 	req := slices.Clone(s.Required)

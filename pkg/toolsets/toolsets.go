@@ -234,6 +234,7 @@ func NewTool(tool mcp.Tool, register func(s *mcp.Server), scopes []string) ToolD
 const (
 	ToolsetAll         = "all" // Special name to enable all toolsets
 	ToolsetClusters    = "clusters"
+	ToolsetAgents      = "agents"
 	ToolsetPipelines   = "pipelines"
 	ToolsetBuilds      = "builds"
 	ToolsetArtifacts   = "artifacts"
@@ -246,6 +247,7 @@ const (
 var ValidToolsets = []string{
 	ToolsetAll,
 	ToolsetClusters,
+	ToolsetAgents,
 	ToolsetPipelines,
 	ToolsetBuilds,
 	ToolsetArtifacts,
@@ -306,6 +308,14 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.UpdateClusterQueue),
 				newToolDef(buildkite.PauseClusterQueueDispatch),
 				newToolDef(buildkite.ResumeClusterQueueDispatch),
+			},
+		},
+		ToolsetAgents: {
+			Name:        "Agent Operations",
+			Description: "Tools for inspecting Buildkite agents",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListAgents),
+				newToolDef(buildkite.GetAgent),
 			},
 		},
 		ToolsetPipelines: {
