@@ -17,9 +17,9 @@ type AgentsClient interface {
 
 type ListAgentsArgs struct {
 	OrgSlug     string `json:"org_slug"`
-	Name        string `json:"name,omitempty" jsonschema:"Filter agents by agent name"`
-	Hostname    string `json:"hostname,omitempty" jsonschema:"Filter agents by hostname"`
-	Version     string `json:"version,omitempty" jsonschema:"Filter agents by exact agent version"`
+	Name        string `json:"name,omitempty"`
+	Hostname    string `json:"hostname,omitempty"`
+	Version     string `json:"version,omitempty"`
 	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
 	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default)\\, 'detailed'\\, or 'full'"`
