@@ -2,11 +2,15 @@ package recording
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
+	"unicode/utf8"
+
+	"github.com/rs/zerolog/log"
 )
 
 // RecordingTransport wraps an http.RoundTripper and appends each request/response to a HAR file.
@@ -33,30 +37,44 @@ func NewRecordingTransport(wrapped http.RoundTripper, harPath, version string) (
 
 // RoundTrip forwards the request to the wrapped transport, records the response, and returns it.
 func (t *RecordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Capture request body before forwarding so it can be recorded and restored.
+	var reqBody []byte
+	if req.Body != nil && req.Body != http.NoBody {
+		var err error
+		reqBody, err = io.ReadAll(req.Body)
+		req.Body.Close()
+		if err == nil {
+			req.Body = io.NopCloser(bytes.NewReader(reqBody))
+		}
+	}
+
 	resp, err := t.wrapped.RoundTrip(req)
 	if err != nil {
 		return nil, err
 	}
 
-	body, readErr := io.ReadAll(resp.Body)
+	respBody, readErr := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	resp.Body = io.NopCloser(bytes.NewReader(body))
+	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 	if readErr != nil {
 		return resp, nil
 	}
 
-	entry := buildHAREntry(req, resp, body)
+	entry := buildHAREntry(req, reqBody, resp, respBody)
 
 	t.mu.Lock()
 	t.har.Log.Entries = append(t.har.Log.Entries, entry)
-	_ = t.har.save(t.harPath)
+	if saveErr := t.har.save(t.harPath); saveErr != nil {
+		log.Warn().Err(saveErr).Str("path", t.harPath).Msg("recording: failed to save HAR file")
+	}
 	t.mu.Unlock()
 
 	return resp, nil
 }
 
 // ReplayTransport serves recorded responses from a HAR file without making real network calls.
-// Requests are matched by method + full URL. Repeated calls to the same URL are served in recorded order.
+// Requests are matched by method + full URL (+ request body for write methods).
+// Repeated calls to the same key are served in recorded order.
 type ReplayTransport struct {
 	mu      sync.Mutex
 	entries map[string][]HAREntry
@@ -70,15 +88,30 @@ func NewReplayTransport(harPath string) (*ReplayTransport, error) {
 	}
 	entries := make(map[string][]HAREntry, len(har.Log.Entries))
 	for _, e := range har.Log.Entries {
-		key := e.Request.Method + " " + e.Request.URL
+		key := entryKey(e.Request.Method, e.Request.URL, e.Request.PostData)
 		entries[key] = append(entries[key], e)
 	}
 	return &ReplayTransport{entries: entries}, nil
 }
 
-// RoundTrip returns the next recorded response matching the request's method and URL.
+// RoundTrip returns the next recorded response matching the request's method, URL, and body.
 func (t *ReplayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	key := req.Method + " " + req.URL.String()
+	var postData *HARPostData
+	if req.Body != nil && req.Body != http.NoBody {
+		body, err := io.ReadAll(req.Body)
+		req.Body.Close()
+		if err == nil {
+			req.Body = io.NopCloser(bytes.NewReader(body))
+			if len(body) > 0 {
+				postData = &HARPostData{
+					MimeType: req.Header.Get("Content-Type"),
+					Text:     string(body),
+				}
+			}
+		}
+	}
+
+	key := entryKey(req.Method, req.URL.String(), postData)
 
 	t.mu.Lock()
 	list := t.entries[key]
@@ -93,7 +126,16 @@ func (t *ReplayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return harEntryToResponse(req, entry), nil
 }
 
-func buildHAREntry(req *http.Request, resp *http.Response, body []byte) HAREntry {
+// entryKey returns the lookup key for a HAR entry. For requests with a body the key
+// includes the body text so that different POSTs to the same URL are matched correctly.
+func entryKey(method, rawURL string, postData *HARPostData) string {
+	if postData != nil && postData.Text != "" {
+		return method + " " + rawURL + "\n" + postData.Text
+	}
+	return method + " " + rawURL
+}
+
+func buildHAREntry(req *http.Request, reqBody []byte, resp *http.Response, respBody []byte) HAREntry {
 	var reqHeaders []HARNameValue
 	for k, vs := range req.Header {
 		if strings.EqualFold(k, "Authorization") {
@@ -111,6 +153,14 @@ func buildHAREntry(req *http.Request, resp *http.Response, body []byte) HAREntry
 		}
 	}
 
+	var postData *HARPostData
+	if len(reqBody) > 0 {
+		postData = &HARPostData{
+			MimeType: req.Header.Get("Content-Type"),
+			Text:     string(reqBody),
+		}
+	}
+
 	mimeType := resp.Header.Get("Content-Type")
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
@@ -123,6 +173,8 @@ func buildHAREntry(req *http.Request, resp *http.Response, body []byte) HAREntry
 		}
 	}
 
+	content := harContent(respBody, mimeType)
+
 	return HAREntry{
 		Request: HARRequest{
 			Method:      req.Method,
@@ -130,7 +182,8 @@ func buildHAREntry(req *http.Request, resp *http.Response, body []byte) HAREntry
 			HTTPVersion: "HTTP/1.1",
 			Headers:     reqHeaders,
 			QueryString: queryString,
-			BodySize:    -1,
+			PostData:    postData,
+			BodySize:    len(reqBody),
 			HeadersSize: -1,
 		},
 		Response: HARResponse{
@@ -138,15 +191,28 @@ func buildHAREntry(req *http.Request, resp *http.Response, body []byte) HAREntry
 			StatusText:  http.StatusText(resp.StatusCode),
 			HTTPVersion: "HTTP/1.1",
 			Headers:     respHeaders,
-			Content: HARContent{
-				Size:     len(body),
-				MimeType: mimeType,
-				Text:     string(body),
-			},
+			Content:     content,
 			RedirectURL: "",
-			BodySize:    len(body),
+			BodySize:    len(respBody),
 			HeadersSize: -1,
 		},
+	}
+}
+
+// harContent encodes the response body as plain text or base64 depending on whether it is valid UTF-8.
+func harContent(body []byte, mimeType string) HARContent {
+	if utf8.Valid(body) {
+		return HARContent{
+			Size:     len(body),
+			MimeType: mimeType,
+			Text:     string(body),
+		}
+	}
+	return HARContent{
+		Size:     len(body),
+		MimeType: mimeType,
+		Text:     base64.StdEncoding.EncodeToString(body),
+		Encoding: "base64",
 	}
 }
 
@@ -155,6 +221,9 @@ func harEntryToResponse(req *http.Request, entry HAREntry) *http.Response {
 	for _, h := range entry.Response.Headers {
 		header.Add(h.Name, h.Value)
 	}
+
+	body := decodeHARContent(entry.Response.Content)
+
 	return &http.Response{
 		Status:     fmt.Sprintf("%d %s", entry.Response.Status, entry.Response.StatusText),
 		StatusCode: entry.Response.Status,
@@ -162,7 +231,17 @@ func harEntryToResponse(req *http.Request, entry HAREntry) *http.Response {
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Header:     header,
-		Body:       io.NopCloser(strings.NewReader(entry.Response.Content.Text)),
+		Body:       io.NopCloser(body),
 		Request:    req,
 	}
+}
+
+func decodeHARContent(content HARContent) *bytes.Reader {
+	if content.Encoding == "base64" {
+		decoded, err := base64.StdEncoding.DecodeString(content.Text)
+		if err == nil {
+			return bytes.NewReader(decoded)
+		}
+	}
+	return bytes.NewReader([]byte(content.Text))
 }

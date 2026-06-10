@@ -36,8 +36,15 @@ type HARRequest struct {
 	HTTPVersion string         `json:"httpVersion"`
 	Headers     []HARNameValue `json:"headers"`
 	QueryString []HARNameValue `json:"queryString"`
+	PostData    *HARPostData   `json:"postData,omitempty"`
 	BodySize    int            `json:"bodySize"`
 	HeadersSize int            `json:"headersSize"`
+}
+
+// HARPostData holds a recorded request body.
+type HARPostData struct {
+	MimeType string `json:"mimeType"`
+	Text     string `json:"text"`
 }
 
 // HARResponse captures the HTTP response fields we use.
@@ -53,10 +60,12 @@ type HARResponse struct {
 }
 
 // HARContent holds the response body and its metadata.
+// When the body is not valid UTF-8, Text contains a base64-encoded copy and Encoding is "base64".
 type HARContent struct {
 	Size     int    `json:"size"`
 	MimeType string `json:"mimeType"`
 	Text     string `json:"text,omitempty"`
+	Encoding string `json:"encoding,omitempty"`
 }
 
 // HARNameValue is a key-value pair used for headers and query string parameters.

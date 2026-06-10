@@ -70,14 +70,17 @@ func run(ctx context.Context, cmd *kong.Context) error {
 	// Parse additional headers into a map
 	headers := commands.ParseHeaders(cli.HTTPHeaders)
 
-	// resolve the api token from either the token or 1password flag
-	apiToken, err := commands.ResolveAPIToken(cli.APIToken, cli.APITokenFrom1Password)
-	if err != nil {
-		return fmt.Errorf("failed to resolve Buildkite API token: %w", err)
-	}
-
 	if cli.Record != "" && cli.Replay != "" {
 		return fmt.Errorf("cannot specify both --record and --replay")
+	}
+
+	// Token is not required for replay — the HAR file is self-contained.
+	apiToken := ""
+	if cli.Replay == "" {
+		apiToken, err = commands.ResolveAPIToken(cli.APIToken, cli.APITokenFrom1Password)
+		if err != nil {
+			return fmt.Errorf("failed to resolve Buildkite API token: %w", err)
+		}
 	}
 
 	var innerTransport http.RoundTripper = http.DefaultTransport
