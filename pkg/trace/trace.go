@@ -71,10 +71,16 @@ func NewHTTPClient() *http.Client {
 
 // NewHTTPClientWithHeaders returns an http.Client that injects the provided headers into every request.
 func NewHTTPClientWithHeaders(headers map[string]string) *http.Client {
+	return NewHTTPClientWithHeadersAndTransport(headers, http.DefaultTransport)
+}
+
+// NewHTTPClientWithHeadersAndTransport is like NewHTTPClientWithHeaders but uses inner as the
+// innermost RoundTripper instead of http.DefaultTransport. Use this to inject a recording or replay transport.
+func NewHTTPClientWithHeadersAndTransport(headers map[string]string, inner http.RoundTripper) *http.Client {
 	return &http.Client{
 		Transport: &headerInjector{
 			headers: headers,
-			wrapped: otelhttp.NewTransport(http.DefaultTransport),
+			wrapped: otelhttp.NewTransport(inner),
 		},
 	}
 }

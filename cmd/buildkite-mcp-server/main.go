@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/alecthomas/kong"
 	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/buildkite/buildkite-mcp-server/internal/commands"
+	"github.com/buildkite/buildkite-mcp-server/pkg/recording"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	gobuildkite "github.com/buildkite/go-buildkite/v5"
 	"github.com/mattn/go-isatty"
@@ -31,6 +33,8 @@ var (
 		Debug                 bool              `help:"Enable debug mode." env:"DEBUG"`
 		OTELExporter          string            `help:"OpenTelemetry exporter to enable. Options are 'http/protobuf', 'grpc', or 'noop'." enum:"http/protobuf, grpc, noop" env:"OTEL_EXPORTER_OTLP_PROTOCOL" default:"noop"`
 		HTTPHeaders           []string          `help:"Additional HTTP headers to send with every request. Format: 'Key: Value'" name:"http-header" env:"BUILDKITE_HTTP_HEADERS"`
+		Record                string            `help:"Record API calls to this HAR file path." env:"BUILDKITE_RECORD"`
+		Replay                string            `help:"Replay recorded API calls from this HAR file path." env:"BUILDKITE_REPLAY"`
 		Version               kong.VersionFlag
 	}
 )
@@ -72,10 +76,31 @@ func run(ctx context.Context, cmd *kong.Context) error {
 		return fmt.Errorf("failed to resolve Buildkite API token: %w", err)
 	}
 
+	if cli.Record != "" && cli.Replay != "" {
+		return fmt.Errorf("cannot specify both --record and --replay")
+	}
+
+	var innerTransport http.RoundTripper = http.DefaultTransport
+	if cli.Record != "" {
+		recTransport, recErr := recording.NewRecordingTransport(http.DefaultTransport, cli.Record, version)
+		if recErr != nil {
+			return fmt.Errorf("failed to create recording transport: %w", recErr)
+		}
+		innerTransport = recTransport
+		log.Info().Str("path", cli.Record).Msg("Recording API calls to HAR file")
+	} else if cli.Replay != "" {
+		replayTransport, replayErr := recording.NewReplayTransport(cli.Replay)
+		if replayErr != nil {
+			return fmt.Errorf("failed to load replay HAR file: %w", replayErr)
+		}
+		innerTransport = replayTransport
+		log.Info().Str("path", cli.Replay).Msg("Replaying API calls from HAR file")
+	}
+
 	client, err := gobuildkite.NewOpts(
 		gobuildkite.WithTokenAuth(apiToken),
 		gobuildkite.WithUserAgent(commands.UserAgent(version)),
-		gobuildkite.WithHTTPClient(trace.NewHTTPClientWithHeaders(headers)),
+		gobuildkite.WithHTTPClient(trace.NewHTTPClientWithHeadersAndTransport(headers, innerTransport)),
 		gobuildkite.WithBaseURL(cli.BaseURL),
 	)
 	if err != nil {
