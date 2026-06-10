@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -126,13 +127,26 @@ func (t *ReplayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return harEntryToResponse(req, entry), nil
 }
 
-// entryKey returns the lookup key for a HAR entry. For requests with a body the key
-// includes the body text so that different POSTs to the same URL are matched correctly.
+// entryKey returns the lookup key for a HAR entry.
+// Only the path and query string are used, not the scheme or host, so a recording made against
+// one base URL (e.g. https://api.buildkite.com) can be replayed against another (e.g. a local stub).
+// For requests with a body the body text is appended so that distinct POSTs to the same path are
+// matched correctly.
 func entryKey(method, rawURL string, postData *HARPostData) string {
+	path := requestURI(rawURL)
 	if postData != nil && postData.Text != "" {
-		return method + " " + rawURL + "\n" + postData.Text
+		return method + " " + path + "\n" + postData.Text
 	}
-	return method + " " + rawURL
+	return method + " " + path
+}
+
+// requestURI returns the path and query string of rawURL, falling back to the full string on parse error.
+func requestURI(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	return u.RequestURI()
 }
 
 func buildHAREntry(req *http.Request, reqBody []byte, resp *http.Response, respBody []byte) HAREntry {
