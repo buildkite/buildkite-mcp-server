@@ -4,23 +4,8 @@ agents:
   queue: hosted
 
 steps:
-  - label: ":terminal: build ({{matrix}})"
-    command: ".buildkite/release.sh release --clean --split"
-    matrix:
-      - "darwin"
-      - "linux"
-      - "windows"
-    env:
-      GOOS: "{{matrix}}"
-    artifact_paths:
-      - dist/**/*
-    plugins:
-      - mise#v1.1.1: ~
-
-  - wait: ~
-
   - label: ":rocket: :github: MCP Release"
-    command: ".buildkite/release.sh continue --merge"
+    command: ".buildkite/release.sh release --clean"
     artifact_paths:
       - dist/**/*
     env:
@@ -38,7 +23,4 @@ steps:
             GITHUB_TOKEN: /pipelines/buildkite/buildkite-mcp-server-release/github-token
             DOCKERHUB_PASSWORD: /pipelines/buildkite/buildkite-mcp-server-release/dockerhub-password
             DOCKERHUB_USER: /pipelines/buildkite/buildkite-mcp-server-release/dockerhub-user
-      - artifacts#v1.9.3:
-          download:
-            - dist/**/*
       - mise#v1.1.1: ~
