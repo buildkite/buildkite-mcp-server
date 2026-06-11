@@ -7,6 +7,47 @@
 # NOTE: do not exit on non-zero returns codes
 set -euo pipefail
 
+goreleaser_args=("$@")
+
+if [[ -n "${GOOS:-}" ]]; then
+    goreleaser_config="$(mktemp "${TMPDIR:-/tmp}/goreleaser.XXXXXX")"
+    trap 'rm -f "${goreleaser_config:-}"' EXIT
+
+    echo "--- :goreleaser: Filtering GoReleaser config to GOOS=${GOOS}"
+    if ! awk '
+        BEGIN {
+            in_goos = 0
+            replaced = 0
+        }
+        /^[[:space:]]+goos:[[:space:]]*$/ {
+            print
+            print "      - " ENVIRON["GOOS"]
+            in_goos = 1
+            replaced = 1
+            next
+        }
+        in_goos && /^[[:space:]]+- / {
+            next
+        }
+        in_goos {
+            in_goos = 0
+        }
+        {
+            print
+        }
+        END {
+            if (!replaced) {
+                exit 1
+            }
+        }
+    ' .goreleaser.yaml > "${goreleaser_config}"; then
+        echo "Failed to filter GoReleaser config for GOOS=${GOOS}"
+        exit 1
+    fi
+
+    goreleaser_args+=("--config" "${goreleaser_config}")
+fi
+
 # check if DOCKERHUB_USER and DOCKERHUB_PASSWORD are set if not skip docker login
 if [[ -z "${DOCKERHUB_USER:-}" || -z "${DOCKERHUB_PASSWORD:-}" ]]; then
     echo "Skipping Docker login as DOCKERHUB_USER or DOCKERHUB_PASSWORD is not set"
@@ -33,7 +74,7 @@ fi
 
 echo "--- :goreleaser: Building release with GoReleaser"
 
-if ! goreleaser "$@"; then
+if ! goreleaser "${goreleaser_args[@]}"; then
     echo "Failed to build a release"
     exit 1
 fi
