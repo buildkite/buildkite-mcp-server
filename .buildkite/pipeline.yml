@@ -39,7 +39,7 @@ steps:
         - mise#v1.1.1: ~
 
   - label: ":terminal: build ({{matrix}})"
-    command: ".buildkite/release.sh release --clean --snapshot --split"
+    command: ".buildkite/release.sh release --clean --snapshot"
     depends_on: quality-checks
     env:
       GOOS: "{{matrix}}"
