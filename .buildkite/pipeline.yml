@@ -38,17 +38,12 @@ steps:
       plugins:
         - mise#v1.1.1: ~
 
-  - label: ":terminal: build ({{matrix}})"
-    command: ".buildkite/release.sh release --clean --snapshot --split"
+  - label: ":terminal: build"
+    command: ".buildkite/release.sh release --clean --snapshot"
     depends_on: quality-checks
     env:
-      GOOS: "{{matrix}}"
       GOCACHE: /gocache
       GOMODCACHE: /gomodcache
-    matrix:
-      - "darwin"
-      - "linux"
-      - "windows"
     artifact_paths:
       - dist/**/*
     secrets:
