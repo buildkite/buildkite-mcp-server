@@ -3,6 +3,7 @@ package buildkite
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -174,6 +175,58 @@ func TestGetArtifact(t *testing.T) {
 
 	// The base64 encoded "This is test artifact content"
 	assert.Contains(textContent.Text, `"data":"VGhpcyBpcyB0ZXN0IGFydGlmYWN0IGNvbnRlbnQ="`)
+}
+
+func TestGetArtifact_JSONContent(t *testing.T) {
+	assert := require.New(t)
+
+	client := &MockArtifactsClient{
+		DownloadArtifactFunc: func(ctx context.Context, org, pipelineSlug, buildNumber, jobID, artifactID string, writer io.Writer) (*buildkite.Response, error) {
+			_, err := writer.Write([]byte(`{"passed":true,"failures":[{"name":"test one"}]}`))
+			if err != nil {
+				return nil, err
+			}
+
+			return &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+					Status:     "200 OK",
+				},
+			}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: client})
+
+	_, handler, _ := GetArtifact()
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetArtifactArgs{
+		OrgSlug:      "myorg",
+		PipelineSlug: "my-pipeline",
+		BuildNumber:  "123",
+		JobID:        "abc",
+		ArtifactID:   "def",
+	})
+	assert.NoError(err)
+
+	textContent := getTextResult(t, result)
+	assert.Contains(textContent.Text, `"status":"200 OK"`)
+	assert.Contains(textContent.Text, `"statusCode":200`)
+	assert.Contains(textContent.Text, `"encoding":"json"`)
+	assert.NotContains(textContent.Text, `"encoding":"base64"`)
+
+	var response struct {
+		Data struct {
+			Passed   bool `json:"passed"`
+			Failures []struct {
+				Name string `json:"name"`
+			} `json:"failures"`
+		} `json:"data"`
+	}
+	assert.NoError(json.Unmarshal([]byte(textContent.Text), &response))
+	assert.True(response.Data.Passed)
+	assert.Equal("test one", response.Data.Failures[0].Name)
 }
 
 func TestGetArtifact_ErrorResponse(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -181,7 +182,7 @@ func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs
 func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_artifact",
-			Description: "Download a specific artifact's content, identified by its organization, pipeline, build, job, and artifact identifiers. The content is returned base64-encoded",
+			Description: "Download a specific artifact's content, identified by its organization, pipeline, build, job, and artifact identifiers. JSON artifacts are returned inline; other content is returned base64-encoded",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Artifact",
 				ReadOnlyHint: true,
@@ -207,12 +208,18 @@ func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string
 				return utils.NewToolResultError(fmt.Sprintf("response failed with error %s", err.Error())), nil, nil
 			}
 
-			// Create a response with the artifact data encoded safely for JSON
+			content := buffer.Bytes()
 			result := map[string]any{
 				"status":     resp.Status,
 				"statusCode": resp.StatusCode,
-				"data":       base64.StdEncoding.EncodeToString(buffer.Bytes()),
-				"encoding":   "base64",
+			}
+			if json.Valid(content) {
+				result["data"] = json.RawMessage(content)
+				result["encoding"] = "json"
+			} else {
+				// Non-JSON artifacts may be arbitrary bytes, so encode safely for JSON.
+				result["data"] = base64.StdEncoding.EncodeToString(content)
+				result["encoding"] = "base64"
 			}
 
 			return mcpTextResult(span, &result)
