@@ -4,8 +4,8 @@ go 1.25.8
 
 require (
 	github.com/alecthomas/kong v1.15.0
-	github.com/buildkite/buildkite-logs v0.11.0
-	github.com/buildkite/go-buildkite/v5 v5.1.0
+	github.com/buildkite/buildkite-logs v0.12.1
+	github.com/buildkite/go-buildkite/v5 v5.2.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/mattn/go-isatty v0.0.22
 	github.com/microcosm-cc/bluemonday v1.0.27
@@ -87,7 +87,7 @@ require (
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/api v0.285.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260427160629-7cedc36a6bc4 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260615183401-62b3387ff324 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260618152121-87f3d3e198d3 // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
