@@ -197,6 +197,7 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			}
 
 			options := &buildkite.BuildsListOptions{
+				ExcludeJobs: true,
 				ListOptions: buildkite.ListOptions{
 					Page:    page,
 					PerPage: perPage,
@@ -340,6 +341,9 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 
 			// Configure build get options based on detail level
 			options := &buildkite.BuildGetOptions{
+				BuildsListOptions: buildkite.BuildsListOptions{
+					ExcludeJobs: true,
+				},
 				IncludeTestEngine: true,
 			}
 
