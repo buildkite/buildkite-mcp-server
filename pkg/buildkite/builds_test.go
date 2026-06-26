@@ -83,10 +83,21 @@ func TestGetBuild(t *testing.T) {
 				assert.Equal("pipeline", pipeline)
 				assert.Equal("1", id)
 				return buildkite.Build{
-						ID:        "123",
-						Number:    1,
-						State:     "passed",
-						Branch:    "main",
+						ID:     "123",
+						Number: 1,
+						State:  "passed",
+						Branch: "main",
+						Env: map[string]any{
+							"SECRET_TOKEN": "redacted",
+						},
+						Jobs: []buildkite.Job{{
+							ID: "job-1",
+						}},
+						Pipeline: &buildkite.Pipeline{
+							ID:            "pipeline-1",
+							Configuration: "steps:\n  - command: echo secret",
+							Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
+						},
 						CreatedAt: &buildkite.Timestamp{},
 					}, &buildkite.Response{
 						Response: &http.Response{StatusCode: 200},
@@ -109,11 +120,18 @@ func TestGetBuild(t *testing.T) {
 		assert.Contains(text, `"number":1`)
 		assert.Contains(text, `"state":"passed"`)
 		// Job detail lives in list_jobs/get_job, not here.
-		assert.NotContains(text, `"job_summary"`)
+		assert.NotContains(text, `"jobs":`)
+		// Build env and pipeline config are intentionally omitted from read_builds.
+		assert.NotContains(text, `"env":`)
+		assert.NotContains(text, `"pipeline":`)
+		assert.NotContains(text, "SECRET_TOKEN")
+		assert.NotContains(text, "PIPELINE_SECRET")
+		assert.NotContains(text, "steps:")
 
-		// The handler must exclude jobs from the API request.
+		// The handler must exclude jobs and pipeline detail from the API request.
 		require.NotNil(t, capturedOptions)
 		assert.True(capturedOptions.ExcludeJobs)
+		assert.True(capturedOptions.ExcludePipeline)
 		assert.True(capturedOptions.IncludeTestEngine)
 	})
 

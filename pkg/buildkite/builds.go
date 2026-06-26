@@ -30,6 +30,24 @@ type BuildSummary struct {
 	CreatedAt *buildkite.Timestamp `json:"created_at"`
 }
 
+// BuildDetail includes useful build metadata while omitting jobs, env, and
+// pipeline configuration from the raw Buildkite SDK response.
+type BuildDetail struct {
+	BuildSummary
+	Blocked       bool                          `json:"blocked"`
+	Author        buildkite.Author              `json:"author"`
+	ScheduledAt   *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
+	StartedAt     *buildkite.Timestamp          `json:"started_at,omitempty"`
+	FinishedAt    *buildkite.Timestamp          `json:"finished_at,omitempty"`
+	MetaData      map[string]string             `json:"meta_data,omitempty"`
+	Creator       buildkite.Creator             `json:"creator"`
+	Source        string                        `json:"source,omitempty"`
+	RebuiltFrom   *buildkite.RebuiltFrom        `json:"rebuilt_from,omitempty"`
+	PullRequest   *buildkite.PullRequest        `json:"pull_request,omitempty"`
+	TriggeredFrom *buildkite.TriggeredFrom      `json:"triggered_from,omitempty"`
+	TestEngine    *buildkite.TestEngineProperty `json:"test_engine,omitempty"`
+}
+
 // ListBuildsArgs struct with enhanced filtering
 type ListBuildsArgs struct {
 	OrgSlug      string `json:"org_slug"`
@@ -69,6 +87,24 @@ func summarizeBuild(build buildkite.Build) BuildSummary {
 		Message:   build.Message,
 		WebURL:    build.WebURL,
 		CreatedAt: build.CreatedAt,
+	}
+}
+
+func detailBuild(build buildkite.Build) BuildDetail {
+	return BuildDetail{
+		BuildSummary:  summarizeBuild(build),
+		Blocked:       build.Blocked,
+		Author:        build.Author,
+		ScheduledAt:   build.ScheduledAt,
+		StartedAt:     build.StartedAt,
+		FinishedAt:    build.FinishedAt,
+		MetaData:      build.MetaData,
+		Creator:       build.Creator,
+		Source:        build.Source,
+		RebuiltFrom:   build.RebuiltFrom,
+		PullRequest:   build.PullRequest,
+		TriggeredFrom: build.TriggeredFrom,
+		TestEngine:    build.TestEngine,
 	}
 }
 
@@ -226,7 +262,8 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 			// Jobs are excluded; use list_jobs/get_job for job detail.
 			options := &buildkite.BuildGetOptions{
 				BuildsListOptions: buildkite.BuildsListOptions{
-					ExcludeJobs: true,
+					ExcludeJobs:     true,
+					ExcludePipeline: true,
 				},
 				IncludeTestEngine: true,
 			}
@@ -237,7 +274,8 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 				return handleBuildkiteError(err)
 			}
 
-			return mcpTextResult(span, &build)
+			result := detailBuild(build)
+			return mcpTextResult(span, &result)
 		}, []string{"read_builds"}
 }
 
