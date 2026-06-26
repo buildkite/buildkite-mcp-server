@@ -38,6 +38,7 @@ type ListJobsArgs struct {
 	PerPage            int    `json:"per_page,omitempty" jsonschema:"Results per page for cursor pagination (min 1\\, max 100\\, default 30)"`
 	After              string `json:"after,omitempty" jsonschema:"Cursor for the next page. Take this from the 'links.next' URL of a previous response. Mutually exclusive with 'before'"`
 	Before             string `json:"before,omitempty" jsonschema:"Cursor for the previous page. Take this from a previous response. Mutually exclusive with 'after'"`
+	IncludeAgent       bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default)\\, only agent.id is included"`
 }
 
 func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
@@ -91,6 +92,14 @@ func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 				redactUnusedJobFields(&jobs.Items[i])
 			}
 
+			if !args.IncludeAgent && len(jobs.Items) > 0 {
+				for i := range jobs.Items {
+					jobs.Items[i].Agent = buildkite.Agent{
+						ID: jobs.Items[i].Agent.ID,
+					}
+				}
+			}
+
 			return mcpTextResult(span, &jobs)
 		}, []string{"read_builds"}
 }
@@ -101,6 +110,7 @@ type GetJobArgs struct {
 	JobID        string `json:"job_id"`
 	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Pipeline slug. Provide together with 'build_number' for a build-scoped lookup. Omit both to look up the job by organization and job ID alone"`
 	BuildNumber  string `json:"build_number,omitempty" jsonschema:"Build number. Provide together with 'pipeline_slug' for a build-scoped lookup. Omit both to look up the job by organization and job ID alone"`
+	IncludeAgent bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default)\\, only agent.id is included"`
 }
 
 func GetJob() (mcp.Tool, mcp.ToolHandlerFor[GetJobArgs, any], []string) {
@@ -141,6 +151,12 @@ func GetJob() (mcp.Tool, mcp.ToolHandlerFor[GetJobArgs, any], []string) {
 			}
 
 			redactUnusedJobFields(&job)
+
+			if !args.IncludeAgent {
+				job.Agent = buildkite.Agent{
+					ID: job.Agent.ID,
+				}
+			}
 
 			return mcpTextResult(span, &job)
 		}, []string{"read_builds"}

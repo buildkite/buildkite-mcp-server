@@ -67,6 +67,15 @@ func (m *MockJobsClient) GetJobEnvironmentVariables(ctx context.Context, org str
 
 var _ JobsClient = (*MockJobsClient)(nil)
 
+func testJobAgent() buildkite.Agent {
+	return buildkite.Agent{
+		ID:       "agent-1",
+		Name:     "agent-name",
+		Hostname: "agent-host",
+		Version:  "3.99.0",
+	}
+}
+
 func TestUnblockJob(t *testing.T) {
 	// Test tool definition
 	t.Run("ToolDefinition", func(t *testing.T) {
@@ -393,6 +402,68 @@ func TestListJobs(t *testing.T) {
 		assert.Empty(t, jobs.Items[0].GraphQLID)
 	})
 
+	t.Run("DefaultsToAgentIDOnly", func(t *testing.T) {
+		mockJobs := &MockJobsClient{
+			ListByBuildFunc: func(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				return buildkite.JobsList{
+					Items: []buildkite.Job{{
+						ID:    "job-1",
+						State: "passed",
+						Agent: testJobAgent(),
+					}},
+				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := ListJobs()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListJobsArgs{
+			OrgSlug:      "test-org",
+			PipelineSlug: "test-pipeline",
+			BuildNumber:  "123",
+		})
+		require.NoError(t, err)
+
+		var jobs buildkite.JobsList
+		require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &jobs))
+		require.Len(t, jobs.Items, 1)
+		assert.Equal(t, "agent-1", jobs.Items[0].Agent.ID)
+		assert.Empty(t, jobs.Items[0].Agent.Name)
+		assert.Empty(t, jobs.Items[0].Agent.Hostname)
+		assert.Empty(t, jobs.Items[0].Agent.Version)
+	})
+
+	t.Run("IncludesAgentDetailsWhenRequested", func(t *testing.T) {
+		mockJobs := &MockJobsClient{
+			ListByBuildFunc: func(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				return buildkite.JobsList{
+					Items: []buildkite.Job{{
+						ID:    "job-1",
+						State: "passed",
+						Agent: testJobAgent(),
+					}},
+				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := ListJobs()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListJobsArgs{
+			OrgSlug:      "test-org",
+			PipelineSlug: "test-pipeline",
+			BuildNumber:  "123",
+			IncludeAgent: true,
+		})
+		require.NoError(t, err)
+
+		var jobs buildkite.JobsList
+		require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &jobs))
+		require.Len(t, jobs.Items, 1)
+		assert.Equal(t, testJobAgent(), jobs.Items[0].Agent)
+	})
+
 	t.Run("AfterAndBeforeMutuallyExclusive", func(t *testing.T) {
 		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: &MockJobsClient{}})
 		_, handler, _ := ListJobs()
@@ -485,6 +556,60 @@ func TestGetJob(t *testing.T) {
 		assert.Empty(t, job.ArtifactsURL)
 		assert.Empty(t, job.LogsURL)
 		assert.Empty(t, job.GraphQLID)
+	})
+
+	t.Run("DefaultsToAgentIDOnly", func(t *testing.T) {
+		mockJobs := &MockJobsClient{
+			GetJobByOrgFunc: func(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error) {
+				return buildkite.Job{
+					ID:    jobID,
+					State: "running",
+					Agent: testJobAgent(),
+				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := GetJob()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetJobArgs{
+			OrgSlug: "test-org",
+			JobID:   "job-456",
+		})
+		require.NoError(t, err)
+
+		var job buildkite.Job
+		require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &job))
+		assert.Equal(t, "agent-1", job.Agent.ID)
+		assert.Empty(t, job.Agent.Name)
+		assert.Empty(t, job.Agent.Hostname)
+		assert.Empty(t, job.Agent.Version)
+	})
+
+	t.Run("IncludesAgentDetailsWhenRequested", func(t *testing.T) {
+		mockJobs := &MockJobsClient{
+			GetJobByOrgFunc: func(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error) {
+				return buildkite.Job{
+					ID:    jobID,
+					State: "running",
+					Agent: testJobAgent(),
+				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := GetJob()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetJobArgs{
+			OrgSlug:      "test-org",
+			JobID:        "job-456",
+			IncludeAgent: true,
+		})
+		require.NoError(t, err)
+
+		var job buildkite.Job
+		require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &job))
+		assert.Equal(t, testJobAgent(), job.Agent)
 	})
 
 	t.Run("OrgScopedLookup", func(t *testing.T) {
