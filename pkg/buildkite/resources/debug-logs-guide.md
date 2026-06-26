@@ -75,14 +75,14 @@ Always set `limit` — logs can be very large.
 ## Debugging Workflow
 
 ### Step 0: Identify the Failing Job
-Before pulling any logs, call `get_build` with `job_state=failed,broken` to narrow down which jobs need attention:
+Before pulling any logs, call `list_jobs` with `state=failed,broken` to narrow down which jobs need attention:
 
 ```json
 {
   "org_slug": "<ORG>",
   "pipeline_slug": "<PIPELINE>",
   "build_number": "<BUILD>",
-  "job_state": "failed,broken"
+  "state": "failed,broken"
 }
 ```
 
@@ -162,7 +162,7 @@ Log entries are returned as JSON objects:
 
 ```
 // 1. Identify failed or broken jobs first
-get_build: org_slug=<ORG> pipeline_slug=<PIPELINE> build_number=<BUILD> job_state="failed,broken"
+list_jobs: org_slug=<ORG> pipeline_slug=<PIPELINE> build_number=<BUILD> state="failed,broken"
 
 // 2. Use the id from a failed job as job_id, then check recent output
 tail_logs: org_slug=<ORG> pipeline_slug=<PIPELINE> build_number=<BUILD> job_id=<FAILED_JOB_ID> tail=50

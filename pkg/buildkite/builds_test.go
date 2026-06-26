@@ -63,334 +63,243 @@ func (m *MockBuildsClient) Rebuild(ctx context.Context, org, pipeline, buildNumb
 
 var _ BuildsClient = (*MockBuildsClient)(nil)
 
-func TestGetBuildDefault(t *testing.T) {
-	assert := require.New(t)
-
-	client := &MockBuildsClient{
-		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			// Return build without jobs
-			return buildkite.Build{
-					ID:        "123",
-					Number:    1,
-					State:     "running",
-					CreatedAt: &buildkite.Timestamp{},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	tool, handler, _ := GetBuild()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
-
-	// Test default behavior - jobs always excluded, summary always included
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetBuildArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-		BuildNumber:  "1",
+func TestGetBuild(t *testing.T) {
+	t.Run("ToolDefinition", func(t *testing.T) {
+		tool, handler, scopes := GetBuild()
+		require.Equal(t, "get_build", tool.Name)
+		require.True(t, tool.Annotations.ReadOnlyHint)
+		require.Equal(t, []string{"read_builds"}, scopes)
+		require.NotNil(t, handler)
 	})
-	assert.NoError(err)
 
-	textContent := getTextResult(t, result)
-	// New format returns BuildDetail (detailed level by default)
-	assert.Contains(textContent.Text, `"id":"123"`)
-	assert.Contains(textContent.Text, `"number":1`)
-	assert.Contains(textContent.Text, `"state":"running"`)
-	assert.Contains(textContent.Text, `"total":0`)
-	assert.Contains(textContent.Text, `"by_state":{}`)
-	assert.NotContains(textContent.Text, `"jobs_total"`)
-}
+	t.Run("ReturnsBuildAndExcludesJobs", func(t *testing.T) {
+		assert := require.New(t)
 
-func TestGetBuildWithJobSummary(t *testing.T) {
-	assert := require.New(t)
+		var capturedOptions *buildkite.BuildGetOptions
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				capturedOptions = opt
+				assert.Equal("org", org)
+				assert.Equal("pipeline", pipeline)
+				assert.Equal("1", id)
+				return buildkite.Build{
+						ID:     "123",
+						Number: 1,
+						State:  "passed",
+						Branch: "main",
+						Env: map[string]any{
+							"SECRET_TOKEN": "redacted",
+						},
+						Jobs: []buildkite.Job{{
+							ID: "job-1",
+						}},
+						Pipeline: &buildkite.Pipeline{
+							ID:            "pipeline-1",
+							Configuration: "steps:\n  - command: echo secret",
+							Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
+						},
+						CreatedAt: &buildkite.Timestamp{},
+					}, &buildkite.Response{
+						Response: &http.Response{StatusCode: 200},
+					}, nil
+			},
+		}
 
-	client := &MockBuildsClient{
-		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			// Create a build with some jobs to test summary functionality
-			return buildkite.Build{
-					ID:        "123",
-					Number:    1,
-					State:     "finished",
-					CreatedAt: &buildkite.Timestamp{},
-					Jobs: []buildkite.Job{
-						{ID: "job1", State: "passed"}, // API already coerced
-						{ID: "job2", State: "failed"}, // API already coerced
-						{ID: "job3", State: "running"},
-						{ID: "job4", State: "waiting"},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
-		},
-	}
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := GetBuild()
 
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+		})
+		assert.NoError(err)
 
-	tool, handler, _ := GetBuild()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
+		text := getTextResult(t, result).Text
+		assert.Contains(text, `"id":"123"`)
+		assert.Contains(text, `"number":1`)
+		assert.Contains(text, `"state":"passed"`)
+		// Job detail lives in list_jobs/get_job, not here.
+		assert.NotContains(text, `"jobs":`)
+		// Build env and pipeline config are intentionally omitted from read_builds.
+		assert.NotContains(text, `"env":`)
+		assert.NotContains(text, `"pipeline":`)
+		assert.NotContains(text, "SECRET_TOKEN")
+		assert.NotContains(text, "PIPELINE_SECRET")
+		assert.NotContains(text, "steps:")
 
-	// Test behavior - jobs always excluded, summary always shown
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetBuildArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-		BuildNumber:  "1",
+		// The handler must exclude jobs and pipeline detail from the API request.
+		require.NotNil(t, capturedOptions)
+		assert.True(capturedOptions.ExcludeJobs)
+		assert.True(capturedOptions.ExcludePipeline)
+		assert.True(capturedOptions.IncludeTestEngine)
 	})
-	assert.NoError(err)
 
-	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"job_summary"`)
-	assert.Contains(textContent.Text, `"total":4`)
-	assert.Contains(textContent.Text, `"by_state":{"failed":1,"passed":1,"running":1,"waiting":1}`)
-	// Lightweight job entries included with correct id, name, and state
-	assert.Contains(textContent.Text, `"jobs":[{"id":"job1"`)
-	assert.Contains(textContent.Text, `{"id":"job1","name":"","state":"passed"}`)
-	assert.Contains(textContent.Text, `{"id":"job2","name":"","state":"failed"}`)
-	assert.Contains(textContent.Text, `{"id":"job3","name":"","state":"running"}`)
-	assert.Contains(textContent.Text, `{"id":"job4","name":"","state":"waiting"}`)
-	// Full job objects should NOT be present (no agent, command, etc.)
-	assert.NotContains(textContent.Text, `"agent"`)
+	t.Run("APIError", func(t *testing.T) {
+		assert := require.New(t)
+
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{}, nil, &buildkite.ErrorResponse{
+					RawBody:  []byte("build not found"),
+					Response: &http.Response{StatusCode: 404},
+				}
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := GetBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+		})
+		assert.NoError(err)
+		assert.True(result.IsError)
+		assert.Contains(getTextResult(t, result).Text, "build not found")
+	})
 }
 
 func TestListBuilds(t *testing.T) {
-	assert := require.New(t)
+	t.Run("ToolDefinition", func(t *testing.T) {
+		tool, handler, scopes := ListBuilds()
+		require.Equal(t, "list_builds", tool.Name)
+		require.True(t, tool.Annotations.ReadOnlyHint)
+		require.Equal(t, []string{"read_builds"}, scopes)
+		require.NotNil(t, handler)
+	})
 
-	var capturedOptions *buildkite.BuildsListOptions
-	client := &MockBuildsClient{
-		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
-			capturedOptions = opt
-			return []buildkite.Build{
-					{
-						ID:        "123",
-						Number:    1,
-						State:     "running",
-						CreatedAt: &buildkite.Timestamp{},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
+	t.Run("DefaultsAndSummaryOutput", func(t *testing.T) {
+		assert := require.New(t)
+
+		var capturedOptions *buildkite.BuildsListOptions
+		client := &MockBuildsClient{
+			ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+				capturedOptions = opt
+				return []buildkite.Build{
+						{ID: "123", Number: 1, State: "running", CreatedAt: &buildkite.Timestamp{}},
+					}, &buildkite.Response{
+						Response: &http.Response{StatusCode: 200},
+					}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := ListBuilds()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListBuildsArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+		})
+		assert.NoError(err)
+
+		text := getTextResult(t, result).Text
+		assert.Contains(text, `"headers":{"Link":""}`)
+		assert.Contains(text, `"items":[`)
+		assert.Contains(text, `"id":"123"`)
+		assert.Contains(text, `"state":"running"`)
+		assert.NotContains(text, `"job_summary"`)
+		assert.NotContains(text, `"jobs":`)
+
+		require.NotNil(t, capturedOptions)
+		assert.Equal(1, capturedOptions.Page)
+		assert.Equal(30, capturedOptions.PerPage)
+		assert.True(capturedOptions.ExcludeJobs)
+		assert.True(capturedOptions.ExcludePipeline)
+		assert.Nil(capturedOptions.Branch)
+	})
+
+	t.Run("CustomPaginationAndFilters", func(t *testing.T) {
+		assert := require.New(t)
+
+		var capturedOptions *buildkite.BuildsListOptions
+		client := &MockBuildsClient{
+			ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+				capturedOptions = opt
+				return []buildkite.Build{}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
 				}, nil
-		},
-	}
+			},
+		}
 
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := ListBuilds()
 
-	tool, handler, _ := ListBuilds()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
+		_, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListBuildsArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			Branch:       "feature",
+			State:        "failed",
+			Commit:       "abc123",
+			Creator:      "user-1",
+			Page:         3,
+			PerPage:      50,
+		})
+		assert.NoError(err)
 
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, ListBuildsArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
+		require.NotNil(t, capturedOptions)
+		assert.Equal(3, capturedOptions.Page)
+		assert.Equal(50, capturedOptions.PerPage)
+		assert.Equal([]string{"feature"}, capturedOptions.Branch)
+		assert.Equal([]string{"failed"}, capturedOptions.State)
+		assert.Equal("abc123", capturedOptions.Commit)
+		assert.Equal("user-1", capturedOptions.Creator)
 	})
-	assert.NoError(err)
 
-	textContent := getTextResult(t, result)
+	t.Run("OrgScopedWhenPipelineOmitted", func(t *testing.T) {
+		assert := require.New(t)
 
-	// New format returns BuildSummary (summary level by default)
-	assert.Contains(textContent.Text, `"headers":{"Link":""}`)
-	assert.Contains(textContent.Text, `"items":[`)
-	assert.Contains(textContent.Text, `"id":"123"`)
-	assert.Contains(textContent.Text, `"number":1`)
-	assert.Contains(textContent.Text, `"state":"running"`)
-	assert.NotContains(textContent.Text, `"jobs_total"`)
+		called := false
+		client := &MockBuildsClient{
+			ListByOrgFunc: func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+				called = true
+				assert.Equal("org", org)
+				return []buildkite.Build{
+						{ID: "123", Number: 1, State: "passed", CreatedAt: &buildkite.Timestamp{}},
+					}, &buildkite.Response{
+						Response: &http.Response{StatusCode: 200},
+					}, nil
+			},
+			ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+				t.Fatal("ListByPipeline should not be called when pipeline_slug is omitted")
+				return nil, nil, nil
+			},
+		}
 
-	// Verify default pagination parameters - new defaults
-	assert.NotNil(capturedOptions)
-	assert.Equal(1, capturedOptions.Page)
-	assert.Equal(30, capturedOptions.PerPage) // New default
-	assert.Nil(capturedOptions.Branch)        // Branch should be nil when not specified
-}
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := ListBuilds()
 
-func TestListBuildsWithCustomPagination(t *testing.T) {
-	assert := require.New(t)
-
-	var capturedOptions *buildkite.BuildsListOptions
-	client := &MockBuildsClient{
-		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
-			capturedOptions = opt
-			return []buildkite.Build{
-					{
-						ID:        "123",
-						Number:    1,
-						State:     "running",
-						CreatedAt: &buildkite.Timestamp{},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	tool, handler, _ := ListBuilds()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
-
-	// Test with custom pagination parameters
-	request := createMCPRequest(t, map[string]any{})
-	_, _, err := handler(ctx, request, ListBuildsArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-		Page:         3,
-		PerPage:      50,
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListBuildsArgs{
+			OrgSlug: "org",
+		})
+		assert.NoError(err)
+		assert.True(called)
+		assert.Contains(getTextResult(t, result).Text, `"id":"123"`)
 	})
-	assert.NoError(err)
 
-	// Verify custom pagination parameters were used
-	assert.NotNil(capturedOptions)
-	assert.Equal(3, capturedOptions.Page)
-	assert.Equal(50, capturedOptions.PerPage)
-	assert.Nil(capturedOptions.Branch) // Branch should be nil when not specified
-}
+	t.Run("APIError", func(t *testing.T) {
+		assert := require.New(t)
 
-func TestListBuildsWithBranchFilter(t *testing.T) {
-	assert := require.New(t)
+		client := &MockBuildsClient{
+			ListByOrgFunc: func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+				return nil, nil, &buildkite.ErrorResponse{
+					RawBody:  []byte("organization not found"),
+					Response: &http.Response{StatusCode: 404},
+				}
+			},
+		}
 
-	var capturedOptions *buildkite.BuildsListOptions
-	client := &MockBuildsClient{
-		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
-			capturedOptions = opt
-			return []buildkite.Build{
-					{
-						ID:        "123",
-						Number:    1,
-						State:     "running",
-						CreatedAt: &buildkite.Timestamp{},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
-		},
-	}
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := ListBuilds()
 
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	tool, handler, _ := ListBuilds()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
-
-	// Test with branch filter
-	request := createMCPRequest(t, map[string]any{})
-	_, _, err := handler(ctx, request, ListBuildsArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-		Branch:       "main",
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListBuildsArgs{
+			OrgSlug: "bad-org",
+		})
+		assert.NoError(err)
+		assert.True(result.IsError)
+		assert.Contains(getTextResult(t, result).Text, "organization not found")
 	})
-	assert.NoError(err)
-
-	// Verify branch filter was applied
-	assert.NotNil(capturedOptions)
-	assert.Equal([]string{"main"}, capturedOptions.Branch)
-	assert.Equal(1, capturedOptions.Page)
-	assert.Equal(30, capturedOptions.PerPage) // New default
-}
-
-func TestListBuildsByOrg(t *testing.T) {
-	assert := require.New(t)
-
-	var capturedOrg string
-	var capturedOptions *buildkite.BuildsListOptions
-	client := &MockBuildsClient{
-		ListByOrgFunc: func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
-			capturedOrg = org
-			capturedOptions = opt
-			return []buildkite.Build{
-					{
-						ID:        "build-1",
-						Number:    10,
-						State:     "running",
-						CreatedAt: &buildkite.Timestamp{},
-						Pipeline:  &buildkite.Pipeline{Slug: "pipeline-a"},
-					},
-					{
-						ID:        "build-2",
-						Number:    20,
-						State:     "scheduled",
-						CreatedAt: &buildkite.Timestamp{},
-						Pipeline:  &buildkite.Pipeline{Slug: "pipeline-b"},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
-		},
-		ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
-			t.Fatal("ListByPipeline should not be called when pipeline_slug is empty")
-			return nil, nil, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	tool, handler, _ := ListBuilds()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
-
-	// Test without pipeline_slug — should use ListByOrg
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, ListBuildsArgs{
-		OrgSlug: "my-org",
-		State:   "running",
-	})
-	assert.NoError(err)
-
-	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"id":"build-1"`)
-	assert.Contains(textContent.Text, `"id":"build-2"`)
-	assert.Equal("my-org", capturedOrg)
-	assert.NotNil(capturedOptions)
-	assert.Equal([]string{"running"}, capturedOptions.State)
-	assert.Equal(1, capturedOptions.Page)
-	assert.Equal(30, capturedOptions.PerPage)
-	// Pipeline info should be included for org-wide queries
-	assert.False(capturedOptions.ExcludePipeline)
-}
-
-func TestListBuildsByOrgError(t *testing.T) {
-	assert := require.New(t)
-
-	client := &MockBuildsClient{
-		ListByOrgFunc: func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
-			return nil, nil, &buildkite.ErrorResponse{
-				RawBody: []byte("organization not found"),
-				Response: &http.Response{
-					StatusCode: 404,
-				},
-			}
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	_, handler, _ := ListBuilds()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, ListBuildsArgs{
-		OrgSlug: "bad-org",
-	})
-	assert.NoError(err)
-
-	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, "organization not found")
-	assert.True(result.IsError)
 }
 
 func TestGetBuildTestEngineRuns(t *testing.T) {
@@ -549,248 +458,6 @@ func TestCreateBuild(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 	assert.JSONEq(`{"id":"123","number":1,"state":"created","blocked":false,"author":{},"env":{"ENV_VAR":"value"},"created_at":"0001-01-01T00:00:00Z","meta_data":{"meta_key":"meta_value"},"creator":{"avatar_url":"","created_at":null,"email":"","id":"","name":""}}`, textContent.Text)
-}
-
-func TestGetBuildWithJobStateFilter(t *testing.T) {
-	assert := require.New(t)
-
-	// Mock returns jobs matching the requested states (simulating API-side filtering)
-	client := &MockBuildsClient{
-		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			// Simulate API-side job state filtering
-			allJobs := []buildkite.Job{
-				{ID: "job1", Name: "Test 1", State: "passed", Agent: buildkite.Agent{ID: "agent1", Name: "Agent 1"}},
-				{ID: "job2", Name: "Test 2", State: "failed", Agent: buildkite.Agent{ID: "agent2", Name: "Agent 2"}},
-				{ID: "job3", Name: "Test 3", State: "failed", Agent: buildkite.Agent{ID: "agent3", Name: "Agent 3"}},
-				{ID: "job4", Name: "Test 4", State: "broken", Agent: buildkite.Agent{ID: "agent4", Name: "Agent 4"}},
-			}
-
-			// Filter jobs based on requested states (simulating what the API does)
-			var jobs []buildkite.Job
-			if len(opt.JobStates) > 0 {
-				stateSet := make(map[string]bool, len(opt.JobStates))
-				for _, s := range opt.JobStates {
-					stateSet[s] = true
-				}
-				for _, job := range allJobs {
-					if stateSet[job.State] {
-						jobs = append(jobs, job)
-					}
-				}
-			} else {
-				jobs = allJobs
-			}
-
-			return buildkite.Build{
-					ID:     "123",
-					Number: 1,
-					State:  "failed",
-					Jobs:   jobs,
-				}, &buildkite.Response{
-					Response: &http.Response{StatusCode: 200},
-				}, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	tool, handler, _ := GetBuild()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
-
-	t.Run("filter by single state", func(t *testing.T) {
-		request := createMCPRequest(t, map[string]any{})
-		result, _, err := handler(ctx, request, GetBuildArgs{
-			OrgSlug:      "org",
-			PipelineSlug: "pipeline",
-			BuildNumber:  "1",
-			DetailLevel:  "full",
-			JobState:     "failed",
-		})
-		assert.NoError(err)
-
-		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"id":"job2"`)
-		assert.Contains(textContent.Text, `"id":"job3"`)
-		assert.NotContains(textContent.Text, `"id":"job1"`)
-		assert.NotContains(textContent.Text, `"id":"job4"`)
-	})
-
-	t.Run("filter by multiple states", func(t *testing.T) {
-		request := createMCPRequest(t, map[string]any{})
-		result, _, err := handler(ctx, request, GetBuildArgs{
-			OrgSlug:      "org",
-			PipelineSlug: "pipeline",
-			BuildNumber:  "1",
-			DetailLevel:  "full",
-			JobState:     "failed,broken",
-		})
-		assert.NoError(err)
-
-		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"id":"job2"`)
-		assert.Contains(textContent.Text, `"id":"job3"`)
-		assert.Contains(textContent.Text, `"id":"job4"`)
-		assert.NotContains(textContent.Text, `"id":"job1"`)
-	})
-
-	t.Run("filter with whitespace handling", func(t *testing.T) {
-		request := createMCPRequest(t, map[string]any{})
-		result, _, err := handler(ctx, request, GetBuildArgs{
-			OrgSlug:      "org",
-			PipelineSlug: "pipeline",
-			BuildNumber:  "1",
-			DetailLevel:  "full",
-			JobState:     "failed, broken",
-		})
-		assert.NoError(err)
-
-		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"id":"job2"`)
-		assert.Contains(textContent.Text, `"id":"job3"`)
-		assert.Contains(textContent.Text, `"id":"job4"`)
-	})
-}
-
-func TestGetBuildWithAgentStripping(t *testing.T) {
-	assert := require.New(t)
-
-	client := &MockBuildsClient{
-		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			return buildkite.Build{
-					ID:     "123",
-					Number: 1,
-					State:  "passed",
-					Jobs: []buildkite.Job{
-						{ID: "job1", Name: "Test 1", State: "passed", Agent: buildkite.Agent{ID: "agent1", Name: "Agent 1", Hostname: "host1"}},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{StatusCode: 200},
-				}, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	tool, handler, _ := GetBuild()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
-
-	t.Run("include_agent false strips details", func(t *testing.T) {
-		request := createMCPRequest(t, map[string]any{})
-		result, _, err := handler(ctx, request, GetBuildArgs{
-			OrgSlug:      "org",
-			PipelineSlug: "pipeline",
-			BuildNumber:  "1",
-			DetailLevel:  "full",
-			IncludeAgent: false,
-		})
-		assert.NoError(err)
-
-		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"agent1"`)
-		assert.NotContains(textContent.Text, `"Agent 1"`)
-		assert.NotContains(textContent.Text, `"host1"`)
-	})
-
-	t.Run("include_agent true keeps details", func(t *testing.T) {
-		request := createMCPRequest(t, map[string]any{})
-		result, _, err := handler(ctx, request, GetBuildArgs{
-			OrgSlug:      "org",
-			PipelineSlug: "pipeline",
-			BuildNumber:  "1",
-			DetailLevel:  "full",
-			IncludeAgent: true,
-		})
-		assert.NoError(err)
-
-		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"agent1"`)
-		assert.Contains(textContent.Text, `"Agent 1"`)
-		assert.Contains(textContent.Text, `"host1"`)
-	})
-}
-
-func TestGetBuildDetailedWithJobStateFilter(t *testing.T) {
-	assert := require.New(t)
-
-	client := &MockBuildsClient{
-		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			assert.Equal([]string{"failed"}, opt.JobStates, "JobStates should be passed to the API")
-
-			// API returns only the filtered jobs
-			return buildkite.Build{
-					ID:     "123",
-					Number: 1,
-					State:  "failed",
-					Jobs: []buildkite.Job{
-						{ID: "job2", Name: "Test 2", State: "failed"},
-						{ID: "job3", Name: "Test 3", State: "failed"},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{StatusCode: 200},
-				}, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	tool, handler, _ := GetBuild()
-	assert.NotNil(tool)
-	assert.NotNil(handler)
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetBuildArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-		BuildNumber:  "1",
-		DetailLevel:  "detailed",
-		JobState:     "failed",
-	})
-	assert.NoError(err)
-
-	textContent := getTextResult(t, result)
-	assert.NotContains(textContent.Text, `"jobs_total"`)
-	// job_summary.total should reflect filtered jobs (2)
-	assert.Contains(textContent.Text, `"total":2`)
-	// job_summary.by_state should only show failed count
-	assert.Contains(textContent.Text, `"failed":2`)
-	// jobs array should contain only the filtered entries
-	assert.Contains(textContent.Text, `{"id":"job2","name":"Test 2","state":"failed"}`)
-	assert.Contains(textContent.Text, `{"id":"job3","name":"Test 3","state":"failed"}`)
-}
-
-func TestGetBuildInvalidDetailLevel(t *testing.T) {
-	assert := require.New(t)
-
-	client := &MockBuildsClient{
-		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			return buildkite.Build{
-					ID:     "123",
-					Number: 1,
-					State:  "failed",
-				}, &buildkite.Response{
-					Response: &http.Response{StatusCode: 200},
-				}, nil
-		},
-	}
-
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
-
-	_, handler, _ := GetBuild()
-
-	request := createMCPRequest(t, map[string]any{})
-	result, _, err := handler(ctx, request, GetBuildArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-		BuildNumber:  "1",
-		DetailLevel:  "summary",
-	})
-	assert.NoError(err)
-	assert.True(result.IsError)
-
-	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, "detail_level must be 'detailed' or 'full'")
 }
 
 func TestCancelBuild(t *testing.T) {
