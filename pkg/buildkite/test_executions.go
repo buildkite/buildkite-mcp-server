@@ -35,30 +35,33 @@ func GetFailedTestExecutions() (mcp.Tool, mcp.ToolHandlerFor[GetFailedTestExecut
 			ctx, span := trace.Start(ctx, "buildkite.GetFailedExecutions")
 			defer span.End()
 
-			// Get client-side pagination parameters (always enabled)
-			paginationParams := clientSidePaginationFromArgs(args.Page, args.PerPage)
-
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("test_suite_slug", args.TestSuiteSlug),
 				attribute.String("run_id", args.RunID),
 				attribute.Bool("include_failure_expanded", args.IncludeFailureExpanded),
-				attribute.Int("page", paginationParams.Page),
-				attribute.Int("per_page", paginationParams.PerPage),
+				attribute.Int("page", args.Page),
+				attribute.Int("per_page", args.PerPage),
 			)
 
 			options := &buildkite.FailedExecutionsOptions{
 				IncludeFailureExpanded: args.IncludeFailureExpanded,
+				Page:                   args.Page,
+				PerPage:                args.PerPage,
 			}
 
 			deps := DepsFromContext(ctx)
-			failedExecutions, _, err := deps.TestExecutionsClient.GetFailedExecutions(ctx, args.OrgSlug, args.TestSuiteSlug, args.RunID, options)
+			failedExecutions, resp, err := deps.TestExecutionsClient.GetFailedExecutions(ctx, args.OrgSlug, args.TestSuiteSlug, args.RunID, options)
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
 
-			// Always apply client-side pagination
-			result := applyClientSidePagination(failedExecutions, paginationParams)
+			result := PaginatedResult[buildkite.FailedExecution]{
+				Items: failedExecutions,
+				Headers: map[string]string{
+					"Link": resp.Header.Get("Link"),
+				},
+			}
 
 			span.SetAttributes(
 				attribute.Int("item_count", len(failedExecutions)),

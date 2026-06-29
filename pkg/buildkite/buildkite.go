@@ -37,68 +37,6 @@ func paginationFromArgs(page, perPage int) buildkite.ListOptions {
 	}
 }
 
-// ClientSidePaginationParams represents parameters for client-side pagination
-type ClientSidePaginationParams struct {
-	Page    int
-	PerPage int
-}
-
-// ClientSidePaginatedResult represents a paginated result for client-side pagination
-type ClientSidePaginatedResult[T any] struct {
-	Items      []T  `json:"items"`
-	Page       int  `json:"page"`
-	PerPage    int  `json:"per_page"`
-	Total      int  `json:"total"`
-	TotalPages int  `json:"total_pages"`
-	HasNext    bool `json:"has_next"`
-	HasPrev    bool `json:"has_prev"`
-}
-
-func clientSidePaginationFromArgs(page, perPage int) ClientSidePaginationParams {
-	if page == 0 {
-		page = 1
-	}
-	if perPage == 0 {
-		perPage = 25
-	}
-	return ClientSidePaginationParams{
-		Page:    page,
-		PerPage: perPage,
-	}
-}
-
-// applyClientSidePagination applies client-side pagination to a slice of items
-func applyClientSidePagination[T any](items []T, params ClientSidePaginationParams) ClientSidePaginatedResult[T] {
-	total := len(items)
-	totalPages := (total + params.PerPage - 1) / params.PerPage
-	if totalPages == 0 {
-		totalPages = 1
-	}
-
-	startIndex := (params.Page - 1) * params.PerPage
-	endIndex := startIndex + params.PerPage
-
-	var paginatedItems []T
-	if startIndex >= total {
-		paginatedItems = []T{}
-	} else {
-		if endIndex > total {
-			endIndex = total
-		}
-		paginatedItems = items[startIndex:endIndex]
-	}
-
-	return ClientSidePaginatedResult[T]{
-		Items:      paginatedItems,
-		Page:       params.Page,
-		PerPage:    params.PerPage,
-		Total:      total,
-		TotalPages: totalPages,
-		HasNext:    params.Page < totalPages,
-		HasPrev:    params.Page > 1,
-	}
-}
-
 func boolPtr(b bool) *bool {
 	return &b
 }
