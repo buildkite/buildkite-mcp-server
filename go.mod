@@ -5,7 +5,7 @@ go 1.25.8
 require (
 	github.com/alecthomas/kong v1.15.0
 	github.com/buildkite/buildkite-logs v0.12.1
-	github.com/buildkite/go-buildkite/v5 v5.2.0
+	github.com/buildkite/go-buildkite/v5 v5.3.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/mattn/go-isatty v0.0.22
 	github.com/microcosm-cc/bluemonday v1.0.27
@@ -44,7 +44,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.3 // indirect
 	github.com/aws/smithy-go v1.27.2 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
-	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
+	github.com/buildkite/roko v1.4.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
