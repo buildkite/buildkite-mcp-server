@@ -76,6 +76,7 @@ func TestListArtifactsForBuild(t *testing.T) {
 			return []buildkite.Artifact{
 					{
 						ID:          "abc123",
+						JobID:       "job-789",
 						Filename:    "test-artifact.txt",
 						State:       "finished",
 						DownloadURL: "https://example.com/artifact",
@@ -104,9 +105,12 @@ func TestListArtifactsForBuild(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 	assert.Contains(textContent.Text, `"id":"abc123"`)
+	assert.Contains(textContent.Text, `"job_id":"job-789"`)
 	assert.Contains(textContent.Text, `"filename":"test-artifact.txt"`)
 	assert.Contains(textContent.Text, `"state":"finished"`)
-	assert.Contains(textContent.Text, `"download_url":"https://example.com/artifact"`)
+	// download_url is intentionally stripped from list results; agents fetch via
+	// get_artifact using id and job_id instead.
+	assert.NotContains(textContent.Text, `"download_url"`)
 }
 
 func TestListArtifactsForJob(t *testing.T) {
@@ -117,6 +121,7 @@ func TestListArtifactsForJob(t *testing.T) {
 			return []buildkite.Artifact{
 					{
 						ID:          "abc123",
+						JobID:       "job-789",
 						Filename:    "test-artifact.txt",
 						State:       "finished",
 						DownloadURL: "https://example.com/artifact",
@@ -146,9 +151,12 @@ func TestListArtifactsForJob(t *testing.T) {
 
 	textContent := getTextResult(t, result)
 	assert.Contains(textContent.Text, `"id":"abc123"`)
+	assert.Contains(textContent.Text, `"job_id":"job-789"`)
 	assert.Contains(textContent.Text, `"filename":"test-artifact.txt"`)
 	assert.Contains(textContent.Text, `"state":"finished"`)
-	assert.Contains(textContent.Text, `"download_url":"https://example.com/artifact"`)
+	// download_url is intentionally stripped from list results; agents fetch via
+	// get_artifact using id and job_id instead.
+	assert.NotContains(textContent.Text, `"download_url"`)
 }
 
 func TestGetArtifact_TextInline(t *testing.T) {
