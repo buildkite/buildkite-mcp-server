@@ -102,10 +102,11 @@ func run(ctx context.Context, cmd *kong.Context) error {
 		log.Info().Str("path", cli.Replay).Msg("Replaying API calls from HAR file")
 	}
 
+	httpClient := trace.NewHTTPClientWithHeadersAndTransport(headers, innerTransport)
 	client, err := gobuildkite.NewOpts(
 		gobuildkite.WithTokenAuth(apiToken),
 		gobuildkite.WithUserAgent(commands.UserAgent(version)),
-		gobuildkite.WithHTTPClient(trace.NewHTTPClientWithHeadersAndTransport(headers, innerTransport)),
+		gobuildkite.WithHTTPClient(httpClient),
 		gobuildkite.WithBaseURL(cli.BaseURL),
 	)
 	if err != nil {
@@ -135,7 +136,7 @@ func run(ctx context.Context, cmd *kong.Context) error {
 		log.Ctx(ctx).Debug().Str("org", result.Org).Str("pipeline", result.Pipeline).Str("build", result.Build).Str("job", result.Job).Dur("time_taken", result.Duration).Msg("Stored logs to blob storage")
 	})
 
-	return cmd.Run(&commands.Globals{Version: version, Client: client, BuildkiteLogsClient: buildkiteLogsClient})
+	return cmd.Run(&commands.Globals{Version: version, Client: client, HTTPClient: httpClient, BuildkiteLogsClient: buildkiteLogsClient})
 }
 
 func setupLogger(debug bool) zerolog.Logger {
