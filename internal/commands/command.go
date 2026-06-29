@@ -3,6 +3,7 @@ package commands
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"runtime"
 
@@ -13,6 +14,7 @@ import (
 
 type Globals struct {
 	Client              *gobuildkite.Client
+	HTTPClient          *http.Client
 	BuildkiteLogsClient *buildkitelogs.Client
 	Version             string
 }

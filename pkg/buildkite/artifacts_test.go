@@ -62,6 +62,12 @@ func (m *MockArtifactsClient) ResolveDownloadURL(ctx context.Context, org, pipel
 // Ensure MockArtifactsClient implements ArtifactsClient interface
 var _ ArtifactsClient = (*MockArtifactsClient)(nil)
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestListArtifactsForBuild(t *testing.T) {
 	assert := require.New(t)
 
@@ -202,6 +208,46 @@ func TestGetArtifact_TextInline(t *testing.T) {
 	assert.Equal("https://example.com/resolved-artifact?X-Amz-Expires=600", got["download_url"])
 	assert.Equal("none", got["download_url_auth"])
 	assert.Equal(int64(600), got["download_url_expires_in_seconds"])
+}
+
+func TestGetArtifact_NonUTF8TextReturnsURL(t *testing.T) {
+	assert := require.New(t)
+
+	client := &MockArtifactsClient{
+		GetByJobFunc: func(ctx context.Context, org, pipelineSlug, buildNumber, jobID, artifactID string) (buildkite.Artifact, *buildkite.Response, error) {
+			return buildkite.Artifact{
+				Filename: "latin1.txt",
+				MimeType: "text/plain; charset=iso-8859-1",
+				FileSize: 4,
+			}, nil, nil
+		},
+		ResolveDownloadURLFunc: func(ctx context.Context, org, pipelineSlug, buildNumber, jobID, artifactID string) (string, error) {
+			return "https://example.com/latin1.txt", nil
+		},
+		DownloadArtifactFunc: func(ctx context.Context, org, pipelineSlug, buildNumber, jobID, artifactID string, writer io.Writer) (*buildkite.Response, error) {
+			_, err := writer.Write([]byte{0xff, 0xfe, 0xfd, '\n'})
+			return nil, err
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ArtifactsClient: client})
+	_, handler, _ := GetArtifact()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetArtifactArgs{
+		OrgSlug:      "myorg",
+		PipelineSlug: "my-pipeline",
+		BuildNumber:  "123",
+		JobID:        "abc",
+		ArtifactID:   "def",
+	})
+	assert.NoError(err)
+
+	got := getJSONResult(t, result)
+	assert.Equal("url", got["encoding"])
+	assert.Equal("text/plain; charset=iso-8859-1", got["mime_type"])
+	assert.Equal("https://example.com/latin1.txt", got["download_url"])
+	assert.Contains(got["note"], "not valid UTF-8")
+	assert.NotContains(got, "content")
 }
 
 func TestGetArtifact_StructuredJSONInline(t *testing.T) {
@@ -753,6 +799,40 @@ func TestBuildkiteClientAdapter_ResolveDownloadURL(t *testing.T) {
 			assert.Equal("Bearer fake-token", gotAuth)
 		})
 	}
+}
+
+func TestBuildkiteClientAdapter_ResolveDownloadURLUsesConfiguredHTTPClient(t *testing.T) {
+	assert := require.New(t)
+
+	const resolvedURL = "https://storage.example.com/artifact"
+
+	var gotInjectedHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotInjectedHeader = r.Header.Get("X-Transport-Was-Here")
+		http.Redirect(w, r, resolvedURL, http.StatusFound)
+	}))
+	defer srv.Close()
+
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			req.Header.Set("X-Transport-Was-Here", "yes")
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}
+	client, err := buildkite.NewOpts(
+		buildkite.WithTokenAuth("fake-token"),
+		buildkite.WithBaseURL(srv.URL+"/"),
+		buildkite.WithHTTPClient(httpClient),
+	)
+	assert.NoError(err)
+
+	adapter := &BuildkiteClientAdapter{Client: client, HTTPClient: httpClient}
+
+	gotURL, err := adapter.ResolveDownloadURL(context.Background(), "myorg", "my-pipeline", "123", "abc", "def")
+	assert.NoError(err)
+	assert.Equal(resolvedURL, gotURL)
+	assert.Equal("yes", gotInjectedHeader)
+	assert.Nil(httpClient.CheckRedirect)
 }
 
 func getJSONResult(t *testing.T, result *mcp.CallToolResult) map[string]any {

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
@@ -31,6 +32,7 @@ type ArtifactsClient interface {
 // BuildkiteClientAdapter adapts the buildkite.Client to work with our interfaces
 type BuildkiteClientAdapter struct {
 	*buildkite.Client
+	HTTPClient *http.Client
 }
 
 // ListByBuild implements ArtifactsClient
@@ -76,10 +78,12 @@ func (a *BuildkiteClientAdapter) ResolveDownloadURL(ctx context.Context, org, pi
 		return "", err
 	}
 
-	client := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
+	client := http.Client{}
+	if a.HTTPClient != nil {
+		client = *a.HTTPClient
+	}
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 
 	resp, err := client.Do(req)
@@ -321,6 +325,14 @@ func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string
 				_, err := deps.ArtifactsClient.DownloadArtifact(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, args.ArtifactID, &buffer)
 				if err != nil {
 					return handleBuildkiteError(err)
+				}
+				if !utf8.Valid(buffer.Bytes()) {
+					result := artifactResult("url", artifact, downloadURL, downloadURLAuth, expiresInSeconds)
+					result["note"] = "Artifact content was not returned inline because it was not valid UTF-8. Use download_url to fetch it directly."
+					if downloadURL == "" {
+						result["note"] = "Artifact content was not returned inline because it was not valid UTF-8, and no download URL was available."
+					}
+					return mcpTextResult(span, &result)
 				}
 
 				result := artifactResult("text", artifact, downloadURL, downloadURLAuth, expiresInSeconds)

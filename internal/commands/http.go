@@ -33,7 +33,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		ClustersClient:          globals.Client.Clusters,
 		ClusterQueuesClient:     globals.Client.ClusterQueues,
 		AgentsClient:            globals.Client.Agents,
-		ArtifactsClient:         &buildkite.BuildkiteClientAdapter{Client: globals.Client},
+		ArtifactsClient:         &buildkite.BuildkiteClientAdapter{Client: globals.Client, HTTPClient: globals.HTTPClient},
 		AnnotationsClient:       globals.Client.Annotations,
 		OrganizationsClient:     globals.Client.Organizations,
 		UserClient:              globals.Client.User,
