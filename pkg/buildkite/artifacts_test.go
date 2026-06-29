@@ -77,6 +77,8 @@ func TestListArtifactsForBuild(t *testing.T) {
 					{
 						ID:          "abc123",
 						JobID:       "job-789",
+						URL:         "https://example.com/artifact-resource",
+						Dirname:     "build/logs",
 						Filename:    "test-artifact.txt",
 						State:       "finished",
 						DownloadURL: "https://example.com/artifact",
@@ -108,9 +110,11 @@ func TestListArtifactsForBuild(t *testing.T) {
 	assert.Contains(textContent.Text, `"job_id":"job-789"`)
 	assert.Contains(textContent.Text, `"filename":"test-artifact.txt"`)
 	assert.Contains(textContent.Text, `"state":"finished"`)
-	// download_url is intentionally stripped from list results; agents fetch via
-	// get_artifact using id and job_id instead.
+	// download_url and url are intentionally stripped from list results to keep
+	// them small; agents fetch via get_artifact using id and job_id instead.
 	assert.NotContains(textContent.Text, `"download_url"`)
+	assert.NotContains(textContent.Text, `"url"`)
+	assert.NotContains(textContent.Text, `"dirname"`)
 }
 
 func TestListArtifactsForJob(t *testing.T) {
@@ -122,6 +126,8 @@ func TestListArtifactsForJob(t *testing.T) {
 					{
 						ID:          "abc123",
 						JobID:       "job-789",
+						URL:         "https://example.com/artifact-resource",
+						Dirname:     "build/logs",
 						Filename:    "test-artifact.txt",
 						State:       "finished",
 						DownloadURL: "https://example.com/artifact",
@@ -154,9 +160,11 @@ func TestListArtifactsForJob(t *testing.T) {
 	assert.Contains(textContent.Text, `"job_id":"job-789"`)
 	assert.Contains(textContent.Text, `"filename":"test-artifact.txt"`)
 	assert.Contains(textContent.Text, `"state":"finished"`)
-	// download_url is intentionally stripped from list results; agents fetch via
-	// get_artifact using id and job_id instead.
+	// download_url and url are intentionally stripped from list results to keep
+	// them small; agents fetch via get_artifact using id and job_id instead.
 	assert.NotContains(textContent.Text, `"download_url"`)
+	assert.NotContains(textContent.Text, `"url"`)
+	assert.NotContains(textContent.Text, `"dirname"`)
 }
 
 func TestGetArtifact_TextInline(t *testing.T) {

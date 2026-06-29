@@ -189,43 +189,44 @@ func isTextMIMEType(mimeType string) bool {
 }
 
 // artifactListItem is the projection of an artifact returned by the list tools.
-// It deliberately omits the download_url field present on buildkite.Artifact:
-// that URL is the authenticated API redirect endpoint, which behaves differently
-// from the presigned URL get_artifact returns and consistently misled agents into
-// sending Bearer tokens to the wrong place. Callers identify an artifact by
-// filename/path and fetch it via get_artifact using id and job_id, so the field
-// is redundant here (it is exactly url + "/download").
+// It deliberately omits several fields present on buildkite.Artifact to keep list
+// output small (a big build has hundreds of artifacts):
+//
+//   - download_url: the authenticated API redirect endpoint, which behaves
+//     differently from the presigned URL get_artifact returns and consistently
+//     misled agents into sending Bearer tokens to the wrong place.
+//   - url: the authenticated API resource endpoint (download_url minus
+//     "/download"); derivable and unnecessary, as artifacts are fetched via
+//     get_artifact using id and job_id, not by following a URL.
+//   - dirname: always the directory portion of path.
+//   - glob_path, original_path: upload-time internals that are rarely populated
+//     and not actionable.
+//
+// Callers identify an artifact by filename/path and fetch it via get_artifact
+// using id and job_id.
 type artifactListItem struct {
-	ID           string `json:"id,omitempty"`
-	JobID        string `json:"job_id,omitempty"`
-	URL          string `json:"url,omitempty"`
-	State        string `json:"state,omitempty"`
-	Path         string `json:"path,omitempty"`
-	Dirname      string `json:"dirname,omitempty"`
-	Filename     string `json:"filename,omitempty"`
-	MimeType     string `json:"mime_type,omitempty"`
-	FileSize     int64  `json:"file_size,omitempty"`
-	GlobPath     string `json:"glob_path,omitempty"`
-	OriginalPath string `json:"original_path,omitempty"`
-	SHA1         string `json:"sha1sum,omitempty"`
+	ID       string `json:"id,omitempty"`
+	JobID    string `json:"job_id,omitempty"`
+	State    string `json:"state,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	FileSize int64  `json:"file_size,omitempty"`
+	SHA1     string `json:"sha1sum,omitempty"`
 }
 
 func toArtifactListItems(artifacts []buildkite.Artifact) []artifactListItem {
 	items := make([]artifactListItem, len(artifacts))
 	for i, a := range artifacts {
 		items[i] = artifactListItem{
-			ID:           a.ID,
-			JobID:        a.JobID,
-			URL:          a.URL,
-			State:        a.State,
-			Path:         a.Path,
-			Dirname:      a.Dirname,
-			Filename:     a.Filename,
-			MimeType:     a.MimeType,
-			FileSize:     a.FileSize,
-			GlobPath:     a.GlobPath,
-			OriginalPath: a.OriginalPath,
-			SHA1:         a.SHA1,
+			ID:       a.ID,
+			JobID:    a.JobID,
+			State:    a.State,
+			Path:     a.Path,
+			Filename: a.Filename,
+			MimeType: a.MimeType,
+			FileSize: a.FileSize,
+			SHA1:     a.SHA1,
 		}
 	}
 	return items
