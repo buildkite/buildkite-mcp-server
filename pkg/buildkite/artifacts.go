@@ -188,6 +188,50 @@ func isTextMIMEType(mimeType string) bool {
 	}
 }
 
+// artifactListItem is the projection of an artifact returned by the list tools.
+// It deliberately omits several fields present on buildkite.Artifact to keep list
+// output small (a big build has hundreds of artifacts):
+//
+//   - download_url: the authenticated API redirect endpoint, which behaves
+//     differently from the presigned URL get_artifact returns and consistently
+//     misled agents into sending Bearer tokens to the wrong place.
+//   - url: the authenticated API resource endpoint (download_url minus
+//     "/download"); derivable and unnecessary, as artifacts are fetched via
+//     get_artifact using id and job_id, not by following a URL.
+//   - dirname: always the directory portion of path.
+//   - glob_path, original_path: upload-time internals that are rarely populated
+//     and not actionable.
+//
+// Callers identify an artifact by filename/path and fetch it via get_artifact
+// using id and job_id.
+type artifactListItem struct {
+	ID       string `json:"id,omitempty"`
+	JobID    string `json:"job_id,omitempty"`
+	State    string `json:"state,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Filename string `json:"filename,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	FileSize int64  `json:"file_size,omitempty"`
+	SHA1     string `json:"sha1sum,omitempty"`
+}
+
+func toArtifactListItems(artifacts []buildkite.Artifact) []artifactListItem {
+	items := make([]artifactListItem, len(artifacts))
+	for i, a := range artifacts {
+		items[i] = artifactListItem{
+			ID:       a.ID,
+			JobID:    a.JobID,
+			State:    a.State,
+			Path:     a.Path,
+			Filename: a.Filename,
+			MimeType: a.MimeType,
+			FileSize: a.FileSize,
+			SHA1:     a.SHA1,
+		}
+	}
+	return items
+}
+
 type ListArtifactsForBuildArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
@@ -216,7 +260,7 @@ type GetArtifactArgs struct {
 func ListArtifactsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_artifacts_for_build",
-			Description: "List all artifacts for a build across all jobs, including file details, paths, sizes, MIME types, and download URLs",
+			Description: "List all artifacts for a build across all jobs, including filenames, paths, sizes, and MIME types. Output can be large for big builds — use per_page and paginate. To fetch an artifact's contents or a download URL, call get_artifact with that artifact's id and job_id.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Build Artifact List",
 				ReadOnlyHint: true,
@@ -244,8 +288,8 @@ func ListArtifactsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForBuild
 				return handleBuildkiteError(err)
 			}
 
-			result := PaginatedResult[buildkite.Artifact]{
-				Items: artifacts,
+			result := PaginatedResult[artifactListItem]{
+				Items: toArtifactListItems(artifacts),
 				Headers: map[string]string{
 					"Link": resp.Header.Get("Link"),
 				},
@@ -262,7 +306,7 @@ func ListArtifactsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForBuild
 func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_artifacts_for_job",
-			Description: "List all artifacts for an individual job, including file details, paths, sizes, MIME types, and download URLs",
+			Description: "List all artifacts for an individual job, including filenames, paths, sizes, and MIME types. To fetch an artifact's contents or a download URL, call get_artifact with that artifact's id and job_id.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Job Artifact List",
 				ReadOnlyHint: true,
@@ -291,8 +335,8 @@ func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs
 				return handleBuildkiteError(err)
 			}
 
-			result := PaginatedResult[buildkite.Artifact]{
-				Items: artifacts,
+			result := PaginatedResult[artifactListItem]{
+				Items: toArtifactListItems(artifacts),
 				Headers: map[string]string{
 					"Link": resp.Header.Get("Link"),
 				},
@@ -310,7 +354,7 @@ func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs
 func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_artifact",
-			Description: "Get a specific artifact by organization, pipeline, build, job, and artifact identifiers. Small text artifacts are returned inline; large or binary artifacts return metadata plus a download URL",
+			Description: "Get a specific artifact by organization, pipeline, build, job, and artifact identifiers. Text artifacts under 64 KiB are returned inline in `content`; larger or binary artifacts return metadata plus a short-lived `download_url`. When `download_url_auth` is \"none\" the URL is presigned (a buildkiteartifacts.com S3 link) — fetch it with a plain GET and NO Authorization header. It expires after `download_url_expires_in_seconds`; if it has expired, call this tool again for a fresh URL.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Artifact",
 				ReadOnlyHint: true,
@@ -408,10 +452,13 @@ func downloadURLExpiresInSeconds(downloadURL string) int {
 // (e.g. " because it was larger than expected"); pass "" for no specific reason.
 func urlArtifactResult(reason string, artifact buildkite.Artifact, downloadURL, downloadURLAuth string, expiresInSeconds int) map[string]any {
 	result := artifactResult("url", artifact, downloadURL, downloadURLAuth, expiresInSeconds)
-	if downloadURL == "" {
+	switch {
+	case downloadURL == "":
 		result["note"] = fmt.Sprintf("Artifact content was not returned inline%s, and no download URL was available.", reason)
-	} else {
-		result["note"] = fmt.Sprintf("Artifact content was not returned inline%s. Use download_url to fetch it directly.", reason)
+	case downloadURLAuth == "none":
+		result["note"] = fmt.Sprintf("Artifact content was not returned inline%s. Fetch download_url with a plain GET and no Authorization header (it is a presigned URL). It is short-lived (see download_url_expires_in_seconds); if it has expired, call get_artifact again for a fresh URL.", reason)
+	default:
+		result["note"] = fmt.Sprintf("Artifact content was not returned inline%s. Use download_url to fetch it directly; it is an authenticated Buildkite API endpoint and requires your API token (Authorization: Bearer <token>).", reason)
 	}
 	return result
 }
