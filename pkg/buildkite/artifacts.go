@@ -354,7 +354,7 @@ func ListArtifactsForJob() (mcp.Tool, mcp.ToolHandlerFor[ListArtifactsForJobArgs
 func GetArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetArtifactArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_artifact",
-			Description: "Get a specific artifact by organization, pipeline, build, job, and artifact identifiers. Text artifacts under 64 KiB are returned inline in `content`; larger or binary artifacts return metadata plus a short-lived `download_url`. When `download_url_auth` is \"none\" the URL is presigned (a buildkiteartifacts.com S3 link) — fetch it with a plain GET and NO Authorization header. It expires after `download_url_expires_in_seconds`; if it has expired, call this tool again for a fresh URL. (Note: the `download_url` returned by list_artifacts_for_build/list_artifacts_for_job is different — that one is an authenticated API endpoint requiring your token.)",
+			Description: "Get a specific artifact by organization, pipeline, build, job, and artifact identifiers. Text artifacts under 64 KiB are returned inline in `content`; larger or binary artifacts return metadata plus a short-lived `download_url`. When `download_url_auth` is \"none\" the URL is presigned (a buildkiteartifacts.com S3 link) — fetch it with a plain GET and NO Authorization header. It expires after `download_url_expires_in_seconds`; if it has expired, call this tool again for a fresh URL.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Artifact",
 				ReadOnlyHint: true,
