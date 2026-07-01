@@ -11,6 +11,11 @@ cache:
   size: "100g"
 
 steps:
+  - name: ":memo: Trigger docs draft"
+    if: build.branch == "main"
+    soft_fail: true
+    command: .buildkite/trigger-docs-draft
+
   - group: ":mag: Quality Checks"
     key: quality-checks
     steps:
