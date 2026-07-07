@@ -1,7 +1,7 @@
 image: "buildkite/hosted-agent-base-images:ubuntu-jammy"
 
 agents:
-  queue: hosted
+  queue: default-queue
 
 steps:
   - label: ":rocket: :github: MCP Release"
