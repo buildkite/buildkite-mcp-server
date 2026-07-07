@@ -57,6 +57,9 @@ type AgentDetail struct {
 	IPAddress              string               `json:"ip_address,omitempty"`
 	UserAgent              string               `json:"user_agent,omitempty"`
 	Version                string               `json:"version,omitempty"`
+	OSID                   string               `json:"os_id,omitempty"`
+	Arch                   string               `json:"arch,omitempty"`
+	Queue                  string               `json:"queue,omitempty"`
 	Priority               *int                 `json:"priority,omitempty"`
 	Metadata               []string             `json:"meta_data,omitempty"`
 	CreatedAt              *buildkite.Timestamp `json:"created_at,omitempty"`
@@ -103,6 +106,9 @@ func detailAgent(agent buildkite.Agent) AgentDetail {
 		IPAddress:              agent.IPAddress,
 		UserAgent:              agent.UserAgent,
 		Version:                agent.Version,
+		OSID:                   agent.OSID,
+		Arch:                   agent.Arch,
+		Queue:                  agent.Queue,
 		Priority:               agent.Priority,
 		Metadata:               agent.Metadata,
 		CreatedAt:              agent.CreatedAt,

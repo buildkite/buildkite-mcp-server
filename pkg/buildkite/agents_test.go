@@ -135,6 +135,9 @@ func TestListAgentsDetailed(t *testing.T) {
 				IPAddress:      "10.0.0.1",
 				UserAgent:      "buildkite-agent/3.90.0",
 				Version:        "3.90.0",
+				OSID:           "ubuntu",
+				Arch:           "amd64",
+				Queue:          "default",
 				Priority:       &priority,
 				Metadata:       []string{"queue=default"},
 				Paused:         &paused,
@@ -151,7 +154,7 @@ func TestListAgentsDetailed(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"agent-id","name":"agent-name","connection_state":"connected","hostname":"host-1","ip_address":"10.0.0.1","user_agent":"buildkite-agent/3.90.0","version":"3.90.0","priority":7,"meta_data":["queue=default"],"paused":true,"job":{"id":"job-id","name":"tests","state":"running"}}]}`, textContent.Text)
+	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"agent-id","name":"agent-name","connection_state":"connected","hostname":"host-1","ip_address":"10.0.0.1","user_agent":"buildkite-agent/3.90.0","version":"3.90.0","os_id":"ubuntu","arch":"amd64","queue":"default","priority":7,"meta_data":["queue=default"],"paused":true,"job":{"id":"job-id","name":"tests","state":"running"}}]}`, textContent.Text)
 }
 
 func TestGetAgentDetailed(t *testing.T) {
@@ -165,6 +168,9 @@ func TestGetAgentDetailed(t *testing.T) {
 				Name:           "agent-name",
 				ConnectedState: "connected",
 				Hostname:       "host-1",
+				OSID:           "ubuntu",
+				Arch:           "amd64",
+				Queue:          "default",
 				Paused:         &paused,
 				Job:            &gobuildkite.Job{ID: "job-id", Name: "tests", State: "running"},
 			}, &gobuildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
@@ -179,7 +185,32 @@ func TestGetAgentDetailed(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq(`{"id":"agent-id","name":"agent-name","connection_state":"connected","hostname":"host-1","paused":true,"job":{"id":"job-id","name":"tests","state":"running"}}`, textContent.Text)
+	assert.JSONEq(`{"id":"agent-id","name":"agent-name","connection_state":"connected","hostname":"host-1","os_id":"ubuntu","arch":"amd64","queue":"default","paused":true,"job":{"id":"job-id","name":"tests","state":"running"}}`, textContent.Text)
+}
+
+func TestGetAgentFullIncludesUpstreamAgentFields(t *testing.T) {
+	assert := require.New(t)
+
+	client := &mockAgentsClient{
+		GetFunc: func(ctx context.Context, org, id string) (gobuildkite.Agent, *gobuildkite.Response, error) {
+			return gobuildkite.Agent{
+				ID:         "agent-id",
+				Name:       "agent-name",
+				AgentToken: "agent-token",
+				Queue:      "default",
+			}, &gobuildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{AgentsClient: client})
+
+	_, handler, _ := GetAgent()
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetAgentArgs{OrgSlug: "org", AgentID: "agent-id"})
+	assert.NoError(err)
+
+	textContent := getTextResult(t, result)
+	assert.JSONEq(`{"id":"agent-id","name":"agent-name","access_token":"agent-token","queue":"default"}`, textContent.Text)
 }
 
 func TestListAgentsInvalidDetailLevel(t *testing.T) {
