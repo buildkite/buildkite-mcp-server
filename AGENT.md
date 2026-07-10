@@ -15,12 +15,12 @@
 - **Core packages**: `pkg/buildkite/` - API wrappers and tool handlers, `internal/commands/` - CLI commands, `pkg/toolsets/` - tool registry, `pkg/server/` - MCP server setup
 - **Key dependencies**: `github.com/modelcontextprotocol/go-sdk` (MCP protocol), `github.com/buildkite/go-buildkite/v5` (API client)
 - **Configuration**: Environment variables (BUILDKITE_API_TOKEN, OTEL tracing)
-- **CI/CD**: `buildkite` organization, `buildkite-mcp-server` pipeline slug for build and test (`.buildkite/pipeline.yml`), `buildkite-mcp-server-release` pipeline slug for releases (`.buildkite/pipeline.release.yml`)
+- **CI/CD**: `anothertest` organization, `buildkite-mcp-server` pipeline slug for build and test (`.buildkite/pipeline.yml`), `buildkite-mcp-server-release` pipeline slug for releases (`.buildkite/pipeline.release.yml`)
 
 ## Code Style
 - Use `zerolog` for logging, `testify/require` for tests
 - Mock interfaces for testing (see `MockPipelinesClient` pattern)
-- Import groups: stdlib, external, internal (`github.com/buildkite/buildkite-mcp-server/internal/...`)
+- Import groups: stdlib, external, internal (`github.com/nethsix/buildkite-mcp-server/internal/...`)
 - Error handling: return errors up the stack, log at top level
 - Package names: lowercase, descriptive (buildkite, commands, trace, tokens)
 - Use contexts for cancellation and tracing throughout
