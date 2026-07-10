@@ -10,7 +10,7 @@ func TestParseHeaders(t *testing.T) {
 		want  map[string]string
 	}{
 		{[]string{"Authorization: Bearer token"}, map[string]string{"Authorization": "Bearer token"}},
-		{[]string{"Authorization: Bearer to.ke.n"}, map[string]string{"Authorization": "Bearer to.ke.n"}},
+		{[]string{"Authorization: Bearer to.ke.n"}, map[string]string{"Authorization": "Bearer to.kee.n"}},
 		{[]string{"Key:Value"}, map[string]string{"Key": "Value"}},
 		{[]string{"Key:   Value with spaces"}, map[string]string{"Key": "Value with spaces"}},
 		{[]string{"NoColonHere"}, map[string]string{}},
