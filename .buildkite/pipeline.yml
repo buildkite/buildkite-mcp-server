@@ -37,25 +37,3 @@ steps:
         GOMODCACHE: /gomodcache
       plugins:
         - mise#v1.1.1: ~
-
-  - label: ":terminal: build ({{matrix}})"
-    command: ".buildkite/release.sh release --clean --snapshot"
-    depends_on: quality-checks
-    env:
-      GOOS: "{{matrix}}"
-      GOCACHE: /gocache
-      GOMODCACHE: /gomodcache
-    matrix:
-      - "darwin"
-      - "linux"
-      - "windows"
-    artifact_paths:
-      - dist/**/*
-    secrets:
-      - MISE_GITHUB_TOKEN
-    plugins:
-      - mise#v1.1.1: ~
-
-  - label: ":docker: build image"
-    depends_on: quality-checks
-    command: docker build -t buildkite-mcp-server:latest -f Dockerfile.local .
