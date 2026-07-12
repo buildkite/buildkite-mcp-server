@@ -82,6 +82,7 @@ func TestUnblockJob(t *testing.T) {
 		tool, _, _ := UnblockJob()
 		assert.Equal(t, "unblock_job", tool.Name)
 		assert.Contains(t, tool.Description, "Unblock a blocked job")
+		assert.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
 	})
 
 	// Test successful unblock
@@ -192,6 +193,7 @@ func TestRetryJob(t *testing.T) {
 		tool, _, _ := RetryJob()
 		assert.Equal(t, "retry_job", tool.Name)
 		assert.Contains(t, tool.Description, "Retry")
+		assert.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
 	})
 
 	t.Run("Success", func(t *testing.T) {

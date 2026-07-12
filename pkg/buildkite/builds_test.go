@@ -528,6 +528,7 @@ func TestRebuildBuild(t *testing.T) {
 		tool, _, _ := RebuildBuild()
 		require.Equal(t, "rebuild_build", tool.Name)
 		require.Contains(t, tool.Description, "Rebuild")
+		require.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
 	})
 
 	t.Run("Success", func(t *testing.T) {

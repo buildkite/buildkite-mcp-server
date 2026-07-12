@@ -380,7 +380,7 @@ func RebuildBuild() (mcp.Tool, mcp.ToolHandlerFor[RebuildBuildArgs, any], []stri
 			Description: "Rebuild/retry an entire build on a Buildkite pipeline",
 			Annotations: &mcp.ToolAnnotations{
 				Title:           "Rebuild Build",
-				DestructiveHint: boolPtr(false),
+				DestructiveHint: boolPtr(true),
 			},
 		},
 		func(ctx context.Context, request *mcp.CallToolRequest, args RebuildBuildArgs) (*mcp.CallToolResult, any, error) {
