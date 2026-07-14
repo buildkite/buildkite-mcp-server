@@ -224,6 +224,10 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 
 			deps := DepsFromContext(ctx)
 			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
+				BuildsListOptions: buildkite.BuildsListOptions{
+					ExcludeJobs:     true,
+					ExcludePipeline: true,
+				},
 				IncludeTestEngine: true,
 			})
 			if err != nil {

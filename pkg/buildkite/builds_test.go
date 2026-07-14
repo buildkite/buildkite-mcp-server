@@ -305,8 +305,10 @@ func TestListBuilds(t *testing.T) {
 func TestGetBuildTestEngineRuns(t *testing.T) {
 	assert := require.New(t)
 
+	var capturedOptions *buildkite.BuildGetOptions
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			capturedOptions = opt
 			// Return build with test engine data
 			return buildkite.Build{
 					ID:     "123",
@@ -361,6 +363,11 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 	assert.Contains(textContent.Text, "run-2")
 	assert.Contains(textContent.Text, "my-test-suite")
 	assert.Contains(textContent.Text, "another-test-suite")
+
+	require.NotNil(t, capturedOptions)
+	assert.True(capturedOptions.ExcludeJobs)
+	assert.True(capturedOptions.ExcludePipeline)
+	assert.True(capturedOptions.IncludeTestEngine)
 }
 
 func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
