@@ -1,0 +1,21 @@
+{
+    "mcpServers": {
+        "buildkite": {
+            "command": "./buildkite-mcp-server",
+            "args": ["stdio"],
+            "env": {
+                "BUILDKITE_API_TOKEN": "${BUILDKITE_API_TOKEN}"
+            },
+            "disabled_tools": [
+                "create_pipeline",
+                "update_pipeline",
+                "create_build",
+                "unblock_job",
+                "list_clusters",
+                "get_cluster",
+                "list_cluster_queues",
+                "get_cluster_queue"
+            ]
+        }
+    }
+}

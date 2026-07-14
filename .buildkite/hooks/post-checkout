@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Build an image for the toolchain and load it into the local image store.
+if [ "$BUILDKITE_STEP_KEY" == "agent" ]; then
+    docker build \
+        --load \
+        --build-arg GITHUB_CLI_VERSION="${GITHUB_CLI_VERSION}" \
+        --build-arg BUILDKITE_MCP_SERVER_VERSION="${BUILDKITE_MCP_SERVER_VERSION}" \
+        --platform linux/amd64 \
+        -t buildkite-mcp-server-evals:latest .
+fi
