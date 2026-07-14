@@ -58,7 +58,11 @@ func NewReportIssuePrompt(version string) (*mcp.Prompt, mcp.PromptHandler) {
 		client := "unknown"
 		if request != nil && request.Session != nil {
 			if ip := request.Session.InitializeParams(); ip != nil && ip.ClientInfo != nil && ip.ClientInfo.Name != "" {
-				client = fmt.Sprintf("%s %s", ip.ClientInfo.Name, ip.ClientInfo.Version)
+				if ip.ClientInfo.Version != "" {
+					client = fmt.Sprintf("%s %s", ip.ClientInfo.Name, ip.ClientInfo.Version)
+				} else {
+					client = ip.ClientInfo.Name
+				}
 			}
 		}
 
