@@ -204,7 +204,7 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRunsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build_test_engine_runs",
-			Description: "Get test engine runs data for a specific build in Buildkite. This can be used to look up Test Runs.",
+			Description: "Get test engine runs data for a specific build. Returns run references, [] when the build has no runs, or null when the build has no Test Engine data.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build Test Engine Runs",
 				ReadOnlyHint: true,
@@ -232,7 +232,8 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 				return handleBuildkiteError(err)
 			}
 
-			// Extract just the test engine runs data
+			// Preserve null when no Test Engine data exists so callers can
+			// distinguish it from a build with no runs ([]).
 			var testEngineRuns []buildkite.TestEngineRun
 			if build.TestEngine != nil {
 				testEngineRuns = build.TestEngine.Runs
@@ -245,7 +246,7 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build",
-			Description: "Get metadata for a single build. Jobs are not included — use list_jobs or get_job for job detail. Use get_build_test_engine_runs for Test Engine run references",
+			Description: "Get metadata for a single build. Jobs are not included — use list_jobs or get_job for job detail. This response does not indicate whether Test Engine data exists; call get_build_test_engine_runs to check.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build",
 				ReadOnlyHint: true,

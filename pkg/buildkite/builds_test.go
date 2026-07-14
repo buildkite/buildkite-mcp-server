@@ -68,6 +68,7 @@ func TestGetBuild(t *testing.T) {
 		tool, handler, scopes := GetBuild()
 		require.Equal(t, "get_build", tool.Name)
 		require.Contains(t, tool.Description, "metadata")
+		require.Contains(t, tool.Description, "does not indicate whether Test Engine data exists")
 		require.Contains(t, tool.Description, "get_build_test_engine_runs")
 		require.True(t, tool.Annotations.ReadOnlyHint)
 		require.Equal(t, []string{"read_builds"}, scopes)
@@ -355,6 +356,8 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 	// Test tool properties
 	assert.Equal("get_build_test_engine_runs", tool.Name)
 	assert.Contains(tool.Description, "test engine runs")
+	assert.Contains(tool.Description, "[] when")
+	assert.Contains(tool.Description, "null when")
 
 	// Test successful request
 	request := createMCPRequest(t, map[string]any{})
@@ -375,6 +378,33 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 	assert.True(capturedOptions.ExcludeJobs)
 	assert.True(capturedOptions.ExcludePipeline)
 	assert.True(capturedOptions.IncludeTestEngine)
+}
+
+func TestGetBuildTestEngineRunsNoRuns(t *testing.T) {
+	assert := require.New(t)
+
+	client := &MockBuildsClient{
+		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+					ID:         "123",
+					Number:     1,
+					TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{}},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+	_, handler, _ := GetBuildTestEngineRuns()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildTestEngineRunsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
+	})
+	assert.NoError(err)
+	assert.Equal("[]", getTextResult(t, result).Text)
 }
 
 func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
@@ -408,7 +438,7 @@ func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	// Should return empty array when no test engine data
+	// Preserve the distinction between no Test Engine data and no runs.
 	assert.Equal("null", textContent.Text)
 }
 
