@@ -13,10 +13,6 @@ const reportIssuePromptDescription = "Generate a structured, copy-pasteable repo
 
 const reportIssuePromptTemplate = `You are helping the user report a problem with the Buildkite MCP server (buildkite-mcp-server).
 
-Known environment (include these values in the report verbatim):
-- buildkite-mcp-server version: %s
-- MCP client: %s
-
 Review this conversation for Buildkite MCP tool calls that failed, returned errors, or behaved differently than the user expected, then produce an issue report the user can copy and paste.
 
 Rules:
@@ -30,8 +26,8 @@ Output the report inside a single fenced markdown code block using this template
 One sentence describing what went wrong.
 
 ## Environment
-- buildkite-mcp-server version:
-- MCP client:
+- buildkite-mcp-server version: %s
+- MCP client: %s
 
 ## Tool calls
 For each problematic tool call:
