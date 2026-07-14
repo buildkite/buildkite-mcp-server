@@ -60,9 +60,9 @@ if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
     SESSION_ID=$(sed -n 's/^CLAUDE_SESSION_ID=//p' "$LOG" | tail -n1)
     TRANSCRIPT=$(sed -n 's/^CLAUDE_TRANSCRIPT=//p' "$LOG" | tail -n1)
 else
-    # Local execution: run claude directly against mcp_local.json, as before.
+    # Local execution: run claude directly against mcp.json, as before.
     claude -p "$LLM_PROMPT" \
-        --mcp-config mcp_local.json \
+        --mcp-config mcp.json \
         "${CLAUDE_TOOL_ARGS[@]}" \
         | tee "$LOG"
 
