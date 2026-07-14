@@ -34,18 +34,17 @@ type BuildSummary struct {
 // pipeline configuration from the raw Buildkite SDK response.
 type BuildDetail struct {
 	BuildSummary
-	Blocked       bool                          `json:"blocked"`
-	Author        buildkite.Author              `json:"author"`
-	ScheduledAt   *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
-	StartedAt     *buildkite.Timestamp          `json:"started_at,omitempty"`
-	FinishedAt    *buildkite.Timestamp          `json:"finished_at,omitempty"`
-	MetaData      map[string]string             `json:"meta_data,omitempty"`
-	Creator       buildkite.Creator             `json:"creator"`
-	Source        string                        `json:"source,omitempty"`
-	RebuiltFrom   *buildkite.RebuiltFrom        `json:"rebuilt_from,omitempty"`
-	PullRequest   *buildkite.PullRequest        `json:"pull_request,omitempty"`
-	TriggeredFrom *buildkite.TriggeredFrom      `json:"triggered_from,omitempty"`
-	TestEngine    *buildkite.TestEngineProperty `json:"test_engine,omitempty"`
+	Blocked       bool                     `json:"blocked"`
+	Author        buildkite.Author         `json:"author"`
+	ScheduledAt   *buildkite.Timestamp     `json:"scheduled_at,omitempty"`
+	StartedAt     *buildkite.Timestamp     `json:"started_at,omitempty"`
+	FinishedAt    *buildkite.Timestamp     `json:"finished_at,omitempty"`
+	MetaData      map[string]string        `json:"meta_data,omitempty"`
+	Creator       buildkite.Creator        `json:"creator"`
+	Source        string                   `json:"source,omitempty"`
+	RebuiltFrom   *buildkite.RebuiltFrom   `json:"rebuilt_from,omitempty"`
+	PullRequest   *buildkite.PullRequest   `json:"pull_request,omitempty"`
+	TriggeredFrom *buildkite.TriggeredFrom `json:"triggered_from,omitempty"`
 }
 
 // ListBuildsArgs struct with enhanced filtering
@@ -104,7 +103,6 @@ func detailBuild(build buildkite.Build) BuildDetail {
 		RebuiltFrom:   build.RebuiltFrom,
 		PullRequest:   build.PullRequest,
 		TriggeredFrom: build.TriggeredFrom,
-		TestEngine:    build.TestEngine,
 	}
 }
 
@@ -247,7 +245,7 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build",
-			Description: "Get a single build. Jobs are not included — use list_jobs or get_job for job detail",
+			Description: "Get metadata for a single build. Jobs are not included — use list_jobs or get_job for job detail. Use get_build_test_engine_runs for Test Engine run references",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build",
 				ReadOnlyHint: true,
@@ -269,7 +267,6 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 					ExcludeJobs:     true,
 					ExcludePipeline: true,
 				},
-				IncludeTestEngine: true,
 			}
 
 			deps := DepsFromContext(ctx)

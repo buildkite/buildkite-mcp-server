@@ -67,6 +67,8 @@ func TestGetBuild(t *testing.T) {
 	t.Run("ToolDefinition", func(t *testing.T) {
 		tool, handler, scopes := GetBuild()
 		require.Equal(t, "get_build", tool.Name)
+		require.Contains(t, tool.Description, "metadata")
+		require.Contains(t, tool.Description, "get_build_test_engine_runs")
 		require.True(t, tool.Annotations.ReadOnlyHint)
 		require.Equal(t, []string{"read_builds"}, scopes)
 		require.NotNil(t, handler)
@@ -98,6 +100,9 @@ func TestGetBuild(t *testing.T) {
 							Configuration: "steps:\n  - command: echo secret",
 							Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
 						},
+						TestEngine: &buildkite.TestEngineProperty{
+							Runs: []buildkite.TestEngineRun{{ID: "run-1"}},
+						},
 						CreatedAt: &buildkite.Timestamp{},
 					}, &buildkite.Response{
 						Response: &http.Response{StatusCode: 200},
@@ -127,12 +132,14 @@ func TestGetBuild(t *testing.T) {
 		assert.NotContains(text, "SECRET_TOKEN")
 		assert.NotContains(text, "PIPELINE_SECRET")
 		assert.NotContains(text, "steps:")
+		assert.NotContains(text, `"test_engine":`)
+		assert.NotContains(text, "run-1")
 
 		// The handler must exclude jobs and pipeline detail from the API request.
 		require.NotNil(t, capturedOptions)
 		assert.True(capturedOptions.ExcludeJobs)
 		assert.True(capturedOptions.ExcludePipeline)
-		assert.True(capturedOptions.IncludeTestEngine)
+		assert.False(capturedOptions.IncludeTestEngine)
 	})
 
 	t.Run("APIError", func(t *testing.T) {
