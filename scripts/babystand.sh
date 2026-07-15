@@ -93,4 +93,7 @@ fi
 echo "*** SESSION_ID: $SESSION_ID"
 echo "*** TRANSCRIPT: $TRANSCRIPT"
 
+echo "*** Session Metrics ***"
 "$SCRIPT_DIR/bk-tool-audit-v2.sh" metrics "$TRANSCRIPT"
+echo "*** Session Details ***"
+"$SCRIPT_DIR/bk-tool-audit-v2.sh" "$TRANSCRIPT"
