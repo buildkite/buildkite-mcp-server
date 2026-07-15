@@ -167,6 +167,10 @@ function generateMCPEvalsBuildPipeline(
                     // The agent runs inside this container, so select the
                     // sandboxed claude.sh execution path in babystand.sh.
                     "RUN_IN_CI=true",
+                    // This is a babystand.sh env var
+                    "LOCAL_CI=false",
+                    // This is a babystand.sh env var
+                    "DEBUG_PERMISSIONS=false",
                 ],
             },
         },
