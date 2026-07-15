@@ -130,22 +130,23 @@ async function findFailedBuildForBranch(
 /**
  * Generates the pipeline using the Buildkite SDK
  */
-function generateFixBuildPipeline(
-    webhookBuildUrl: string,
-    webhookPullRequestUrl: string,
-    agentBuildUrl: string,
+function generateMCPEvalsBuildPipeline(
+////    webhookBuildUrl: string,
+////    webhookPullRequestUrl: string,
+////    agentBuildUrl: string,
 ): string {
     const pipeline = new Pipeline();
 
-    const tokenArgs = [
-        `BuildURL=${webhookBuildUrl}`,
-        `PullRequestURL=${webhookPullRequestUrl}`,
-        `AgentBuildURL=${agentBuildUrl}`,
-    ];
+////    const tokenArgs = [
+////        `BuildURL=${webhookBuildUrl}`,
+////        `PullRequestURL=${webhookPullRequestUrl}`,
+////        `AgentBuildURL=${agentBuildUrl}`,
+////    ];
+    const tokenArgs = [];
 
     pipeline.addStep({
         id: "agent",
-        label: ":buildkite: Fixing the build",
+        label: ":buildkite: Running scenarios",
         commands: [...runAgent(tokenArgs)],
         plugins: {
             docker: {
@@ -261,62 +262,62 @@ async function main() {
     const orgSlug = process.env.BUILDKITE_ORGANIZATION_SLUG ?? repoOwner;
     const pipelineSlug = process.env.BUILDKITE_PIPELINE_SLUG ?? repoName.replace(".", "-dot-");
 
-    // Create Octokit instance for GitHub API calls
-    const octokit = createOctokit();
-
-    const prHeadCommit = await getPrHeadCommit(octokit, prNumber, repoOwner, repoName);
-
-    if (!prHeadCommit) {
-        console.log("Could not get PR head commit, skipping pipeline upload");
-        process.exit(0);
-    }
-
-    const failedBuild = await findFailedBuildForBranch(
-        prBranch,
-        orgSlug,
-        pipelineSlug,
-        prHeadCommit,
-    );
-
-    if (!failedBuild) {
-        console.log("No failed builds found for PR head commit, skipping pipeline upload");
-        process.exit(0);
-    }
-
-    console.log(
-        "Found failed build for PR head commit, posting acknowledgement and uploading pipeline",
-    );
-
-    const webhookPullRequestUrl = `https://github.com/${repoOwner}/${repoName}/pull/${prNumber}`;
-
-    // Post acknowledgement comment on the PR
-    const agentBuildUrl = process.env.BUILDKITE_BUILD_URL || "";
-    const acknowledgementBody = `I'm on it! 🛠️\n\nYou can follow my progress here: ${agentBuildUrl}`;
-
-    try {
-        await octokit.rest.issues.createComment({
-            owner: repoOwner,
-            repo: repoName,
-            issue_number: prNumber,
-            body: acknowledgementBody,
-        });
-        console.log("Posted acknowledgement comment on PR");
-    } catch (error) {
-        console.error("Failed to post acknowledgement comment:", error);
-        // Continue with pipeline upload even if comment fails
-    }
-
-    // Set environment variables for the pipeline
-    process.env.WEBHOOK_BUILD_STATE = failedBuild.state;
-    process.env.WEBHOOK_BUILD_NUMBER = failedBuild.number.toString();
-    process.env.WEBHOOK_BUILD_URL = failedBuild.web_url;
-    process.env.WEBHOOK_PIPELINE_SLUG = pipelineSlug;
-    process.env.WEBHOOK_PULL_REQUEST_URL = webhookPullRequestUrl;
-
-    const pipelineYaml = generateFixBuildPipeline(
-        failedBuild.web_url,
-        webhookPullRequestUrl,
-        process.env.BUILDKITE_BUILD_URL || "",
+////    // Create Octokit instance for GitHub API calls
+////    const octokit = createOctokit();
+////
+////    const prHeadCommit = await getPrHeadCommit(octokit, prNumber, repoOwner, repoName);
+////
+////    if (!prHeadCommit) {
+////        console.log("Could not get PR head commit, skipping pipeline upload");
+////        process.exit(0);
+////    }
+////
+////    const failedBuild = await findFailedBuildForBranch(
+////        prBranch,
+////        orgSlug,
+////        pipelineSlug,
+////        prHeadCommit,
+////    );
+////
+////    if (!failedBuild) {
+////        console.log("No failed builds found for PR head commit, skipping pipeline upload");
+////        process.exit(0);
+////    }
+////
+////    console.log(
+////        "Found failed build for PR head commit, posting acknowledgement and uploading pipeline",
+////    );
+////
+////    const webhookPullRequestUrl = `https://github.com/${repoOwner}/${repoName}/pull/${prNumber}`;
+////
+////    // Post acknowledgement comment on the PR
+////    const agentBuildUrl = process.env.BUILDKITE_BUILD_URL || "";
+////    const acknowledgementBody = `I'm on it! 🛠️\n\nYou can follow my progress here: ${agentBuildUrl}`;
+////
+////    try {
+////        await octokit.rest.issues.createComment({
+////            owner: repoOwner,
+////            repo: repoName,
+////            issue_number: prNumber,
+////            body: acknowledgementBody,
+////        });
+////        console.log("Posted acknowledgement comment on PR");
+////    } catch (error) {
+////        console.error("Failed to post acknowledgement comment:", error);
+////        // Continue with pipeline upload even if comment fails
+////    }
+////
+////    // Set environment variables for the pipeline
+////    process.env.WEBHOOK_BUILD_STATE = failedBuild.state;
+////    process.env.WEBHOOK_BUILD_NUMBER = failedBuild.number.toString();
+////    process.env.WEBHOOK_BUILD_URL = failedBuild.web_url;
+////    process.env.WEBHOOK_PIPELINE_SLUG = pipelineSlug;
+////    process.env.WEBHOOK_PULL_REQUEST_URL = webhookPullRequestUrl;
+////
+    const pipelineYaml = generateMCPEvalsBuildPipeline(
+////        failedBuild.web_url,
+////        webhookPullRequestUrl,
+////        process.env.BUILDKITE_BUILD_URL || "",
     );
 
     // Upload the pipeline
