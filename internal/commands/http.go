@@ -16,9 +16,10 @@ import (
 )
 
 type HTTPCmd struct {
-	Listen          string   `help:"The address to listen on." default:"localhost:3000" env:"HTTP_LISTEN_ADDR"`
-	EnabledToolsets []string `help:"Comma-separated list of toolsets to enable (e.g., 'pipelines,builds,clusters'). Use 'all' to enable all toolsets." default:"all" env:"BUILDKITE_TOOLSETS"`
-	ReadOnly        bool     `help:"Enable read-only mode, which filters out write operations from all toolsets." default:"false" env:"BUILDKITE_READ_ONLY"`
+	Listen                 string   `help:"The address to listen on." default:"localhost:3000" env:"HTTP_LISTEN_ADDR"`
+	EnabledToolsets        []string `help:"Comma-separated list of toolsets to enable (e.g., 'pipelines,builds,clusters'). Use 'all' to enable all toolsets." default:"all" env:"BUILDKITE_TOOLSETS"`
+	ReadOnly               bool     `help:"Enable read-only mode, which filters out write operations from all toolsets." default:"false" env:"BUILDKITE_READ_ONLY"`
+	PassthroughHTTPHeaders []string `help:"Inbound HTTP header names to pass through to the Buildkite API. May be repeated." name:"passthrough-http-header" env:"BUILDKITE_PASSTHROUGH_HTTP_HEADERS"`
 }
 
 func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
@@ -63,6 +64,9 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		}),
 		`Bearer realm="buildkite"`,
 	)
+	if globals.HeaderPassthrough != nil {
+		handler = globals.HeaderPassthrough.WrapHandler(handler)
+	}
 	mux.Handle("/mcp", handler)
 
 	log.Ctx(ctx).Info().

@@ -8,6 +8,7 @@ import (
 	"runtime"
 
 	buildkitelogs "github.com/buildkite/buildkite-logs"
+	"github.com/buildkite/buildkite-mcp-server/internal/headerpassthrough"
 	gobuildkite "github.com/buildkite/go-buildkite/v5"
 	"github.com/rs/zerolog/log"
 )
@@ -16,6 +17,7 @@ type Globals struct {
 	Client              *gobuildkite.Client
 	HTTPClient          *http.Client
 	BuildkiteLogsClient *buildkitelogs.Client
+	HeaderPassthrough   *headerpassthrough.Config
 	Version             string
 }
 
