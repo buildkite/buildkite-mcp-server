@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# Resolve the harness directory so sibling scripts keep resolving after we cd
+# into a separate git checkout (the subject under test) below.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 if [[ "${LOCAL_CI}" == "true" ]]; then
   WAIT_STATUS_STRING="(perform local CI)"
 else
@@ -14,6 +18,19 @@ else
 fi
 
 DATETIME=$(date +%Y-%m-%d-%H%M%S)
+
+if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+  # The CI agent runs in a container built via COPY (mount-checkout=false), so the
+  # working directory is not a git checkout. Authenticate git via gh and clone a
+  # fresh working copy for the eval (and the agent) to operate on.
+  echo "${GITHUB_TOKEN}" | gh auth login --with-token
+  gh auth setup-git
+
+  REPO_SLUG="${EVAL_REPO_SLUG:-nethsix/buildkite-mcp-server}"
+  WORKDIR="$HOME/eval-repo-$DATETIME"
+  git clone "https://github.com/${REPO_SLUG}.git" "$WORKDIR"
+  cd "$WORKDIR"
+fi
 
 git fetch && git checkout -b "bork-branch-$DATETIME" origin/test-broken-and-failed-jobs
 git push -u origin HEAD
@@ -52,8 +69,9 @@ if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
     # Sandboxed CI execution: run inside the container via claude.sh, which owns
     # the mcp_in_ci.json config, appends the system prompt, and pipes through the
     # parser. It prints CLAUDE_SESSION_ID / CLAUDE_TRANSCRIPT pointers on stdout.
-    echo "$LLM_PROMPT" > prompts/goal.md
-    ./scripts/claude.sh prompts/goal.md "${CLAUDE_TOOL_ARGS[@]}" | tee "$LOG"
+    GOAL_FILE="$(mktemp)"
+    echo "$LLM_PROMPT" > "$GOAL_FILE"
+    "$SCRIPT_DIR/claude.sh" "$GOAL_FILE" "${CLAUDE_TOOL_ARGS[@]}" | tee "$LOG"
 
     # Recover the session transcript location from claude.sh's emitted pointers
     # (resolved in the agent's user context, so the $HOME is correct).
@@ -74,4 +92,4 @@ fi
 echo "*** SESSION_ID: $SESSION_ID"
 echo "*** TRANSCRIPT: $TRANSCRIPT"
 
-./scripts/bk-tool-audit-v2.sh "$TRANSCRIPT"
+"$SCRIPT_DIR/bk-tool-audit-v2.sh" metrics "$TRANSCRIPT"

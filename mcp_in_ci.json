@@ -1,7 +1,7 @@
 {
     "mcpServers": {
         "buildkite": {
-            "command": "./buildkite-mcp-server",
+            "command": "buildkite-mcp-server",
             "args": ["stdio"],
             "env": {
                 "BUILDKITE_API_TOKEN": "${BUILDKITE_API_TOKEN}"

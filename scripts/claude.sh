@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+# Resolve the harness location from this script's own path, so the parser, MCP
+# config and system prompt keep resolving even when the caller has cd'd into a
+# separate git checkout (the subject under test) as the working directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+
 # Run as non-root user if currently root
 if [ "$(id -u)" -eq 0 ]; then
     echo "Running as root, switching to non-root user..."
@@ -63,7 +69,7 @@ if [ ! -f "$PROMPT_FILE" ]; then
 fi
 
 # Load a system prompt to append
-SYSTEM_PROMPT=$(cat "prompts/system.md") || {
+SYSTEM_PROMPT=$(cat "$ROOT_DIR/prompts/system.md") || {
     echo "Failed to read system.md file"
     exit 1
 }
@@ -99,14 +105,14 @@ echo "--- :robot_face: Starting Claude agent"
 # responsible for passing those (babystand.sh does).
 RAW_LOG="$(mktemp)"
 echo "$prompt_content" | claude \
-    --mcp-config mcp_in_ci.json \
+    --mcp-config "$ROOT_DIR/mcp_in_ci.json" \
     --strict-mcp-config \
     -p \
     --permission-mode bypassPermissions \
     --append-system-prompt "$SYSTEM_PROMPT" \
     ${CLAUDE_ARGS[@]+"${CLAUDE_ARGS[@]}"} \
     | tee "$RAW_LOG" \
-    | node dist/parser -
+    | node "$ROOT_DIR/dist/parser" -
 
 # Emit machine-readable pointers to the Claude session transcript for the caller.
 # Resolved here (in the agent's user context) so $HOME matches where Claude wrote it.

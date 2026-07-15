@@ -1,9 +1,21 @@
+# Build the Buildkite MCP server from this repo's source, so the eval exercises
+# the code under review rather than a published release.
+ARG GO_VERSION="1.25"
+FROM golang:${GO_VERSION} AS mcp-builder
+WORKDIR /src
+# Cache module downloads separately from the source.
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY pkg ./pkg
+COPY internal ./internal
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/buildkite-mcp-server ./cmd/buildkite-mcp-server
+
 FROM ubuntu:22.04
 
 # Expected arguments for tool versions.
 ARG NODE_VERSION="24"
 ARG GITHUB_CLI_VERSION
-ARG BUILDKITE_MCP_SERVER_VERSION
 
 # Install system dependencies.
 RUN apt-get update && apt-get install -y \
@@ -22,8 +34,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
 RUN curl -fsSL https://github.com/cli/cli/releases/download/v${GITHUB_CLI_VERSION}/gh_${GITHUB_CLI_VERSION}_linux_amd64.tar.gz | tar -xz -C /tmp
 RUN cp /tmp/gh_${GITHUB_CLI_VERSION}_linux_amd64/bin/gh /usr/local/bin/
 
-# Install the Buildkite MCP server.
-RUN curl -fsSL https://github.com/buildkite/buildkite-mcp-server/releases/download/v${BUILDKITE_MCP_SERVER_VERSION}/buildkite-mcp-server_Linux_x86_64.tar.gz | tar -xz -C /usr/local/bin
+# Install the Buildkite MCP server, built from source in the mcp-builder stage.
+COPY --from=mcp-builder /out/buildkite-mcp-server /usr/local/bin/buildkite-mcp-server
 
 # Install Claude Code.
 RUN npm install -g @anthropic-ai/claude-code
