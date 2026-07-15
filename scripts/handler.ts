@@ -148,6 +148,11 @@ function generateMCPEvalsBuildPipeline(
         id: "agent",
         label: ":buildkite: Running scenarios",
         commands: [...runAgent(tokenArgs)],
+        // Run the (blocking) eval agent on a dedicated queue, separate from the
+        // PR CI builds it waits on, so the two never contend for the same agents.
+        agents: {
+            queue: process.env.EVAL_AGENT_QUEUE || "default-queue",
+        },
         plugins: {
             docker: {
                 image: "buildkite-mcp-server-evals:latest",
