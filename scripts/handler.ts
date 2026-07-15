@@ -184,7 +184,7 @@ function runAgent(tokenArgs: string[] = []): string[] {
 
     if (provider === "anthropic") {
         // return [`./scripts/claude.sh prompts/user.md ${tokenArgs.join(" ")}`];
-        return [`./babystand.sh`];
+        return [`./scripts/babystand.sh`];
     }
 
     return [
