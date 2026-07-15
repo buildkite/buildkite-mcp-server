@@ -142,7 +142,7 @@ function generateMCPEvalsBuildPipeline(
 ////        `PullRequestURL=${webhookPullRequestUrl}`,
 ////        `AgentBuildURL=${agentBuildUrl}`,
 ////    ];
-    const tokenArgs = [];
+    const tokenArgs: string[] = [];
 
     pipeline.addStep({
         id: "agent",
