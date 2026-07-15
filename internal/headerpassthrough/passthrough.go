@@ -25,7 +25,7 @@ type Config struct {
 func New(headerNames []string, fixedHeaders map[string]string, baseURL string) (*Config, error) {
 	target, err := url.Parse(baseURL)
 	if err != nil || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
-		return nil, fmt.Errorf("Buildkite base URL for HTTP header passthrough must be an absolute HTTP or HTTPS URL")
+		return nil, fmt.Errorf("buildkite base URL for HTTP header passthrough must be an absolute HTTP or HTTPS URL")
 	}
 
 	fixed := make(map[string]struct{}, len(fixedHeaders))

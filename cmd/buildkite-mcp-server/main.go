@@ -153,7 +153,7 @@ func newAPITransport(passthrough *headerpassthrough.Config, recordPath, replayPa
 		return transport, nil
 	}
 
-	var transport http.RoundTripper = http.DefaultTransport
+	transport := http.RoundTripper(http.DefaultTransport)
 	if passthrough != nil {
 		transport = passthrough.WrapTransport(transport)
 	}

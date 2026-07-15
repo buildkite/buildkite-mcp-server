@@ -8,6 +8,7 @@ import (
 
 	"github.com/buildkite/buildkite-mcp-server/internal/headerpassthrough"
 	"github.com/buildkite/buildkite-mcp-server/pkg/recording"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -62,9 +63,15 @@ func TestRecordingDoesNotCapturePassthroughHeaders(t *testing.T) {
 
 	handler := config.WrapHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, requestErr := http.NewRequestWithContext(r.Context(), http.MethodGet, api.URL+"/v2/user", nil)
-		require.NoError(t, requestErr)
+		if !assert.NoError(t, requestErr) {
+			http.Error(w, requestErr.Error(), http.StatusInternalServerError)
+			return
+		}
 		resp, requestErr := client.Do(req)
-		require.NoError(t, requestErr)
+		if !assert.NoError(t, requestErr) {
+			http.Error(w, requestErr.Error(), http.StatusBadGateway)
+			return
+		}
 		resp.Body.Close()
 		w.WriteHeader(http.StatusNoContent)
 	}))

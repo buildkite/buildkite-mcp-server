@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,11 +56,17 @@ func TestForwardsAllowedHeadersThroughRequestContext(t *testing.T) {
 
 	handler := config.WrapHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, requestErr := http.NewRequestWithContext(r.Context(), http.MethodGet, "https://api.buildkite.com/v2/builds", nil)
-		require.NoError(t, requestErr)
+		if !assert.NoError(t, requestErr) {
+			http.Error(w, requestErr.Error(), http.StatusInternalServerError)
+			return
+		}
 		req.Header.Set("X-Identity", "stale")
 		_, requestErr = transport.RoundTrip(req)
-		require.NoError(t, requestErr)
-		require.Equal(t, "stale", req.Header.Get("X-Identity"), "the original request must not be mutated")
+		if !assert.NoError(t, requestErr) {
+			http.Error(w, requestErr.Error(), http.StatusBadGateway)
+			return
+		}
+		assert.Equal(t, "stale", req.Header.Get("X-Identity"), "the original request must not be mutated")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
