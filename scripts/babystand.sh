@@ -21,9 +21,10 @@ DATETIME=$(date +%Y-%m-%d-%H%M%S)
 
 if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
   # The CI agent runs in a container built via COPY (mount-checkout=false), so the
-  # working directory is not a git checkout. Authenticate git via gh and clone a
-  # fresh working copy for the eval (and the agent) to operate on.
-  echo "${GITHUB_TOKEN}" | gh auth login --with-token
+  # working directory is not a git checkout. Clone a fresh working copy for the
+  # eval (and the agent) to operate on. gh already authenticates from GITHUB_TOKEN
+  # in the env; `gh auth setup-git` wires that into git so clone/push work too.
+  # (Do NOT `gh auth login --with-token` here: it errors when GITHUB_TOKEN is set.)
   gh auth setup-git
 
   REPO_SLUG="${EVAL_REPO_SLUG:-nethsix/buildkite-mcp-server}"
