@@ -100,6 +100,17 @@ echo "*** EVAL ELAPSED (red-to-green): $EVAL_ELAPSED"
 echo "*** SESSION_ID: $SESSION_ID"
 echo "*** TRANSCRIPT: $TRANSCRIPT"
 
+# Upload the eval session log (transcript) as a build artifact. Best-effort and
+# CI-only (buildkite-agent is unavailable locally); never fail the build.
+if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+    if [[ -s "$TRANSCRIPT" ]]; then
+        buildkite-agent artifact upload "$TRANSCRIPT" \
+            || echo "WARNING: failed to upload session transcript artifact" >&2
+    else
+        echo "WARNING: session transcript not found or empty: $TRANSCRIPT" >&2
+    fi
+fi
+
 AUDIT_TOOLS_FILE="$(mktemp)"
 AUDIT_METRICS_FILE="$(mktemp)"
 echo "*** Session Details ***"
