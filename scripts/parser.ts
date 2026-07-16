@@ -78,6 +78,13 @@ function createBuildkiteAnnotation(
     lineNumber: number,
     timestamp: string,
 ): void {
+    // Per-message annotations are on by default (chronological, collapsible view).
+    // Set ANNOTATE_MESSAGES=false to suppress them (e.g. rely only on the curated
+    // summary annotations created by babystand.sh).
+    if (process.env.ANNOTATE_MESSAGES === "false") {
+        return;
+    }
+
     // Skip empty lines
     rawJSONLine = rawJSONLine.trim();
     if (rawJSONLine === "") {
@@ -119,28 +126,28 @@ function createBuildkiteAnnotation(
         content = rawJSONLine;
     }
 
-    // Add speaker with appropriate styling
+    // Add the speaker label. NOTE: all per-message annotations use a single,
+    // uniform style (below) on purpose. Buildkite groups/orders annotations by
+    // style severity, so varying the style per speaker scatters messages into
+    // separate buckets and breaks the chronological (creation-order) reading the
+    // user wants. Keep the speaker distinction (and any error marker) in the
+    // body instead.
     switch (speaker) {
         case "ASSISTANT":
             markdownContent += "🤖 **ASSISTANT**:\n\n";
-            style = "info";
             break;
         case "USER":
-            markdownContent += "👤 **USER**:\n\n";
-            if (hasError) {
-                style = "error";
-            } else {
-                style = "success";
-            }
+            markdownContent += hasError ? "👤 **USER** ❌:\n\n" : "👤 **USER**:\n\n";
             break;
         case "SYSTEM":
             markdownContent += "⚙️ **SYSTEM**:\n\n";
-            style = "warning";
             break;
         default:
             markdownContent += `**${speaker}**:\n\n`;
-            style = "info";
     }
+
+    // Uniform style keeps every message in one chronological list.
+    style = "info";
 
     // Add clean content (no ANSI codes)
     if (content !== "") {

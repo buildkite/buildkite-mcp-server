@@ -82,6 +82,9 @@ steps:
             - RUN_IN_CI=true
             - LOCAL_CI=false
             - DEBUG_PERMISSIONS=false
+            # Per-message parser annotations are on by default; set to "false"
+            # (in the top-level env: block) to rely only on the curated summaries.
+            - ANNOTATE_MESSAGES
     secrets:
       GITHUB_TOKEN: GITHUB_TOKEN
       BUILDKITE_API_TOKEN: API_TOKEN_BUILDKITE
