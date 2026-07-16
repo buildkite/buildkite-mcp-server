@@ -78,6 +78,7 @@ if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
     # (resolved in the agent's user context, so the $HOME is correct).
     SESSION_ID=$(sed -n 's/^CLAUDE_SESSION_ID=//p' "$LOG" | tail -n1)
     TRANSCRIPT=$(sed -n 's/^CLAUDE_TRANSCRIPT=//p' "$LOG" | tail -n1)
+    EVAL_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$LOG" | tail -n1)
 else
     # Local execution: run claude directly against mcp.json, as before.
     claude -p "$LLM_PROMPT" \
@@ -93,10 +94,12 @@ fi
 echo "*** SESSION_ID: $SESSION_ID"
 echo "*** TRANSCRIPT: $TRANSCRIPT"
 
+AUDIT_TOOLS_FILE="$(mktemp)"
+AUDIT_METRICS_FILE="$(mktemp)"
 echo "*** Session Details ***"
-"$SCRIPT_DIR/bk-tool-audit-v2.sh" --all "$TRANSCRIPT"
+"$SCRIPT_DIR/bk-tool-audit-v2.sh" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE"
 echo "*** Session Metrics ***"
-"$SCRIPT_DIR/bk-tool-audit-v2.sh" metrics "$TRANSCRIPT"
+"$SCRIPT_DIR/bk-tool-audit-v2.sh" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE"
 
 # --- Review the eval session with the klaren prompt -------------------------
 # Best-effort, post-run analysis: a failure here must NOT fail the eval, which
@@ -118,10 +121,12 @@ KLAREN_TOOL_ARGS=(
     --allowedTools "Read" "Grep" "Glob" "Bash"
 )
 
+KLAREN_RESULT_FILE=""
 if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
     if ! "$SCRIPT_DIR/claude.sh" "$KLAREN_PROMPT_FILE" "${KLAREN_TOOL_ARGS[@]}" | tee "$KLAREN_LOG"; then
         echo "WARNING: klaren review failed" >&2
     fi
+    KLAREN_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$KLAREN_LOG" | tail -n1)
     buildkite-agent artifact upload "$KLAREN_LOG" || echo "WARNING: failed to upload klaren artifact" >&2
 else
     if ! claude -p "$(cat "$KLAREN_PROMPT_FILE")" \
@@ -133,3 +138,39 @@ else
 fi
 
 echo "*** KLAREN_LOG: $KLAREN_LOG"
+
+# --- Curated summary annotations --------------------------------------------
+# In addition to the per-message annotations from the parser (which stay on
+# unless ANNOTATE_MESSAGES=false), surface a few high-signal summaries at the top
+# of the build (priority 10 > the parser's 5). CI-only: buildkite-agent annotate
+# is unavailable locally. All best-effort; never fail the build.
+if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+    # annotate_markdown <context> <title> <file> [style]  -- content is already markdown
+    annotate_markdown() {
+        local context="$1" title="$2" file="$3" style="${4:-info}"
+        if [[ ! -s "$file" ]]; then
+            echo "WARNING: nothing to annotate for '$context'" >&2
+            return 0
+        fi
+        { printf '### %s\n\n' "$title"; cat "$file"; } \
+            | buildkite-agent annotate --context "$context" --style "$style" --priority 10 \
+            || echo "WARNING: failed to annotate '$context'" >&2
+    }
+
+    # annotate_codeblock <context> <title> <file>  -- content is plain text; collapse it
+    annotate_codeblock() {
+        local context="$1" title="$2" file="$3"
+        if [[ ! -s "$file" ]]; then
+            echo "WARNING: nothing to annotate for '$context'" >&2
+            return 0
+        fi
+        { printf '<details><summary>%s</summary>\n\n```\n' "$title"; cat "$file"; printf '\n```\n\n</details>\n'; } \
+            | buildkite-agent annotate --context "$context" --style info --priority 10 \
+            || echo "WARNING: failed to annotate '$context'" >&2
+    }
+
+    annotate_markdown "eval-final"    ":robot_face: Eval — final output"      "${EVAL_RESULT_FILE:-}" "success"
+    annotate_codeblock "eval-metrics" ":bar_chart: Eval — session metrics"    "$AUDIT_METRICS_FILE"
+    annotate_codeblock "eval-tools"   ":hammer_and_wrench: Eval — tool calls" "$AUDIT_TOOLS_FILE"
+    annotate_markdown "klaren-final"  ":female-detective: Klaren — session review" "${KLAREN_RESULT_FILE:-}"
+fi

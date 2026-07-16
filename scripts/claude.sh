@@ -120,3 +120,9 @@ SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_
 TRANSCRIPT="$HOME/.claude/projects/$(pwd | sed -e 's/[\/.]/-/g')/$SESSION_ID.jsonl"
 echo "CLAUDE_SESSION_ID=$SESSION_ID"
 echo "CLAUDE_TRANSCRIPT=$TRANSCRIPT"
+
+# Extract the run's final assistant text (the stream-json "result" event) into a
+# file so the caller can surface just the final output (e.g. as an annotation).
+RESULT_FILE="$(mktemp)"
+jq -r 'select(.type == "result") | .result // empty' "$RAW_LOG" > "$RESULT_FILE" 2>/dev/null || true
+echo "CLAUDE_RESULT_FILE=$RESULT_FILE"
