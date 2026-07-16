@@ -43,6 +43,27 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNewRejectsTransportManagedHeaders(t *testing.T) {
+	for _, name := range []string{
+		"Connection",
+		"Content-Length",
+		"Host",
+		"Keep-Alive",
+		"Proxy-Authenticate",
+		"Proxy-Authorization",
+		"Proxy-Connection",
+		"TE",
+		"Trailer",
+		"Transfer-Encoding",
+		"Upgrade",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := New([]string{strings.ToLower(name)}, nil, "https://api.buildkite.com")
+			require.ErrorContains(t, err, "managed by the HTTP transport")
+		})
+	}
+}
+
 func TestForwardsAllowedHeadersThroughRequestContext(t *testing.T) {
 	config, err := New([]string{"X-Identity", "X-Groups"}, nil, "https://api.buildkite.com/")
 	require.NoError(t, err)
@@ -135,6 +156,53 @@ func TestTransportStripsHeadersFromOtherOrigins(t *testing.T) {
 	_, err = transport.RoundTrip(req)
 	require.NoError(t, err)
 	require.Equal(t, "Bearer stale", req.Header.Get("Authorization"))
+}
+
+func TestTransportStripsHeadersOnCrossOriginRedirect(t *testing.T) {
+	targetHeaders := make(chan http.Header, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHeaders <- r.Header.Clone()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(target.Close)
+
+	sourceHeaders := make(chan http.Header, 1)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sourceHeaders <- r.Header.Clone()
+		http.Redirect(w, r, target.URL+"/artifact", http.StatusFound)
+	}))
+	t.Cleanup(source.Close)
+
+	config, err := New([]string{"Authorization", "X-Identity"}, nil, source.URL)
+	require.NoError(t, err)
+	client := &http.Client{Transport: config.WrapTransport(http.DefaultTransport)}
+
+	handler := config.WrapHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req, requestErr := http.NewRequestWithContext(r.Context(), http.MethodGet, source.URL+"/artifact", nil)
+		if requestErr != nil {
+			http.Error(w, requestErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		resp, requestErr := client.Do(req)
+		if requestErr != nil {
+			http.Error(w, requestErr.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.WriteHeader(resp.StatusCode)
+	}))
+
+	inbound := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	inbound.Header.Set("Authorization", "Bearer secret")
+	inbound.Header.Set("X-Identity", "user-123")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, inbound)
+	require.Equal(t, http.StatusNoContent, recorder.Code)
+
+	require.Equal(t, "Bearer secret", (<-sourceHeaders).Get("Authorization"))
+	targetReceived := <-targetHeaders
+	require.Empty(t, targetReceived.Get("Authorization"))
+	require.Empty(t, targetReceived.Get("X-Identity"))
 }
 
 func TestConcurrentRequestHeadersRemainIsolated(t *testing.T) {

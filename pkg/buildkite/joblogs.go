@@ -22,6 +22,30 @@ type BuildkiteLogsClient interface {
 // Verify that upstream BuildkiteLogsClient implements our interface
 var _ BuildkiteLogsClient = (*buildkitelogs.Client)(nil)
 
+// authorizingBuildkiteLogsClient verifies job access before allowing the
+// shared log cache to serve data. The authorization check is intentionally
+// performed for every read and is not cached by this wrapper.
+type authorizingBuildkiteLogsClient struct {
+	jobs JobsClient
+	logs BuildkiteLogsClient
+}
+
+// NewAuthorizingBuildkiteLogsClient wraps a log client with a per-read job
+// authorization check.
+func NewAuthorizingBuildkiteLogsClient(jobs JobsClient, logs BuildkiteLogsClient) BuildkiteLogsClient {
+	return &authorizingBuildkiteLogsClient{jobs: jobs, logs: logs}
+}
+
+func (c *authorizingBuildkiteLogsClient) NewReader(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
+	if _, _, err := c.jobs.GetJob(ctx, org, pipeline, build, job); err != nil {
+		return nil, fmt.Errorf("failed to authorize job log access: %w", err)
+	}
+
+	return c.logs.NewReader(ctx, org, pipeline, build, job, ttl, forceRefresh)
+}
+
+var _ BuildkiteLogsClient = (*authorizingBuildkiteLogsClient)(nil)
+
 // Common parameter structures for log tools
 type JobLogsBaseParams struct {
 	OrgSlug      string `json:"org_slug"`

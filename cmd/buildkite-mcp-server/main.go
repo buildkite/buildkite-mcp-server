@@ -12,6 +12,7 @@ import (
 	"github.com/buildkite/buildkite-logs/logparser"
 	"github.com/buildkite/buildkite-mcp-server/internal/commands"
 	"github.com/buildkite/buildkite-mcp-server/internal/headerpassthrough"
+	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/recording"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	gobuildkite "github.com/buildkite/go-buildkite/v5"
@@ -138,7 +139,7 @@ func run(ctx context.Context, cmd *kong.Context) error {
 		Version:             version,
 		Client:              client,
 		HTTPClient:          httpClient,
-		BuildkiteLogsClient: buildkiteLogsClient,
+		BuildkiteLogsClient: buildkite.NewAuthorizingBuildkiteLogsClient(client.Jobs, buildkiteLogsClient),
 		HeaderPassthrough:   passthrough,
 	})
 }

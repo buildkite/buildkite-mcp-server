@@ -13,6 +13,20 @@ import (
 
 const authorizationHeader = "Authorization"
 
+var unsupportedHeaderNames = map[string]struct{}{
+	"Connection":          {},
+	"Content-Length":      {},
+	"Host":                {},
+	"Keep-Alive":          {},
+	"Proxy-Authenticate":  {},
+	"Proxy-Authorization": {},
+	"Proxy-Connection":    {},
+	"Te":                  {},
+	"Trailer":             {},
+	"Transfer-Encoding":   {},
+	"Upgrade":             {},
+}
+
 // Config forwards selected headers from an inbound MCP request to API
 // requests on the configured Buildkite origin.
 type Config struct {
@@ -45,6 +59,9 @@ func New(headerNames []string, fixedHeaders map[string]string, baseURL string) (
 		}
 
 		name = textproto.CanonicalMIMEHeaderKey(name)
+		if _, ok := unsupportedHeaderNames[name]; ok {
+			return nil, fmt.Errorf("HTTP header %q cannot be passed through because it is managed by the HTTP transport", name)
+		}
 		if _, ok := fixed[name]; ok {
 			return nil, fmt.Errorf("HTTP header %q cannot be both fixed and passed through", name)
 		}
