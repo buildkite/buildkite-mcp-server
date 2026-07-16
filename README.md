@@ -41,7 +41,7 @@ BUILDKITE_PASSTHROUGH_HTTP_HEADERS=Authorization \
 
 In this mode every `/mcp` request must contain exactly one non-empty `Authorization` header. Missing credentials return HTTP 401; the server never falls back to a shared API token. The reverse proxy in front of the MCP server is responsible for authenticating callers and setting or validating any forwarded identity headers.
 
-Header passthrough is not available in stdio mode. Before serving job logs, the server verifies that the current caller can access the job. This check is performed for every log-tool request, including when the log data is already cached.
+Header passthrough is not available in stdio mode. Before serving job logs, the server verifies that the current caller can access the job log. This check is performed for every log-tool request, including when the log data is already cached.
 
 ---
 

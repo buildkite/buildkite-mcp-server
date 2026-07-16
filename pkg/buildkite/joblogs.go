@@ -10,6 +10,7 @@ import (
 	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
+	gobuildkite "github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -22,23 +23,31 @@ type BuildkiteLogsClient interface {
 // Verify that upstream BuildkiteLogsClient implements our interface
 var _ BuildkiteLogsClient = (*buildkitelogs.Client)(nil)
 
+type JobLogAccessClient interface {
+	JobLogExists(ctx context.Context, org, pipeline, buildNumber, jobID string) (bool, *gobuildkite.Response, error)
+}
+
 // authorizingBuildkiteLogsClient verifies job access before allowing the
 // shared log cache to serve data. The authorization check is intentionally
 // performed for every read and is not cached by this wrapper.
 type authorizingBuildkiteLogsClient struct {
-	jobs JobsClient
+	jobs JobLogAccessClient
 	logs BuildkiteLogsClient
 }
 
 // NewAuthorizingBuildkiteLogsClient wraps a log client with a per-read job
 // authorization check.
-func NewAuthorizingBuildkiteLogsClient(jobs JobsClient, logs BuildkiteLogsClient) BuildkiteLogsClient {
+func NewAuthorizingBuildkiteLogsClient(jobs JobLogAccessClient, logs BuildkiteLogsClient) BuildkiteLogsClient {
 	return &authorizingBuildkiteLogsClient{jobs: jobs, logs: logs}
 }
 
 func (c *authorizingBuildkiteLogsClient) NewReader(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
-	if _, _, err := c.jobs.GetJob(ctx, org, pipeline, build, job); err != nil {
+	exists, _, err := c.jobs.JobLogExists(ctx, org, pipeline, build, job)
+	if err != nil {
 		return nil, fmt.Errorf("failed to authorize job log access: %w", err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("job log does not exist")
 	}
 
 	return c.logs.NewReader(ctx, org, pipeline, build, job, ttl, forceRefresh)
