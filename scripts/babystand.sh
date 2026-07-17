@@ -33,10 +33,19 @@ if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
   cd "$WORKDIR"
 fi
 
-git fetch && git checkout -b "bork-branch-$DATETIME" origin/test-broken-and-failed-jobs
+# Create the scenario branch from the deliberately-broken base branch and push it.
+# We push the BRANCH only and deliberately do NOT open a PR: the branch push
+# triggers its own Quality Checks build (build_branches), which is the red->green
+# CI signal the agent fixes. Opening a PR would fan pull_request events into the
+# mcp-eval trigger and re-loop. The scenario branch name is prefixed so the eval
+# step is skipped on its builds (see .buildkite/pipeline.yml `branches:` guard).
+SCENARIO_BRANCH="mcp-eval-scenario-$DATETIME"
+git fetch && git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
 git push -u origin HEAD
-PR_URL=$(gh pr create --title "test-broken-and-failed jobs PR $DATETIME" --body "test-broken-and-failed jobs" | tail -1)
-LLM_PROMPT="/goal make the CI for PR ($PR_URL) from red $WAIT_STATUS_STRING to green. Do NOT read/reverse-engineer babystand.sh.$DEBUG_STRING"
+
+ORG_SLUG="${BUILDKITE_ORGANIZATION_SLUG:-anothertest}"
+PIPELINE_SLUG="${BUILDKITE_PIPELINE_SLUG:-buildkite-mcp-server}"
+LLM_PROMPT="/goal make the CI for git branch '$SCENARIO_BRANCH' (Buildkite org '$ORG_SLUG', pipeline '$PIPELINE_SLUG') from red $WAIT_STATUS_STRING to green. Push your fixes to that same branch and confirm its build passes. Do NOT read/reverse-engineer babystand.sh.$DEBUG_STRING"
 
 # Echo env vars
 echo "*** Initial Env Vars"
@@ -49,7 +58,7 @@ echo "----------------------"
 echo "***"
 echo "*** Derived Env Vars"
 echo "***"
-echo "*** PR_URL: $PR_URL"
+echo "*** SCENARIO_BRANCH: $SCENARIO_BRANCH"
 echo "*** WAIT_STATUS_STRING: $WAIT_STATUS_STRING"
 echo "*** DEBUG_STRING: $DEBUG_STRING"
 echo "***"

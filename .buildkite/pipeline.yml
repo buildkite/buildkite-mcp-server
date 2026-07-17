@@ -53,21 +53,47 @@ steps:
         GOMODCACHE: /gomodcache
       plugins:
         - mise#v1.1.1: ~
-  # The eval only runs when triggered by the `mcp-eval` label webhook. This step
-  # generates + uploads the agent pipeline (scripts/handler.ts); it exits early
-  # on non-webhook builds so ordinary pushes/PRs do NOT run the eval.
-  # (Do NOT make babystand.sh run unconditionally here: it pushes a bork branch /
-  # opens a PR on every build, whose push re-triggers this pipeline — an infinite
-  # build loop. Keep it gated behind the webhook.)
-  - label: ":node: Generate the eval pipeline"
-    command: |
-
-      if [[ "${BUILDKITE_SOURCE:-}" != "webhook" || -z "${BUILDKITE_TRIGGER_ID:-}" ]]; then
-        echo "Not a webhook trigger -- exiting."
-        exit 0
-      fi
-
-      # Generate and upload the pipeline to handle the webhook.
-      echo "--- :webhook: Run the webhook handler"
-      npm install && npm run build
-      node dist/handler
+  - label: ":buildkite: Running scenarios"
+    key: agent
+    depends_on: quality-checks
+    command: ./scripts/babystand.sh
+    # LOOP GUARD: scenario branches are "inert" — Quality Checks above still run on
+    # them (giving the eval a real red->green CI signal to fix), but this eval step
+    # is skipped there, so babystand.sh cannot recurse (create scenario branch ->
+    # its push builds -> babystand -> create scenario branch -> ... forever).
+    # babystand also pushes the scenario branch WITHOUT opening a PR, so no
+    # pull_request events reach the mcp-eval trigger. Both together break the loop.
+    branches: "!mcp-eval-scenario-*"
+    # Run the (blocking) eval agent on a dedicated queue, separate from the PR CI
+    # queue above, so the eval and the scenario builds it waits on never contend
+    # for the same agents.
+    agents:
+      queue: default-queue
+    plugins:
+      - docker#v5.11.0:
+          image: buildkite-mcp-server-evals:latest
+          mount-checkout: false
+          mount-buildkite-agent: true
+          environment:
+            - BUILDKITE
+            - BUILDKITE_AGENT_ENDPOINT
+            - BUILDKITE_AGENT_ACCESS_TOKEN
+            - BUILDKITE_API_TOKEN
+            - BUILDKITE_BUILD_URL
+            - BUILDKITE_ORGANIZATION_SLUG
+            - BUILDKITE_PIPELINE_SLUG
+            - BUILDKITE_MCP_SERVER_VERSION
+            - GITHUB_CLI_VERSION
+            - GITHUB_TOKEN
+            - TRIGGER_ON_LABEL
+            - MODEL_PROVIDER
+            # Select the sandboxed claude.sh execution path in babystand.sh.
+            - RUN_IN_CI=true
+            - LOCAL_CI=false
+            - DEBUG_PERMISSIONS=false
+            # Per-message parser annotations are on by default; set to "false"
+            # (in the top-level env: block) to rely only on the curated summaries.
+            - ANNOTATE_MESSAGES
+    secrets:
+      GITHUB_TOKEN: GITHUB_TOKEN
+      BUILDKITE_API_TOKEN: API_TOKEN_BUILDKITE
