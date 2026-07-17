@@ -175,17 +175,21 @@ echo "*** KLAREN_LOG: $KLAREN_LOG"
 # is unavailable locally. All best-effort; never fail the build.
 if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
     # annotate_markdown <context> <title> <file> <meta> [style]
-    # content is already markdown; <meta> (e.g. elapsed time) is shown at the top.
+    # content is already markdown; collapsed by default (like the code-block
+    # annotations). The always-visible summary shows the title + <meta> (e.g.
+    # elapsed time); the markdown body is inside the collapsed <details>.
     annotate_markdown() {
         local context="$1" title="$2" file="$3" meta="$4" style="${5:-info}"
         {
-            printf '### %s\n\n' "$title"
-            [[ -n "$meta" ]] && printf '%s\n\n' "$meta"
+            printf '<details><summary>%s' "$title"
+            [[ -n "$meta" ]] && printf ' — %s' "$meta"
+            printf '</summary>\n\n'
             if [[ -s "$file" ]]; then
                 cat "$file"
             else
                 printf '_(no final output captured)_\n'
             fi
+            printf '\n\n</details>\n'
         } | buildkite-agent annotate --context "$context" --style "$style" --priority 10 \
             || echo "WARNING: failed to annotate '$context'" >&2
     }
