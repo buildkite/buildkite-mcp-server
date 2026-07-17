@@ -46,6 +46,7 @@ type ListJobsArgs struct {
 
 // JobSummary contains the fields normally needed to identify a build failure.
 type JobSummary struct {
+	ID         string `json:"id"`
 	Name       string `json:"name"`
 	State      string `json:"state"`
 	Command    string `json:"command"`
@@ -56,7 +57,6 @@ type JobSummary struct {
 // cluster, queue, and log URLs from the SDK response.
 type JobDetail struct {
 	JobSummary
-	ID                 string                    `json:"id"`
 	Type               string                    `json:"type,omitempty"`
 	Label              string                    `json:"label,omitempty"`
 	StepKey            string                    `json:"step_key,omitempty"`
@@ -84,6 +84,7 @@ type JobListResult[T any] struct {
 
 func summarizeJob(job buildkite.Job) JobSummary {
 	return JobSummary{
+		ID:         job.ID,
 		Name:       job.Name,
 		State:      job.State,
 		Command:    job.Command,
@@ -99,7 +100,6 @@ func detailJob(job buildkite.Job) JobDetail {
 
 	return JobDetail{
 		JobSummary:         summarizeJob(job),
-		ID:                 job.ID,
 		Type:               job.Type,
 		Label:              job.Label,
 		StepKey:            job.StepKey,
@@ -133,7 +133,7 @@ func createJobListResult[T any](jobs buildkite.JobsList, converter func(buildkit
 func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_jobs",
-			Description: "List jobs for a Buildkite build, returning a lightweight summary by default. For CI failure diagnosis, use state='failed,broken' to avoid returning successful jobs. Use detail_level='detailed' for job IDs and execution metadata or 'full' for the SDK response. Returns 'items' and cursor pagination 'links'",
+			Description: "List jobs for a Buildkite build, returning an actionable summary by default. For CI failure diagnosis, use state='failed,broken' to avoid returning successful jobs. Use detail_level='detailed' for execution metadata or 'full' for the existing full MCP job response. Returns 'items' and cursor pagination 'links'",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Jobs",
 				ReadOnlyHint: true,
@@ -191,7 +191,7 @@ func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 				return handleBuildkiteError(err)
 			}
 
-			if !args.IncludeAgent && len(jobs.Items) > 0 {
+			if args.DetailLevel != "summary" && !args.IncludeAgent && len(jobs.Items) > 0 {
 				for i := range jobs.Items {
 					jobs.Items[i].Agent = buildkite.Agent{
 						ID: jobs.Items[i].Agent.ID,
