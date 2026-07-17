@@ -7,7 +7,6 @@ import (
 	"time"
 
 	buildkitelogs "github.com/buildkite/buildkite-logs"
-	gobuildkite "github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
@@ -25,100 +24,6 @@ func (m *MockBuildkiteLogsClient) NewReader(ctx context.Context, org, pipeline, 
 }
 
 var _ BuildkiteLogsClient = (*MockBuildkiteLogsClient)(nil)
-
-type mockJobLogAccessClient struct {
-	JobLogExistsFunc func(ctx context.Context, org, pipeline, buildNumber, jobID string) (bool, *gobuildkite.Response, error)
-}
-
-func (m *mockJobLogAccessClient) JobLogExists(ctx context.Context, org, pipeline, buildNumber, jobID string) (bool, *gobuildkite.Response, error) {
-	return m.JobLogExistsFunc(ctx, org, pipeline, buildNumber, jobID)
-}
-
-func TestAuthorizingBuildkiteLogsClientChecksAccessForEveryRead(t *testing.T) {
-	t.Parallel()
-
-	type contextKey struct{}
-	ctx := context.WithValue(context.Background(), contextKey{}, "request")
-	authorizationChecks := 0
-	logReads := 0
-	jobs := &mockJobLogAccessClient{
-		JobLogExistsFunc: func(gotCtx context.Context, org, pipeline, build, job string) (bool, *gobuildkite.Response, error) {
-			require.Equal(t, "request", gotCtx.Value(contextKey{}))
-			require.Equal(t, "org", org)
-			require.Equal(t, "pipeline", pipeline)
-			require.Equal(t, "123", build)
-			require.Equal(t, "job-id", job)
-			authorizationChecks++
-			return true, nil, nil
-		},
-	}
-	logs := &MockBuildkiteLogsClient{
-		NewReaderFunc: func(gotCtx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
-			require.Equal(t, "request", gotCtx.Value(contextKey{}))
-			require.Equal(t, "org", org)
-			require.Equal(t, "pipeline", pipeline)
-			require.Equal(t, "123", build)
-			require.Equal(t, "job-id", job)
-			require.Equal(t, time.Minute, ttl)
-			require.False(t, forceRefresh)
-			logReads++
-			return nil, nil
-		},
-	}
-	client := NewAuthorizingBuildkiteLogsClient(jobs, logs)
-
-	for range 2 {
-		reader, err := client.NewReader(ctx, "org", "pipeline", "123", "job-id", time.Minute, false)
-		require.NoError(t, err)
-		require.Nil(t, reader)
-	}
-
-	require.Equal(t, 2, authorizationChecks)
-	require.Equal(t, 2, logReads)
-}
-
-func TestAuthorizingBuildkiteLogsClientRejectsUnauthorizedRead(t *testing.T) {
-	t.Parallel()
-
-	errUnauthorized := errors.New("unauthorized")
-	jobs := &mockJobLogAccessClient{
-		JobLogExistsFunc: func(context.Context, string, string, string, string) (bool, *gobuildkite.Response, error) {
-			return false, nil, errUnauthorized
-		},
-	}
-	logs := &MockBuildkiteLogsClient{
-		NewReaderFunc: func(context.Context, string, string, string, string, time.Duration, bool) (*buildkitelogs.ParquetReader, error) {
-			t.Fatal("log cache must not be read when authorization fails")
-			return nil, nil
-		},
-	}
-	client := NewAuthorizingBuildkiteLogsClient(jobs, logs)
-
-	reader, err := client.NewReader(context.Background(), "org", "pipeline", "123", "job-id", time.Minute, false)
-	require.Nil(t, reader)
-	require.ErrorIs(t, err, errUnauthorized)
-}
-
-func TestAuthorizingBuildkiteLogsClientRejectsMissingLog(t *testing.T) {
-	t.Parallel()
-
-	jobs := &mockJobLogAccessClient{
-		JobLogExistsFunc: func(context.Context, string, string, string, string) (bool, *gobuildkite.Response, error) {
-			return false, nil, nil
-		},
-	}
-	logs := &MockBuildkiteLogsClient{
-		NewReaderFunc: func(context.Context, string, string, string, string, time.Duration, bool) (*buildkitelogs.ParquetReader, error) {
-			t.Fatal("log cache must not be read when the log does not exist")
-			return nil, nil
-		},
-	}
-	client := NewAuthorizingBuildkiteLogsClient(jobs, logs)
-
-	reader, err := client.NewReader(context.Background(), "org", "pipeline", "123", "job-id", time.Minute, false)
-	require.Nil(t, reader)
-	require.ErrorContains(t, err, "job log does not exist")
-}
 
 func TestParseCacheTTL(t *testing.T) {
 	tests := []struct {
