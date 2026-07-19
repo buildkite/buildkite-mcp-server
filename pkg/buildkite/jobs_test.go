@@ -386,6 +386,8 @@ func TestListJobs(t *testing.T) {
 					SoftFailed:      true,
 					SignalReason:    "agent_stop",
 					StepKey:         "test",
+					RetriesCount:    1,
+					RetrySource:     &buildkite.JobRetrySource{JobID: "job-0", RetryType: "manual"},
 					BuildURL:        "https://api.buildkite.com/v2/builds/123",
 					ClusterID:       "cluster-1",
 					ClusterQueueURL: "https://api.buildkite.com/v2/queues/queue-1",
@@ -408,6 +410,7 @@ func TestListJobs(t *testing.T) {
 		assert.Equal(t, map[string]any{
 			"id": "job-1", "name": "test", "state": "failed", "command": "go test ./...", "exit_status": float64(1),
 			"soft_failed": true, "signal_reason": "agent_stop", "step_key": "test",
+			"retries_count": float64(1), "retry_source": map[string]any{"job_id": "job-0", "retry_type": "manual"},
 		}, response.Items[0])
 	})
 

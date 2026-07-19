@@ -46,35 +46,35 @@ type ListJobsArgs struct {
 
 // JobSummary contains the fields normally needed to identify a build failure.
 type JobSummary struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	State        string `json:"state"`
-	Command      string `json:"command"`
-	ExitStatus   *int   `json:"exit_status"`
-	SoftFailed   bool   `json:"soft_failed,omitempty"`
-	SignalReason string `json:"signal_reason,omitempty"`
-	StepKey      string `json:"step_key,omitempty"`
+	ID           string                    `json:"id"`
+	Name         string                    `json:"name"`
+	State        string                    `json:"state"`
+	Command      string                    `json:"command"`
+	ExitStatus   *int                      `json:"exit_status"`
+	SoftFailed   bool                      `json:"soft_failed,omitempty"`
+	SignalReason string                    `json:"signal_reason,omitempty"`
+	StepKey      string                    `json:"step_key,omitempty"`
+	RetriesCount int                       `json:"retries_count,omitempty"`
+	RetrySource  *buildkite.JobRetrySource `json:"retry_source,omitempty"`
 }
 
 // JobDetail adds actionable job metadata while excluding repeated build,
 // cluster, queue, and log URLs from the SDK response.
 type JobDetail struct {
 	JobSummary
-	Type               string                    `json:"type,omitempty"`
-	Label              string                    `json:"label,omitempty"`
-	GroupKey           string                    `json:"group_key,omitempty"`
-	Signal             *int                      `json:"signal,omitempty"`
-	CreatedAt          *buildkite.Timestamp      `json:"created_at,omitempty"`
-	StartedAt          *buildkite.Timestamp      `json:"started_at,omitempty"`
-	FinishedAt         *buildkite.Timestamp      `json:"finished_at,omitempty"`
-	Agent              *buildkite.Agent          `json:"agent,omitempty"`
-	Retried            bool                      `json:"retried,omitempty"`
-	RetriedInJobID     string                    `json:"retried_in_job_id,omitempty"`
-	RetriesCount       int                       `json:"retries_count,omitempty"`
-	RetrySource        *buildkite.JobRetrySource `json:"retry_source,omitempty"`
-	Unblockable        bool                      `json:"unblockable,omitempty"`
-	ParallelGroupIndex *int                      `json:"parallel_group_index,omitempty"`
-	ParallelGroupTotal *int                      `json:"parallel_group_total,omitempty"`
+	Type               string               `json:"type,omitempty"`
+	Label              string               `json:"label,omitempty"`
+	GroupKey           string               `json:"group_key,omitempty"`
+	Signal             *int                 `json:"signal,omitempty"`
+	CreatedAt          *buildkite.Timestamp `json:"created_at,omitempty"`
+	StartedAt          *buildkite.Timestamp `json:"started_at,omitempty"`
+	FinishedAt         *buildkite.Timestamp `json:"finished_at,omitempty"`
+	Agent              *buildkite.Agent     `json:"agent,omitempty"`
+	Retried            bool                 `json:"retried,omitempty"`
+	RetriedInJobID     string               `json:"retried_in_job_id,omitempty"`
+	Unblockable        bool                 `json:"unblockable,omitempty"`
+	ParallelGroupIndex *int                 `json:"parallel_group_index,omitempty"`
+	ParallelGroupTotal *int                 `json:"parallel_group_total,omitempty"`
 }
 
 type JobListResult[T any] struct {
@@ -92,6 +92,8 @@ func summarizeJob(job buildkite.Job) JobSummary {
 		SoftFailed:   job.SoftFailed,
 		SignalReason: job.SignalReason,
 		StepKey:      job.StepKey,
+		RetriesCount: job.RetriesCount,
+		RetrySource:  job.RetrySource,
 	}
 }
 
@@ -113,8 +115,6 @@ func detailJob(job buildkite.Job) JobDetail {
 		Agent:              agent,
 		Retried:            job.Retried,
 		RetriedInJobID:     job.RetriedInJobID,
-		RetriesCount:       job.RetriesCount,
-		RetrySource:        job.RetrySource,
 		Unblockable:        job.Unblockable,
 		ParallelGroupIndex: job.ParallelGroupIndex,
 		ParallelGroupTotal: job.ParallelGroupTotal,
