@@ -383,6 +383,9 @@ func TestListJobs(t *testing.T) {
 					State:           "failed",
 					Command:         "go test ./...",
 					ExitStatus:      intPtr(1),
+					SoftFailed:      true,
+					SignalReason:    "agent_stop",
+					StepKey:         "test",
 					BuildURL:        "https://api.buildkite.com/v2/builds/123",
 					ClusterID:       "cluster-1",
 					ClusterQueueURL: "https://api.buildkite.com/v2/queues/queue-1",
@@ -404,6 +407,7 @@ func TestListJobs(t *testing.T) {
 		require.Len(t, response.Items, 1)
 		assert.Equal(t, map[string]any{
 			"id": "job-1", "name": "test", "state": "failed", "command": "go test ./...", "exit_status": float64(1),
+			"soft_failed": true, "signal_reason": "agent_stop", "step_key": "test",
 		}, response.Items[0])
 	})
 
