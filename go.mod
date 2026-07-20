@@ -7,7 +7,7 @@ require (
 	github.com/buildkite/buildkite-logs v0.13.1
 	github.com/buildkite/go-buildkite/v5 v5.7.0
 	github.com/google/jsonschema-go v0.4.3
-	github.com/mattn/go-isatty v0.0.22
+	github.com/mattn/go-isatty v0.0.23
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/rs/zerolog v1.35.1
