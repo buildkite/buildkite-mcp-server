@@ -33,15 +33,15 @@ type ListJobsArgs struct {
 	OrgSlug            string `json:"org_slug"`
 	PipelineSlug       string `json:"pipeline_slug"`
 	BuildNumber        string `json:"build_number"`
-	State              string `json:"state,omitempty" jsonschema:"Filter jobs by state. Comma-separated for multiple states (e.g.\\, 'passed\\,failed\\,running')"`
+	State              string `json:"state,omitempty" jsonschema:"Filter jobs by state. Comma-separated for multiple states (e.g., 'passed,failed,running')"`
 	StepKey            string `json:"step_key,omitempty" jsonschema:"Filter jobs by step key. Includes all parallel jobs for the step"`
 	GroupKey           string `json:"group_key,omitempty" jsonschema:"Filter jobs by group key. Includes all jobs in the group"`
-	DetailLevel        string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default)\\, 'detailed'\\, or 'full'"`
+	DetailLevel        string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
 	IncludeRetriedJobs *bool  `json:"include_retried_jobs,omitempty" jsonschema:"Include retried jobs in the response. Defaults to true on the server when omitted"`
-	PerPage            int    `json:"per_page,omitempty" jsonschema:"Results per page for cursor pagination (min 1\\, max 100\\, default 30)"`
+	PerPage            int    `json:"per_page,omitempty" jsonschema:"Results per page for cursor pagination (min 1, max 100, default 30)"`
 	After              string `json:"after,omitempty" jsonschema:"Cursor for the next page. Take this from the 'links.next' URL of a previous response. Mutually exclusive with 'before'"`
 	Before             string `json:"before,omitempty" jsonschema:"Cursor for the previous page. Take this from a previous response. Mutually exclusive with 'after'"`
-	IncludeAgent       bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details at the detailed and full levels. When false (default)\\, detailed and full responses include only agent.id"`
+	IncludeAgent       bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details at the detailed and full levels. When false (default), detailed and full responses include only agent.id"`
 }
 
 // JobSummary contains the fields normally needed to identify a build failure.
@@ -224,7 +224,7 @@ type GetJobArgs struct {
 	JobID        string `json:"job_id"`
 	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Pipeline slug. Provide together with 'build_number' for a build-scoped lookup. Omit both to look up the job by organization and job ID alone"`
 	BuildNumber  string `json:"build_number,omitempty" jsonschema:"Build number. Provide together with 'pipeline_slug' for a build-scoped lookup. Omit both to look up the job by organization and job ID alone"`
-	IncludeAgent bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default)\\, only agent.id is included"`
+	IncludeAgent bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default), only agent.id is included"`
 }
 
 func GetJob() (mcp.Tool, mcp.ToolHandlerFor[GetJobArgs, any], []string) {

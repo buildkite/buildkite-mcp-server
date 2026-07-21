@@ -20,7 +20,7 @@ type ListPipelineSchedulesArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 func ListPipelineSchedules() (mcp.Tool, mcp.ToolHandlerFor[ListPipelineSchedulesArgs, any], []string) {
@@ -104,7 +104,7 @@ func GetPipelineSchedule() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineScheduleArgs
 type CreatePipelineScheduleArgs struct {
 	OrgSlug      string            `json:"org_slug"`
 	PipelineSlug string            `json:"pipeline_slug"`
-	Cronline     string            `json:"cronline" jsonschema:"Schedule interval as a crontab expression (e.g. '0 0 * * *') or predefined value (e.g. '@daily'\\, '@hourly'\\, '@weekly'\\, '@monthly'\\, '@yearly')"`
+	Cronline     string            `json:"cronline" jsonschema:"Schedule interval as a crontab expression (e.g. '0 0 * * *') or predefined value (e.g. '@daily', '@hourly', '@weekly', '@monthly', '@yearly')"`
 	Label        string            `json:"label,omitempty" jsonschema:"Descriptive label for the schedule"`
 	Message      string            `json:"message,omitempty" jsonschema:"Message attached to triggered builds"`
 	Commit       string            `json:"commit,omitempty" jsonschema:"Commit reference (defaults to HEAD)"`

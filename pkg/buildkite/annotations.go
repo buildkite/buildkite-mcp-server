@@ -31,7 +31,7 @@ type ListAnnotationsArgs struct {
 	Scope        string `json:"scope,omitempty" jsonschema:"Annotation scope: 'build' (default) or 'job'. When 'job', job_id is required."`
 	JobID        string `json:"job_id,omitempty" jsonschema:"Job ID required when scope is job"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 type CreateAnnotationArgs struct {

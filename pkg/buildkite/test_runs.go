@@ -23,7 +23,7 @@ type ListTestRunsArgs struct {
 	OrgSlug       string `json:"org_slug"`
 	TestSuiteSlug string `json:"test_suite_slug"`
 	Page          int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage       int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	PerPage       int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 type GetTestRunArgs struct {

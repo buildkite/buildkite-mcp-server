@@ -237,7 +237,7 @@ type ListArtifactsForBuildArgs struct {
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 type ListArtifactsForJobArgs struct {
@@ -246,7 +246,7 @@ type ListArtifactsForJobArgs struct {
 	BuildNumber  string `json:"build_number"`
 	JobID        string `json:"job_id"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 type GetArtifactArgs struct {

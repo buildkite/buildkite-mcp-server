@@ -22,8 +22,8 @@ type ListPipelinesArgs struct {
 	Name        string `json:"name,omitempty" jsonschema:"Filter pipelines by name"`
 	Repository  string `json:"repository,omitempty" jsonschema:"Filter pipelines by repository URL"`
 	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
-	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default)\\, 'detailed'\\, or 'full'"`
+	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
+	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
 }
 
 type CreatePipelineResult struct {
@@ -105,7 +105,7 @@ func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []st
 type GetPipelineArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
-	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary'\\, 'detailed'\\, or 'full' (default)"`
+	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary', 'detailed', or 'full' (default)"`
 }
 
 func GetPipeline() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineArgs, any], []string) {
