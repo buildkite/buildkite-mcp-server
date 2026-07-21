@@ -58,7 +58,7 @@ func ListSkills() (mcp.Tool, mcp.ToolHandlerFor[ListSkillsArgs, any], []string) 
 }
 
 type LoadSkillArgs struct {
-	SkillName string `json:"skill_name" jsonschema:"Name of the skill to load\\, as returned by list_skills"`
+	SkillName string `json:"skill_name" jsonschema:"Name of the skill to load, as returned by list_skills"`
 }
 
 func LoadSkill() (mcp.Tool, mcp.ToolHandlerFor[LoadSkillArgs, any], []string) {
@@ -74,15 +74,18 @@ func LoadSkill() (mcp.Tool, mcp.ToolHandlerFor[LoadSkillArgs, any], []string) {
 			defer span.End()
 
 			var match *skill
-			names := make([]string, 0, len(skillRegistry))
 			for i := range skillRegistry {
-				names = append(names, skillRegistry[i].Name)
 				if skillRegistry[i].Name == args.SkillName {
 					match = &skillRegistry[i]
+					break
 				}
 			}
 
 			if match == nil {
+				names := make([]string, len(skillRegistry))
+				for i := range skillRegistry {
+					names[i] = skillRegistry[i].Name
+				}
 				return utils.NewToolResultError(fmt.Sprintf("unknown skill %q, valid skills are: %s", args.SkillName, strings.Join(names, ", "))), nil, nil
 			}
 
