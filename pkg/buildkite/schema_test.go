@@ -320,3 +320,14 @@ func TestGetBuildTestEngineRunsArgsSchema(t *testing.T) {
 	req := sortedRequired[GetBuildTestEngineRunsArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 }
+
+func TestListSkillsArgsSchema(t *testing.T) {
+	s := schemaFor[ListSkillsArgs](t)
+	require.Empty(t, s.Required)
+	require.Contains(t, s.Properties, "query")
+}
+
+func TestLoadSkillArgsSchema(t *testing.T) {
+	req := sortedRequired[LoadSkillArgs](t)
+	require.Equal(t, []string{"skill_name"}, req)
+}

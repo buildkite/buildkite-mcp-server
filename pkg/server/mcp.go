@@ -76,6 +76,8 @@ Job state "broken" means the job did not run because something inside the build 
 
 Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.
 
+Before debugging logs or investigating build failures, call list_skills to discover usage guides, then load_skill to read one.
+
 Annotation scope: when creating an annotation with scope "job", job_id is required. If job_id is provided but scope is left as the default "build", the job_id is silently ignored.`
 
 // NewMCPServer creates a new MCP server with the given configuration
