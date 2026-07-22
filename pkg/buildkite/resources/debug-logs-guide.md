@@ -7,7 +7,6 @@ This guide explains how to effectively use the Buildkite MCP server's log tools 
 - [Debugging Workflow](#debugging-workflow)
 - [Optimizing LLM Usage](#optimizing-llm-usage)
 - [Common Error Patterns](#common-error-patterns)
-- [Example Investigation](#example-investigation)
 
 ## Tools Overview
 
@@ -15,16 +14,6 @@ The server provides these tools for log analysis:
 
 ### 1. tail_logs - Start Here for Failures
 **Best first step for diagnosing failures** — shows the last N log lines where errors typically appear.
-
-```json
-{
-  "org_slug": "<ORG>",
-  "pipeline_slug": "<PIPELINE>",
-  "build_number": "<BUILD>",
-  "job_id": "<JOB_ID>",
-  "tail": 50
-}
-```
 
 Defaults to 10 lines if `tail` is omitted or zero.
 Use `tail: 50-100` for an initial failure check when you want more than the default.
@@ -44,47 +33,15 @@ Use `tail: 50-100` for an initial failure check when you want more than the defa
 
 Recommended starting values: use `context: 3`, `limit: 10-20`, and leave boolean options false unless you need them. If `limit` is omitted, search can return every match.
 
-```json
-{
-  "org_slug": "<ORG>",
-  "pipeline_slug": "<PIPELINE>",
-  "build_number": "<BUILD>",
-  "job_id": "<JOB_ID>",
-  "pattern": "error|failed|exception",
-  "context": 3,
-  "limit": 20
-}
-```
-
 ### 3. read_logs - For Sequential Reading
 **Use when you need to read a specific section** of logs in order, using a row number found via search_logs.
-
-```json
-{
-  "org_slug": "<ORG>",
-  "pipeline_slug": "<PIPELINE>",
-  "build_number": "<BUILD>",
-  "job_id": "<JOB_ID>",
-  "seek": 1000,
-  "limit": 100
-}
-```
 
 Always set `limit` — logs can be very large.
 
 ## Debugging Workflow
 
 ### Step 0: Identify the Failing Job
-Before pulling any logs, call `list_jobs` with `state=failed,broken` to narrow down which jobs need attention:
-
-```json
-{
-  "org_slug": "<ORG>",
-  "pipeline_slug": "<PIPELINE>",
-  "build_number": "<BUILD>",
-  "state": "failed,broken"
-}
-```
+Before pulling any logs, call `list_jobs` with `state=failed,broken` to narrow down which jobs need attention.
 
 This returns only the jobs that didn't pass. From the results:
 - **`failed`** jobs actually ran and exited non-zero — these are the root cause, start here
@@ -156,22 +113,6 @@ Log entries are returned as JSON objects:
 **Permission/security:**
 ```
 "pattern": "permission denied|access denied|unauthorized|forbidden"
-```
-
-## Example Investigation
-
-```
-// 1. Identify failed or broken jobs first
-list_jobs: org_slug=<ORG> pipeline_slug=<PIPELINE> build_number=<BUILD> state="failed,broken"
-
-// 2. Use the id from a failed job as job_id, then check recent output
-tail_logs: org_slug=<ORG> pipeline_slug=<PIPELINE> build_number=<BUILD> job_id=<FAILED_JOB_ID> tail=50
-
-// 3. Search for errors with context
-search_logs: ...pattern="failed|error" context=5 limit=15
-
-// 4. Deep dive on a specific failure using rn from step 3
-read_logs: ...seek=<rn-10> limit=20
 ```
 
 ## Cache Management
