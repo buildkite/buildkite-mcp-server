@@ -303,6 +303,24 @@ func TestSearchLogsHandler_TerseFormat(t *testing.T) {
 	}
 }
 
+// TestToTerseEntry_RowZero is a regression test for `rn` being tagged
+// json:"rn,omitempty": since row 0 is Go's zero value for int64, omitempty
+// silently dropped `rn` from the very first log entry of any file, breaking
+// the documented {ts,c,rn} contract for exactly the entries most likely to
+// matter (e.g. tail_logs/read_logs starting from the top of a short log).
+func TestToTerseEntry_RowZero(t *testing.T) {
+	entry := buildkitelogs.ParquetLogEntry{
+		RowNumber: 0,
+		Timestamp: 1700000000000,
+		Content:   "first line",
+		Flags:     1, // HasTimestamp
+	}
+
+	b, err := json.Marshal(toTerseEntry(entry))
+	require.NoError(t, err)
+	require.Contains(t, string(b), `"rn":0`)
+}
+
 func TestTailLogsHandler(t *testing.T) {
 	assert := require.New(t)
 

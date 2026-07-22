@@ -59,7 +59,7 @@ type ReadLogsParams struct {
 type TerseLogEntry struct {
 	TS int64  `json:"ts,omitempty"`
 	C  string `json:"c"`
-	RN int64  `json:"rn,omitempty"`
+	RN int64  `json:"rn"`
 }
 
 // TerseSearchResult mirrors buildkitelogs.SearchResult but with entries
