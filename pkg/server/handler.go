@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
@@ -28,6 +29,7 @@ func NewPerRequestServerFactory(
 	deps buildkite.ToolDependencies,
 	defaultToolsets []string,
 	defaultReadOnly bool,
+	disabledToolsets ...string,
 ) func(*http.Request) *mcp.Server {
 	return func(r *http.Request) *mcp.Server {
 		enabledToolsets := defaultToolsets
@@ -45,12 +47,30 @@ func NewPerRequestServerFactory(
 		if header := r.Header.Get(HeaderReadOnly); header != "" {
 			readOnly = strings.EqualFold(strings.TrimSpace(header), "true")
 		}
+		enabledToolsets = withoutToolsets(enabledToolsets, disabledToolsets)
 
 		return NewMCPServer(version, deps,
 			WithToolsets(enabledToolsets...),
 			WithReadOnly(readOnly),
 		)
 	}
+}
+
+func withoutToolsets(enabled, disabled []string) []string {
+	if len(disabled) == 0 {
+		return enabled
+	}
+	if slices.Contains(enabled, toolsets.ToolsetAll) {
+		enabled = toolsets.ValidToolsets
+	}
+
+	filtered := make([]string, 0, len(enabled))
+	for _, name := range enabled {
+		if name != toolsets.ToolsetAll && !slices.Contains(disabled, name) {
+			filtered = append(filtered, name)
+		}
+	}
+	return filtered
 }
 
 // ParseToolsetsHeader parses a comma-separated list of toolset names from a header value.

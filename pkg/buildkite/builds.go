@@ -9,6 +9,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+const annotationSummaryPageSize = 100
+
 type BuildsClient interface {
 	Get(ctx context.Context, org, pipelineSlug, buildNumber string, options *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
 	ListByOrg(ctx context.Context, org string, options *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
@@ -30,34 +32,47 @@ type BuildSummary struct {
 	CreatedAt *buildkite.Timestamp `json:"created_at"`
 }
 
-// BuildDetail includes useful build metadata while omitting jobs, env, and
-// pipeline configuration from the raw Buildkite SDK response.
+// AnnotationSummary contains enough metadata to identify and fetch an
+// annotation without including its potentially large body.
+type AnnotationSummary struct {
+	ID       string `json:"id"`
+	Context  string `json:"context"`
+	Style    string `json:"style"`
+	Scope    string `json:"scope"`
+	JobID    string `json:"job_id,omitempty"`
+	Priority int    `json:"priority"`
+}
+
+// BuildDetail includes useful build metadata and annotation summaries while
+// omitting jobs, env, pipeline configuration, and annotation bodies.
 type BuildDetail struct {
 	BuildSummary
-	Blocked       bool                          `json:"blocked"`
-	Author        buildkite.Author              `json:"author"`
-	ScheduledAt   *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
-	StartedAt     *buildkite.Timestamp          `json:"started_at,omitempty"`
-	FinishedAt    *buildkite.Timestamp          `json:"finished_at,omitempty"`
-	MetaData      map[string]string             `json:"meta_data,omitempty"`
-	Creator       buildkite.Creator             `json:"creator"`
-	Source        string                        `json:"source,omitempty"`
-	RebuiltFrom   *buildkite.RebuiltFrom        `json:"rebuilt_from,omitempty"`
-	PullRequest   *buildkite.PullRequest        `json:"pull_request,omitempty"`
-	TriggeredFrom *buildkite.TriggeredFrom      `json:"triggered_from,omitempty"`
-	TestEngine    *buildkite.TestEngineProperty `json:"test_engine,omitempty"`
+	Blocked              bool                          `json:"blocked"`
+	Author               buildkite.Author              `json:"author"`
+	ScheduledAt          *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
+	StartedAt            *buildkite.Timestamp          `json:"started_at,omitempty"`
+	FinishedAt           *buildkite.Timestamp          `json:"finished_at,omitempty"`
+	MetaData             map[string]string             `json:"meta_data,omitempty"`
+	Creator              buildkite.Creator             `json:"creator"`
+	Source               string                        `json:"source,omitempty"`
+	RebuiltFrom          *buildkite.RebuiltFrom        `json:"rebuilt_from,omitempty"`
+	PullRequest          *buildkite.PullRequest        `json:"pull_request,omitempty"`
+	TriggeredFrom        *buildkite.TriggeredFrom      `json:"triggered_from,omitempty"`
+	TestEngine           *buildkite.TestEngineProperty `json:"test_engine,omitempty"`
+	Annotations          []AnnotationSummary           `json:"annotations"`
+	AnnotationsTruncated bool                          `json:"annotations_truncated,omitempty"`
 }
 
 // ListBuildsArgs struct with enhanced filtering
 type ListBuildsArgs struct {
 	OrgSlug      string `json:"org_slug"`
-	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Filter builds by pipeline. When omitted\\, lists builds across all pipelines in the organization"`
+	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Filter builds by pipeline. When omitted, lists builds across all pipelines in the organization"`
 	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
-	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled\\, running\\, passed\\, failed\\, canceled\\, skipped)"`
+	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled, running, passed, failed, canceled, skipped)"`
 	Commit       string `json:"commit,omitempty" jsonschema:"Filter builds by specific commit SHA"`
 	Creator      string `json:"creator,omitempty" jsonschema:"Filter builds by build creator"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 // GetBuildArgs struct
@@ -90,22 +105,39 @@ func summarizeBuild(build buildkite.Build) BuildSummary {
 	}
 }
 
-func detailBuild(build buildkite.Build) BuildDetail {
+func detailBuild(build buildkite.Build, annotations []buildkite.Annotation, annotationsTruncated bool) BuildDetail {
 	return BuildDetail{
-		BuildSummary:  summarizeBuild(build),
-		Blocked:       build.Blocked,
-		Author:        build.Author,
-		ScheduledAt:   build.ScheduledAt,
-		StartedAt:     build.StartedAt,
-		FinishedAt:    build.FinishedAt,
-		MetaData:      build.MetaData,
-		Creator:       build.Creator,
-		Source:        build.Source,
-		RebuiltFrom:   build.RebuiltFrom,
-		PullRequest:   build.PullRequest,
-		TriggeredFrom: build.TriggeredFrom,
-		TestEngine:    build.TestEngine,
+		BuildSummary:         summarizeBuild(build),
+		Blocked:              build.Blocked,
+		Author:               build.Author,
+		ScheduledAt:          build.ScheduledAt,
+		StartedAt:            build.StartedAt,
+		FinishedAt:           build.FinishedAt,
+		MetaData:             build.MetaData,
+		Creator:              build.Creator,
+		Source:               build.Source,
+		RebuiltFrom:          build.RebuiltFrom,
+		PullRequest:          build.PullRequest,
+		TriggeredFrom:        build.TriggeredFrom,
+		TestEngine:           build.TestEngine,
+		Annotations:          summarizeAnnotations(annotations),
+		AnnotationsTruncated: annotationsTruncated,
 	}
+}
+
+func summarizeAnnotations(annotations []buildkite.Annotation) []AnnotationSummary {
+	summaries := make([]AnnotationSummary, len(annotations))
+	for i, annotation := range annotations {
+		summaries[i] = AnnotationSummary{
+			ID:       annotation.ID,
+			Context:  annotation.Context,
+			Style:    annotation.Style,
+			Scope:    annotation.Scope,
+			JobID:    annotation.JobID,
+			Priority: annotation.Priority,
+		}
+	}
+	return summaries
 }
 
 // createPaginatedBuildResult creates a paginated result with the appropriate converter
@@ -224,6 +256,10 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 
 			deps := DepsFromContext(ctx)
 			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
+				BuildsListOptions: buildkite.BuildsListOptions{
+					ExcludeJobs:     true,
+					ExcludePipeline: true,
+				},
 				IncludeTestEngine: true,
 			})
 			if err != nil {
@@ -243,7 +279,7 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build",
-			Description: "Get a single build. Jobs are not included — use list_jobs or get_job for job detail",
+			Description: "Get a single build with lightweight annotation summaries. Annotation bodies and jobs are not included — use list_annotations to read annotations, and list_jobs or get_job for job detail",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build",
 				ReadOnlyHint: true,
@@ -274,7 +310,22 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 				return handleBuildkiteError(err)
 			}
 
-			result := detailBuild(build)
+			annotations, annotationsResponse, err := deps.AnnotationsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
+				ListOptions: buildkite.ListOptions{Page: 1, PerPage: annotationSummaryPageSize},
+				Scope:       "all",
+				OmitBody:    boolPtr(true),
+			})
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			annotationsTruncated := annotationsResponse != nil && annotationsResponse.NextPage > 0
+			span.SetAttributes(
+				attribute.Int("annotation_count", len(annotations)),
+				attribute.Bool("annotations_truncated", annotationsTruncated),
+			)
+
+			result := detailBuild(build, annotations, annotationsTruncated)
 			return mcpTextResult(span, &result)
 		}, []string{"read_builds"}
 }
@@ -300,7 +351,8 @@ func CreateBuild() (mcp.Tool, mcp.ToolHandlerFor[CreateBuildArgs, any], []string
 			Name:        "create_build",
 			Description: "Trigger a new build on a Buildkite pipeline for a specific commit and branch, with optional environment variables, metadata, and author information",
 			Annotations: &mcp.ToolAnnotations{
-				Title: "Create Build",
+				Title:           "Create Build",
+				DestructiveHint: boolPtr(false),
 			},
 		},
 		func(ctx context.Context, request *mcp.CallToolRequest, args CreateBuildArgs) (*mcp.CallToolResult, any, error) {
@@ -343,7 +395,8 @@ func CancelBuild() (mcp.Tool, mcp.ToolHandlerFor[CancelBuildArgs, any], []string
 			Name:        "cancel_build",
 			Description: "Cancel a running build on a Buildkite pipeline",
 			Annotations: &mcp.ToolAnnotations{
-				Title: "Cancel Build",
+				Title:           "Cancel Build",
+				DestructiveHint: boolPtr(true),
 			},
 		},
 		func(ctx context.Context, request *mcp.CallToolRequest, args CancelBuildArgs) (*mcp.CallToolResult, any, error) {
@@ -377,7 +430,8 @@ func RebuildBuild() (mcp.Tool, mcp.ToolHandlerFor[RebuildBuildArgs, any], []stri
 			Name:        "rebuild_build",
 			Description: "Rebuild/retry an entire build on a Buildkite pipeline",
 			Annotations: &mcp.ToolAnnotations{
-				Title: "Rebuild Build",
+				Title:           "Rebuild Build",
+				DestructiveHint: boolPtr(true),
 			},
 		},
 		func(ctx context.Context, request *mcp.CallToolRequest, args RebuildBuildArgs) (*mcp.CallToolResult, any, error) {

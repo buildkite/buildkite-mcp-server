@@ -1,0 +1,56 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":disableDependencyDashboard",
+    ":semanticCommits",
+    "schedule:weekdays",
+    "group:allNonMajor"
+  ],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "minimumReleaseAge": "3 days",
+  "vulnerabilityAlerts": {
+    "labels": ["dependencies", "security"],
+    "minimumReleaseAge": "0 days",
+    "enabled": true
+  },
+  "postUpdateOptions": ["gomodTidy"],
+  "automerge": true,
+  "automergeType": "pr",
+  "platformAutomerge": true,
+  "packageRules": [
+    {
+      "description": "Group Buildkite pipeline config",
+      "matchFileNames": [".buildkite/**"],
+      "groupName": "buildkite-pipelines"
+    },
+    {
+      "description": "Group Go minor and patch updates",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "go-minor-patch"
+    },
+    {
+      "description": "Group golang.org/x/ packages",
+      "matchSourceUrls": ["https://github.com/golang/**"],
+      "groupName": "golang-x"
+    },
+    {
+      "description": "Group Buildkite dependencies",
+      "matchSourceUrls": ["https://github.com/buildkite/**"],
+      "groupName": "buildkite-dependencies"
+    },
+    {
+      "description": "Group testing dependencies",
+      "matchPackageNames": ["github.com/stretchr/testify"],
+      "groupName": "testing"
+    },
+    {
+      "description": "Do not automerge major updates",
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ]
+}

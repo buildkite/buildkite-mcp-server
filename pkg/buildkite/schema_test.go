@@ -230,6 +230,19 @@ func TestListPipelinesArgsSchema(t *testing.T) {
 	}
 }
 
+func TestListJobsArgsSchemaFilters(t *testing.T) {
+	s := schemaFor[ListJobsArgs](t)
+	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, sortedRequired[ListJobsArgs](t))
+
+	for _, opt := range []string{"step_key", "group_key"} {
+		require.Contains(t, s.Properties, opt)
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+
+	require.Equal(t, "Filter jobs by step key. Includes all parallel jobs for the step", s.Properties["step_key"].Description)
+	require.Equal(t, "Filter jobs by group key. Includes all jobs in the group", s.Properties["group_key"].Description)
+}
+
 func TestUnblockJobArgsSchema(t *testing.T) {
 	s := schemaFor[UnblockJobArgs](t)
 	req := slices.Clone(s.Required)
@@ -237,6 +250,17 @@ func TestUnblockJobArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"fields"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestListJobsArgsSchemaOptionalFields(t *testing.T) {
+	s := schemaFor[ListJobsArgs](t)
+	req := slices.Clone(s.Required)
+	slices.Sort(req)
+	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
+
+	for _, opt := range []string{"state", "detail_level", "include_retried_jobs", "per_page", "after", "before", "include_agent"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
 }
@@ -295,4 +319,15 @@ func TestGetClusterQueueArgsSchema(t *testing.T) {
 func TestGetBuildTestEngineRunsArgsSchema(t *testing.T) {
 	req := sortedRequired[GetBuildTestEngineRunsArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
+}
+
+func TestListSkillsArgsSchema(t *testing.T) {
+	s := schemaFor[ListSkillsArgs](t)
+	require.Empty(t, s.Required)
+	require.Contains(t, s.Properties, "query")
+}
+
+func TestLoadSkillArgsSchema(t *testing.T) {
+	req := sortedRequired[LoadSkillArgs](t)
+	require.Equal(t, []string{"skill_name"}, req)
 }

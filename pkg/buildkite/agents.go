@@ -21,14 +21,14 @@ type ListAgentsArgs struct {
 	Hostname    string `json:"hostname,omitempty"`
 	Version     string `json:"version,omitempty"`
 	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
-	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default)\\, 'detailed'\\, or 'full'"`
+	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
+	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
 }
 
 type GetAgentArgs struct {
 	OrgSlug     string `json:"org_slug"`
 	AgentID     string `json:"agent_id"`
-	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary'\\, 'detailed'\\, or 'full' (default)"`
+	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary', 'detailed', or 'full' (default)"`
 }
 
 type AgentJobSummary struct {

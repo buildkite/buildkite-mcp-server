@@ -22,8 +22,8 @@ type ListPipelinesArgs struct {
 	Name        string `json:"name,omitempty" jsonschema:"Filter pipelines by name"`
 	Repository  string `json:"repository,omitempty" jsonschema:"Filter pipelines by repository URL"`
 	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
-	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default)\\, 'detailed'\\, or 'full'"`
+	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
+	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
 }
 
 type CreatePipelineResult struct {
@@ -105,7 +105,7 @@ func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []st
 type GetPipelineArgs struct {
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
-	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary'\\, 'detailed'\\, or 'full' (default)"`
+	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary', 'detailed', or 'full' (default)"`
 }
 
 func GetPipeline() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineArgs, any], []string) {
@@ -256,7 +256,8 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 			Name:        "create_pipeline",
 			Description: "Set up a new CI/CD pipeline in Buildkite with YAML configuration, repository connection, and cluster assignment",
 			Annotations: &mcp.ToolAnnotations{
-				Title: "Create Pipeline",
+				Title:           "Create Pipeline",
+				DestructiveHint: boolPtr(false),
 			},
 		},
 		func(ctx context.Context, request *mcp.CallToolRequest, args CreatePipelineArgs) (*mcp.CallToolResult, any, error) {
@@ -334,7 +335,8 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 			Name:        "update_pipeline",
 			Description: "Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata",
 			Annotations: &mcp.ToolAnnotations{
-				Title: "Update Pipeline",
+				Title:           "Update Pipeline",
+				DestructiveHint: boolPtr(true),
 			},
 		}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineArgs) (*mcp.CallToolResult, any, error) {
 			ctx, span := trace.Start(ctx, "buildkite.UpdatePipeline")

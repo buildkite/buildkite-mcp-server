@@ -33,18 +33,107 @@ type ListJobsArgs struct {
 	OrgSlug            string `json:"org_slug"`
 	PipelineSlug       string `json:"pipeline_slug"`
 	BuildNumber        string `json:"build_number"`
-	State              string `json:"state,omitempty" jsonschema:"Filter jobs by state. Comma-separated for multiple states (e.g.\\, 'passed\\,failed\\,running')"`
+	State              string `json:"state,omitempty" jsonschema:"Filter jobs by state. Comma-separated for multiple states (e.g., 'passed,failed,running')"`
+	StepKey            string `json:"step_key,omitempty" jsonschema:"Filter jobs by step key. Includes all parallel jobs for the step"`
+	GroupKey           string `json:"group_key,omitempty" jsonschema:"Filter jobs by group key. Includes all jobs in the group"`
+	DetailLevel        string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
 	IncludeRetriedJobs *bool  `json:"include_retried_jobs,omitempty" jsonschema:"Include retried jobs in the response. Defaults to true on the server when omitted"`
-	PerPage            int    `json:"per_page,omitempty" jsonschema:"Results per page for cursor pagination (min 1\\, max 100\\, default 30)"`
+	PerPage            int    `json:"per_page,omitempty" jsonschema:"Results per page for cursor pagination (min 1, max 100, default 30)"`
 	After              string `json:"after,omitempty" jsonschema:"Cursor for the next page. Take this from the 'links.next' URL of a previous response. Mutually exclusive with 'before'"`
 	Before             string `json:"before,omitempty" jsonschema:"Cursor for the previous page. Take this from a previous response. Mutually exclusive with 'after'"`
-	IncludeAgent       bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default)\\, only agent.id is included"`
+	IncludeAgent       bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details at the detailed and full levels. When false (default), detailed and full responses include only agent.id"`
+}
+
+// JobSummary contains the fields normally needed to identify a build failure.
+type JobSummary struct {
+	ID           string                    `json:"id"`
+	Name         string                    `json:"name"`
+	State        string                    `json:"state"`
+	Command      string                    `json:"command"`
+	ExitStatus   *int                      `json:"exit_status"`
+	SoftFailed   bool                      `json:"soft_failed,omitempty"`
+	SignalReason string                    `json:"signal_reason,omitempty"`
+	StepKey      string                    `json:"step_key,omitempty"`
+	RetriesCount int                       `json:"retries_count,omitempty"`
+	RetrySource  *buildkite.JobRetrySource `json:"retry_source,omitempty"`
+}
+
+// JobDetail adds actionable job metadata while excluding repeated build,
+// cluster, queue, and log URLs from the SDK response.
+type JobDetail struct {
+	JobSummary
+	Type               string               `json:"type,omitempty"`
+	Label              string               `json:"label,omitempty"`
+	GroupKey           string               `json:"group_key,omitempty"`
+	Signal             *int                 `json:"signal,omitempty"`
+	CreatedAt          *buildkite.Timestamp `json:"created_at,omitempty"`
+	StartedAt          *buildkite.Timestamp `json:"started_at,omitempty"`
+	FinishedAt         *buildkite.Timestamp `json:"finished_at,omitempty"`
+	Agent              *buildkite.Agent     `json:"agent,omitempty"`
+	Retried            bool                 `json:"retried,omitempty"`
+	RetriedInJobID     string               `json:"retried_in_job_id,omitempty"`
+	Unblockable        bool                 `json:"unblockable,omitempty"`
+	ParallelGroupIndex *int                 `json:"parallel_group_index,omitempty"`
+	ParallelGroupTotal *int                 `json:"parallel_group_total,omitempty"`
+}
+
+type JobListResult[T any] struct {
+	Items []T                     `json:"items"`
+	Links buildkite.JobsListLinks `json:"links"`
+}
+
+func summarizeJob(job buildkite.Job) JobSummary {
+	return JobSummary{
+		ID:           job.ID,
+		Name:         job.Name,
+		State:        job.State,
+		Command:      job.Command,
+		ExitStatus:   job.ExitStatus,
+		SoftFailed:   job.SoftFailed,
+		SignalReason: job.SignalReason,
+		StepKey:      job.StepKey,
+		RetriesCount: job.RetriesCount,
+		RetrySource:  job.RetrySource,
+	}
+}
+
+func detailJob(job buildkite.Job) JobDetail {
+	var agent *buildkite.Agent
+	if job.Agent.ID != "" {
+		agent = &job.Agent
+	}
+
+	return JobDetail{
+		JobSummary:         summarizeJob(job),
+		Type:               job.Type,
+		Label:              job.Label,
+		GroupKey:           job.GroupKey,
+		Signal:             job.Signal,
+		CreatedAt:          job.CreatedAt,
+		StartedAt:          job.StartedAt,
+		FinishedAt:         job.FinishedAt,
+		Agent:              agent,
+		Retried:            job.Retried,
+		RetriedInJobID:     job.RetriedInJobID,
+		Unblockable:        job.Unblockable,
+		ParallelGroupIndex: job.ParallelGroupIndex,
+		ParallelGroupTotal: job.ParallelGroupTotal,
+	}
+}
+
+func createJobListResult[T any](jobs buildkite.JobsList, converter func(buildkite.Job) T) JobListResult[T] {
+	items := make([]T, len(jobs.Items))
+	for i, job := range jobs.Items {
+		items[i] = converter(job)
+	}
+
+	return JobListResult[T]{Items: items, Links: jobs.Links}
 }
 
 func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_jobs",
-			Description: "List jobs for a Buildkite build, with optional state filtering and cursor-based pagination. Returns an object with 'items' (the jobs) and 'links' containing 'next'/'self' URLs; pass the cursor from 'links.next' back as 'after' to fetch the next page",
+			Description: "List jobs for a Buildkite build, returning an actionable summary by default. For CI failure diagnosis, use state='failed,broken' to avoid returning successful jobs. Use detail_level='detailed' for execution metadata or 'full' for the existing full MCP job response. Returns 'items' and cursor pagination 'links'",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Jobs",
 				ReadOnlyHint: true,
@@ -54,11 +143,23 @@ func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 			ctx, span := trace.Start(ctx, "buildkite.ListJobs")
 			defer span.End()
 
+			if args.DetailLevel == "" {
+				args.DetailLevel = "summary"
+			}
+			switch args.DetailLevel {
+			case "summary", "detailed", "full":
+			default:
+				return utils.NewToolResultError("detail_level must be 'summary', 'detailed', or 'full'"), nil, nil
+			}
+
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),
 				attribute.String("build_number", args.BuildNumber),
 				attribute.String("state", args.State),
+				attribute.String("step_key", args.StepKey),
+				attribute.String("group_key", args.GroupKey),
+				attribute.String("detail_level", args.DetailLevel),
 				attribute.Int("per_page", args.PerPage),
 			)
 
@@ -68,6 +169,8 @@ func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 
 			options := &buildkite.JobsListOptions{
 				IncludeRetriedJobs: args.IncludeRetriedJobs,
+				StepKey:            args.StepKey,
+				GroupKey:           args.GroupKey,
 				PerPage:            args.PerPage,
 				After:              args.After,
 				Before:             args.Before,
@@ -88,11 +191,7 @@ func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 				return handleBuildkiteError(err)
 			}
 
-			for i := range jobs.Items {
-				redactUnusedJobFields(&jobs.Items[i])
-			}
-
-			if !args.IncludeAgent && len(jobs.Items) > 0 {
+			if args.DetailLevel != "summary" && !args.IncludeAgent && len(jobs.Items) > 0 {
 				for i := range jobs.Items {
 					jobs.Items[i].Agent = buildkite.Agent{
 						ID: jobs.Items[i].Agent.ID,
@@ -100,7 +199,22 @@ func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 				}
 			}
 
-			return mcpTextResult(span, &jobs)
+			var result any
+			switch args.DetailLevel {
+			case "summary":
+				result = createJobListResult(jobs, summarizeJob)
+			case "detailed":
+				result = createJobListResult(jobs, detailJob)
+			default: // full
+				for i := range jobs.Items {
+					redactUnusedJobFields(&jobs.Items[i])
+				}
+				result = jobs
+			}
+
+			span.SetAttributes(attribute.Int("item_count", len(jobs.Items)))
+
+			return mcpTextResult(span, &result)
 		}, []string{"read_builds"}
 }
 
@@ -110,7 +224,7 @@ type GetJobArgs struct {
 	JobID        string `json:"job_id"`
 	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Pipeline slug. Provide together with 'build_number' for a build-scoped lookup. Omit both to look up the job by organization and job ID alone"`
 	BuildNumber  string `json:"build_number,omitempty" jsonschema:"Build number. Provide together with 'pipeline_slug' for a build-scoped lookup. Omit both to look up the job by organization and job ID alone"`
-	IncludeAgent bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default)\\, only agent.id is included"`
+	IncludeAgent bool   `json:"include_agent,omitempty" jsonschema:"Include full agent details in job objects. When false (default), only agent.id is included"`
 }
 
 func GetJob() (mcp.Tool, mcp.ToolHandlerFor[GetJobArgs, any], []string) {
@@ -184,7 +298,8 @@ func UnblockJob() (mcp.Tool, mcp.ToolHandlerFor[UnblockJobArgs, any], []string) 
 			Name:        "unblock_job",
 			Description: "Unblock a blocked job in a Buildkite build to allow it to continue execution",
 			Annotations: &mcp.ToolAnnotations{
-				Title: "Unblock Job",
+				Title:           "Unblock Job",
+				DestructiveHint: boolPtr(true),
 			},
 		},
 		func(ctx context.Context, request *mcp.CallToolRequest, args UnblockJobArgs) (*mcp.CallToolResult, any, error) {
@@ -228,7 +343,8 @@ func RetryJob() (mcp.Tool, mcp.ToolHandlerFor[RetryJobArgs, any], []string) {
 			Name:        "retry_job",
 			Description: "Retry a specific failed or timed out job in a Buildkite build",
 			Annotations: &mcp.ToolAnnotations{
-				Title: "Retry Job",
+				Title:           "Retry Job",
+				DestructiveHint: boolPtr(true),
 			},
 		},
 		func(ctx context.Context, request *mcp.CallToolRequest, args RetryJobArgs) (*mcp.CallToolResult, any, error) {

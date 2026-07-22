@@ -59,7 +59,16 @@ type ReadLogsParams struct {
 type TerseLogEntry struct {
 	TS int64  `json:"ts,omitempty"`
 	C  string `json:"c"`
-	RN int64  `json:"rn,omitempty"`
+	RN int64  `json:"rn"`
+}
+
+// TerseSearchResult mirrors buildkitelogs.SearchResult but with entries
+// reduced to TerseLogEntry, so search_logs matches the {ts,c,rn} format
+// documented for tail_logs and read_logs.
+type TerseSearchResult struct {
+	Match         TerseLogEntry   `json:"match"`
+	BeforeContext []TerseLogEntry `json:"before_context,omitempty"`
+	AfterContext  []TerseLogEntry `json:"after_context,omitempty"`
 }
 
 // Use the library's types
@@ -107,19 +116,36 @@ func validateSearchPattern(pattern string) error {
 	return nil
 }
 
-func formatLogEntries(entries []buildkitelogs.ParquetLogEntry) any {
+func toTerseEntry(entry buildkitelogs.ParquetLogEntry) TerseLogEntry {
+	terse := TerseLogEntry{C: entry.CleanContent(true), RN: entry.RowNumber}
+	if entry.HasTime() {
+		terse.TS = entry.Timestamp
+	}
+	return terse
+}
+
+func toTerseEntries(entries []buildkitelogs.ParquetLogEntry) []TerseLogEntry {
 	result := make([]TerseLogEntry, len(entries))
 	for i, entry := range entries {
-		content := entry.CleanContent(true)
-
-		terse := TerseLogEntry{C: content, RN: entry.RowNumber}
-		if entry.HasTime() {
-			terse.TS = entry.Timestamp
-		}
-
-		result[i] = terse
+		result[i] = toTerseEntry(entry)
 	}
 	return result
+}
+
+func formatLogEntries(entries []buildkitelogs.ParquetLogEntry) any {
+	return toTerseEntries(entries)
+}
+
+func formatSearchResults(results []SearchResult) []TerseSearchResult {
+	terse := make([]TerseSearchResult, len(results))
+	for i, r := range results {
+		terse[i] = TerseSearchResult{
+			Match:         toTerseEntry(r.Match),
+			BeforeContext: toTerseEntries(r.BeforeContext),
+			AfterContext:  toTerseEntries(r.AfterContext),
+		}
+	}
+	return terse
 }
 
 // SearchLogs implements the search_logs MCP tool
@@ -170,6 +196,7 @@ func SearchLogs() (mcp.Tool, mcp.ToolHandlerFor[SearchLogsParams, any], []string
 				Context:       params.Context,
 				BeforeContext: params.BeforeContext,
 				AfterContext:  params.AfterContext,
+				SeekStart:     int64(params.SeekStart),
 			}
 
 			var results []SearchResult
@@ -190,7 +217,7 @@ func SearchLogs() (mcp.Tool, mcp.ToolHandlerFor[SearchLogsParams, any], []string
 
 			queryTime := time.Since(startTime)
 			response := LogResponse{
-				Results:     results,
+				Results:     formatSearchResults(results),
 				MatchCount:  len(results),
 				QueryTimeMS: queryTime.Milliseconds(),
 			}

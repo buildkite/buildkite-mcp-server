@@ -242,6 +242,7 @@ const (
 	ToolsetTests       = "tests"
 	ToolsetAnnotations = "annotations"
 	ToolsetUser        = "user"
+	ToolsetSkills      = "skills"
 )
 
 var ValidToolsets = []string{
@@ -255,6 +256,7 @@ var ValidToolsets = []string{
 	ToolsetTests,
 	ToolsetAnnotations,
 	ToolsetUser,
+	ToolsetSkills,
 }
 
 // IsValidToolset checks if a toolset name is valid
@@ -392,6 +394,14 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CurrentUser),
 				newToolDef(buildkite.UserTokenOrganization),
 				newToolDef(buildkite.AccessToken),
+			},
+		},
+		ToolsetSkills: {
+			Name:        "Skill Guides",
+			Description: "Discover and load usage guides for Buildkite MCP tools",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListSkills),
+				newToolDef(buildkite.LoadSkill),
 			},
 		},
 	}

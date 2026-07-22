@@ -19,7 +19,7 @@ type GetFailedTestExecutionsArgs struct {
 	RunID                  string `json:"run_id"`
 	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded failure details such as full error messages and stack traces"`
 	Page                   int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage                int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1\\, max 100)"`
+	PerPage                int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 func GetFailedTestExecutions() (mcp.Tool, mcp.ToolHandlerFor[GetFailedTestExecutionsArgs, any], []string) {

@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
+	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -119,4 +122,52 @@ func TestNewPerRequestServerFactory_BothHeaders(t *testing.T) {
 
 	srv := factory(req)
 	require.NotNil(t, srv)
+}
+
+func TestNewPerRequestServerFactory_DisabledToolsetsCannotBeReenabled(t *testing.T) {
+	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false, toolsets.ToolsetLogs)
+
+	for _, tt := range []struct {
+		name           string
+		toolsetsHeader string
+	}{
+		{name: "server defaults"},
+		{name: "per-request override", toolsetsHeader: toolsets.ToolsetLogs},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
+			require.NoError(t, err)
+			req.Header.Set(HeaderToolsets, tt.toolsetsHeader)
+
+			toolNames := listToolNames(t, factory(req))
+			require.NotContains(t, toolNames, "search_logs")
+			require.NotContains(t, toolNames, "tail_logs")
+			require.NotContains(t, toolNames, "read_logs")
+			if tt.toolsetsHeader == "" {
+				require.Contains(t, toolNames, "get_build")
+			}
+		})
+	}
+}
+
+func listToolNames(t *testing.T, server *mcp.Server) []string {
+	t.Helper()
+	ctx := context.Background()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = serverSession.Close() })
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	result, err := clientSession.ListTools(ctx, nil)
+	require.NoError(t, err)
+	names := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
 }

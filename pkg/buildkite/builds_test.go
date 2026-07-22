@@ -76,6 +76,7 @@ func TestGetBuild(t *testing.T) {
 		assert := require.New(t)
 
 		var capturedOptions *buildkite.BuildGetOptions
+		var capturedAnnotationOptions *buildkite.AnnotationListOptions
 		client := &MockBuildsClient{
 			GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 				capturedOptions = opt
@@ -105,7 +106,23 @@ func TestGetBuild(t *testing.T) {
 			},
 		}
 
-		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		annotationsClient := &MockAnnotationsClient{
+			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+				capturedAnnotationOptions = opts
+				assert.Equal("org", org)
+				assert.Equal("pipeline", pipelineSlug)
+				assert.Equal("1", buildNumber)
+				return []buildkite.Annotation{
+						{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, BodyHTML: "<p>large body</p>"},
+						{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, BodyHTML: "<p>another large body</p>"},
+					}, &buildkite.Response{
+						Response: &http.Response{StatusCode: 200},
+						NextPage: 2,
+					}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client, AnnotationsClient: annotationsClient})
 		_, handler, _ := GetBuild()
 
 		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildArgs{
@@ -127,12 +144,82 @@ func TestGetBuild(t *testing.T) {
 		assert.NotContains(text, "SECRET_TOKEN")
 		assert.NotContains(text, "PIPELINE_SECRET")
 		assert.NotContains(text, "steps:")
+		assert.Contains(text, `"annotations":[{`)
+		assert.Contains(text, `{"context":"test-results","id":"annotation-1","priority":5,"scope":"build","style":"error"}`)
+		assert.Contains(text, `{"context":"lint","id":"annotation-2","job_id":"job-2","priority":3,"scope":"job","style":"warning"}`)
+		assert.Contains(text, `"annotations_truncated":true`)
+		assert.NotContains(text, "large body")
+		assert.NotContains(text, "body_html")
 
 		// The handler must exclude jobs and pipeline detail from the API request.
 		require.NotNil(t, capturedOptions)
 		assert.True(capturedOptions.ExcludeJobs)
 		assert.True(capturedOptions.ExcludePipeline)
 		assert.True(capturedOptions.IncludeTestEngine)
+
+		require.NotNil(t, capturedAnnotationOptions)
+		assert.Equal(1, capturedAnnotationOptions.Page)
+		assert.Equal(100, capturedAnnotationOptions.PerPage)
+		assert.Equal("all", capturedAnnotationOptions.Scope)
+		require.NotNil(t, capturedAnnotationOptions.OmitBody)
+		assert.True(*capturedAnnotationOptions.OmitBody)
+	})
+
+	t.Run("ReturnsEmptyAnnotationList", func(t *testing.T) {
+		assert := require.New(t)
+
+		buildsClient := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{ID: "123", Number: 1}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+		annotationsClient := &MockAnnotationsClient{
+			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+				return nil, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: buildsClient, AnnotationsClient: annotationsClient})
+		_, handler, _ := GetBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+		})
+		assert.NoError(err)
+		assert.Contains(getTextResult(t, result).Text, `"annotations":[]`)
+		assert.NotContains(getTextResult(t, result).Text, `"annotations_truncated"`)
+	})
+
+	t.Run("AnnotationAPIError", func(t *testing.T) {
+		assert := require.New(t)
+
+		buildsClient := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{ID: "123", Number: 1}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+		annotationsClient := &MockAnnotationsClient{
+			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+				return nil, nil, &buildkite.ErrorResponse{
+					RawBody:  []byte("annotations unavailable"),
+					Response: &http.Response{StatusCode: 503},
+				}
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: buildsClient, AnnotationsClient: annotationsClient})
+		_, handler, _ := GetBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			BuildNumber:  "1",
+		})
+		assert.NoError(err)
+		assert.True(result.IsError)
+		assert.Contains(getTextResult(t, result).Text, "annotations unavailable")
 	})
 
 	t.Run("APIError", func(t *testing.T) {
@@ -305,8 +392,10 @@ func TestListBuilds(t *testing.T) {
 func TestGetBuildTestEngineRuns(t *testing.T) {
 	assert := require.New(t)
 
+	var capturedOptions *buildkite.BuildGetOptions
 	client := &MockBuildsClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			capturedOptions = opt
 			// Return build with test engine data
 			return buildkite.Build{
 					ID:     "123",
@@ -361,6 +450,11 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 	assert.Contains(textContent.Text, "run-2")
 	assert.Contains(textContent.Text, "my-test-suite")
 	assert.Contains(textContent.Text, "another-test-suite")
+
+	require.NotNil(t, capturedOptions)
+	assert.True(capturedOptions.ExcludeJobs)
+	assert.True(capturedOptions.ExcludePipeline)
+	assert.True(capturedOptions.IncludeTestEngine)
 }
 
 func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
@@ -528,6 +622,7 @@ func TestRebuildBuild(t *testing.T) {
 		tool, _, _ := RebuildBuild()
 		require.Equal(t, "rebuild_build", tool.Name)
 		require.Contains(t, tool.Description, "Rebuild")
+		require.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
 	})
 
 	t.Run("Success", func(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/buildkite/buildkite-logs/logparser"
 	"github.com/buildkite/buildkite-mcp-server/internal/commands"
+	"github.com/buildkite/buildkite-mcp-server/internal/headerpassthrough"
 	"github.com/buildkite/buildkite-mcp-server/pkg/recording"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	gobuildkite "github.com/buildkite/go-buildkite/v5"
@@ -72,43 +73,40 @@ func run(ctx context.Context, cmd *kong.Context) error {
 	// Parse additional headers into a map
 	headers := commands.ParseHeaders(cli.HTTPHeaders)
 
+	var passthrough *headerpassthrough.Config
+	if cmd.Command() == "http" && len(cli.HTTP.PassthroughHTTPHeaders) > 0 {
+		passthrough, err = headerpassthrough.New(cli.HTTP.PassthroughHTTPHeaders, headers, cli.BaseURL)
+		if err != nil {
+			return err
+		}
+	}
+
 	if cli.Record != "" && cli.Replay != "" {
 		return fmt.Errorf("cannot specify both --record and --replay")
 	}
 
-	// Token is not required for replay — the HAR file is self-contained.
-	apiToken := ""
-	if cli.Replay == "" {
-		apiToken, err = commands.ResolveAPIToken(cli.APIToken, cli.APITokenFrom1Password)
-		if err != nil {
-			return fmt.Errorf("failed to resolve Buildkite API token: %w", err)
-		}
+	usesRequestAuthorization := passthrough != nil && passthrough.UsesAuthorization()
+	apiToken, err := resolveAPITokenForMode(passthrough, cli.Replay, cli.APIToken, cli.APITokenFrom1Password)
+	if err != nil {
+		return err
 	}
 
-	innerTransport := http.RoundTripper(http.DefaultTransport)
-	if cli.Record != "" {
-		recTransport, recErr := recording.NewRecordingTransport(http.DefaultTransport, cli.Record, version)
-		if recErr != nil {
-			return fmt.Errorf("failed to create recording transport: %w", recErr)
-		}
-		innerTransport = recTransport
-		log.Info().Str("path", cli.Record).Msg("Recording API calls to HAR file")
-	} else if cli.Replay != "" {
-		replayTransport, replayErr := recording.NewReplayTransport(cli.Replay)
-		if replayErr != nil {
-			return fmt.Errorf("failed to load replay HAR file: %w", replayErr)
-		}
-		innerTransport = replayTransport
-		log.Info().Str("path", cli.Replay).Msg("Replaying API calls from HAR file")
+	innerTransport, err := newAPITransport(passthrough, cli.Record, cli.Replay, version)
+	if err != nil {
+		return err
 	}
 
 	httpClient := trace.NewHTTPClientWithHeadersAndTransport(headers, innerTransport)
-	client, err := gobuildkite.NewOpts(
-		gobuildkite.WithTokenAuth(apiToken),
+	clientOptions := []gobuildkite.ClientOpt{
 		gobuildkite.WithUserAgent(commands.UserAgent(version)),
 		gobuildkite.WithHTTPClient(httpClient),
 		gobuildkite.WithBaseURL(cli.BaseURL),
-	)
+	}
+	if !usesRequestAuthorization {
+		clientOptions = append(clientOptions, gobuildkite.WithTokenAuth(apiToken))
+	}
+
+	client, err := gobuildkite.NewOpts(clientOptions...)
 	if err != nil {
 		return fmt.Errorf("failed to create buildkite client: %w", err)
 	}
@@ -136,7 +134,60 @@ func run(ctx context.Context, cmd *kong.Context) error {
 		log.Ctx(ctx).Debug().Str("org", result.Org).Str("pipeline", result.Pipeline).Str("build", result.Build).Str("job", result.Job).Dur("time_taken", result.Duration).Msg("Stored logs to blob storage")
 	})
 
-	return cmd.Run(&commands.Globals{Version: version, Client: client, HTTPClient: httpClient, BuildkiteLogsClient: buildkiteLogsClient})
+	return cmd.Run(&commands.Globals{
+		Version:             version,
+		Client:              client,
+		HTTPClient:          httpClient,
+		BuildkiteLogsClient: buildkiteLogsClient,
+		HeaderPassthrough:   passthrough,
+	})
+}
+
+func newAPITransport(passthrough *headerpassthrough.Config, recordPath, replayPath, version string) (http.RoundTripper, error) {
+	if replayPath != "" {
+		transport, err := recording.NewReplayTransport(replayPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load replay HAR file: %w", err)
+		}
+		log.Info().Str("path", replayPath).Msg("Replaying API calls from HAR file")
+		return transport, nil
+	}
+
+	transport := http.RoundTripper(http.DefaultTransport)
+	if passthrough != nil {
+		transport = passthrough.WrapTransport(transport)
+	}
+	if recordPath != "" {
+		recorder, err := recording.NewRecordingTransport(transport, recordPath, version)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create recording transport: %w", err)
+		}
+		log.Info().Str("path", recordPath).Msg("Recording API calls to HAR file")
+		return recorder, nil
+	}
+
+	return transport, nil
+}
+
+func resolveAPITokenForMode(passthrough *headerpassthrough.Config, replay, token, tokenFrom1Password string) (string, error) {
+	if passthrough != nil && passthrough.UsesAuthorization() {
+		if token != "" || tokenFrom1Password != "" {
+			return "", fmt.Errorf("cannot configure a fixed Buildkite API token when passing through Authorization")
+		}
+		return "", nil
+	}
+
+	// The HAR file is self-contained, so replay preserves the existing
+	// behavior of not requiring a token.
+	if replay != "" {
+		return "", nil
+	}
+
+	apiToken, err := commands.ResolveAPIToken(token, tokenFrom1Password)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve Buildkite API token: %w", err)
+	}
+	return apiToken, nil
 }
 
 func setupLogger(debug bool) zerolog.Logger {

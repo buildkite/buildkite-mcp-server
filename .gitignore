@@ -16,3 +16,5 @@ vendor/
 # debugger binaries
 __debug_bin*
 /*.json
+
+!renovate.json

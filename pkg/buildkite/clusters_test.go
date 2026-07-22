@@ -174,7 +174,7 @@ func TestUpdateCluster(t *testing.T) {
 
 	tool, handler, scopes := UpdateCluster()
 	assert.Equal("update_cluster", tool.Name)
-	assert.Equal(boolPtr(false), tool.Annotations.DestructiveHint)
+	assert.Equal(boolPtr(true), tool.Annotations.DestructiveHint)
 	assert.Contains(scopes, "write_clusters")
 
 	request := createMCPRequest(t, map[string]any{})
