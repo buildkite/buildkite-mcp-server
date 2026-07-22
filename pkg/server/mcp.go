@@ -62,13 +62,17 @@ func unauthorizedMiddleware(cb func()) mcp.Middleware {
 	}
 }
 
-const buildkiteServerInstructions = `This is the Buildkite MCP Server. It provides access to the Buildkite CI/CD API, enabling you to manage and inspect pipelines, builds, jobs, logs, clusters, tests, artifacts, and annotations.
+// BuildkiteServerInstructions are the instructions sent to MCP clients describing
+// how to use this server's tools. Exported so other services embedding or
+// re-implementing Buildkite MCP tools (e.g. custom/internal MCP servers) can
+// reuse the same guidance instead of maintaining their own copy.
+const BuildkiteServerInstructions = `This is the Buildkite MCP Server. It provides access to the Buildkite CI/CD API, enabling you to manage and inspect pipelines, builds, jobs, logs, clusters, tests, artifacts, and annotations.
 
 Start here: Before using most tools, call user_token_organization to retrieve the organization slug. Nearly every other tool requires the org_slug parameter, and this call is the fastest way to discover it.
 
-Authorization: Tools available depend on the scopes granted to the configured API token. A 401 response from a tool means the token lacks the required scope for that operation.
+Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill (e.g. debugging a build failure, tuning search_logs), call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below.
 
-For task-specific guidance beyond these pitfalls, call list_skills to see available guides, then load_skill to read one.
+Authorization: Tools available depend on the scopes granted to the configured API token. A 401 response from a tool means the token lacks the required scope for that operation.
 
 Common pitfalls:
 
@@ -95,7 +99,7 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 		Name:    "buildkite-mcp-server",
 		Version: version,
 	}, &mcp.ServerOptions{
-		Instructions: buildkiteServerInstructions,
+		Instructions: BuildkiteServerInstructions,
 	})
 
 	log.Info().Str("version", version).Msg("Starting Buildkite MCP server")
