@@ -224,7 +224,7 @@ func TestSearchLogsHandler_SeekStart(t *testing.T) {
 		JobID:        "job-456",
 	}
 
-	search := func(seekStart int) []SearchResult {
+	search := func(seekStart int) []TerseSearchResult {
 		params := SearchLogsParams{
 			JobLogsBaseParams: baseParams,
 			Pattern:           "test.*",
@@ -237,7 +237,7 @@ func TestSearchLogsHandler_SeekStart(t *testing.T) {
 
 		textContent := result.Content[0].(*mcp.TextContent)
 		var resp struct {
-			Results []SearchResult `json:"results"`
+			Results []TerseSearchResult `json:"results"`
 		}
 		assert.NoError(json.Unmarshal([]byte(textContent.Text), &resp))
 		return resp.Results
@@ -246,14 +246,61 @@ func TestSearchLogsHandler_SeekStart(t *testing.T) {
 	// Without seek_start, a reverse search matches all three "test.*" rows.
 	all := search(0)
 	assert.Len(all, 3)
-	assert.Equal(int64(4), all[0].Match.RowNumber)
+	assert.Equal(int64(4), all[0].Match.RN)
 
 	// With seek_start: 3, the search should start at row 3 and go backwards,
 	// so the match at row 4 (after the seek point) must be excluded.
 	seeked := search(3)
 	assert.Len(seeked, 2)
-	assert.Equal(int64(3), seeked[0].Match.RowNumber)
-	assert.Equal(int64(2), seeked[1].Match.RowNumber)
+	assert.Equal(int64(3), seeked[0].Match.RN)
+	assert.Equal(int64(2), seeked[1].Match.RN)
+}
+
+// TestSearchLogsHandler_TerseFormat is a regression test for search_logs
+// returning the library's raw SearchResult (content/row_number/timestamp,
+// plus undocumented flags/group fields) instead of the {ts,c,rn} format
+// documented in debug-logs-guide.md and in the tool's own description.
+func TestSearchLogsHandler_TerseFormat(t *testing.T) {
+	assert := require.New(t)
+
+	testFile := t.TempDir() + "/terse_format.parquet"
+	writeTestParquetFile(t, testFile, []string{
+		"setup phase started",          // row 0
+		"test failed: assertion error", // row 1
+	})
+
+	mockClient := &MockBuildkiteLogsClient{
+		NewReaderFunc: func(ctx context.Context, org, pipeline, build, job string, ttl time.Duration, forceRefresh bool) (*buildkitelogs.ParquetReader, error) {
+			return buildkitelogs.NewParquetReader(testFile), nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildkiteLogsClient: mockClient})
+	_, handler, _ := SearchLogs()
+
+	params := SearchLogsParams{
+		JobLogsBaseParams: JobLogsBaseParams{
+			OrgSlug:      "test-org",
+			PipelineSlug: "test-pipeline",
+			BuildNumber:  "123",
+			JobID:        "job-456",
+		},
+		Pattern: "test failed",
+	}
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), params)
+	assert.NoError(err)
+	text := result.Content[0].(*mcp.TextContent).Text
+
+	// The documented fields must be present under their terse names.
+	assert.Contains(text, `"rn":1`)
+	assert.Contains(text, `"c":"test failed: assertion error"`)
+
+	// The library's raw field names, and its extra undocumented fields,
+	// must not leak through.
+	for _, undocumented := range []string{"row_number", "content", "timestamp", "flags", "group"} {
+		assert.NotContains(text, `"`+undocumented+`"`)
+	}
 }
 
 func TestTailLogsHandler(t *testing.T) {
