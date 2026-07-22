@@ -22,11 +22,6 @@
   "platformAutomerge": true,
   "packageRules": [
     {
-      "description": "Group Buildkite dependencies",
-      "matchSourceUrls": ["https://github.com/buildkite/**"],
-      "groupName": "buildkite"
-    },
-    {
       "description": "Group Buildkite pipeline config",
       "matchFileNames": [".buildkite/**"],
       "groupName": "buildkite"
@@ -43,11 +38,13 @@
       "groupName": "golang-x"
     },
     {
-      "description": "Group test and dev tooling",
-      "matchPackageNames": [
-        "github.com/stretchr/testify",
-        "github.com/alecthomas/assert"
-      ],
+      "description": "Group Buildkite dependencies",
+      "matchSourceUrls": ["https://github.com/buildkite/**"],
+      "groupName": "buildkite"
+    },
+    {
+      "description": "Group testing dependencies",
+      "matchPackageNames": ["github.com/stretchr/testify"],
       "groupName": "testing"
     },
     {
