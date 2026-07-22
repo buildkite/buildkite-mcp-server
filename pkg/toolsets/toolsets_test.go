@@ -598,6 +598,30 @@ func TestIsValidToolset(t *testing.T) {
 	}
 }
 
+func TestIsToolsetEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		enabled  []string
+		toolset  string
+		expected bool
+	}{
+		{"all enables any toolset", []string{"all"}, "skills", true},
+		{"all enables an unrelated toolset", []string{"all"}, "logs", true},
+		{"exact match", []string{"builds"}, "builds", true},
+		{"not in list", []string{"builds"}, "logs", false},
+		{"present among several", []string{"builds", "logs", "annotations"}, "logs", true},
+		{"empty enabled list", []string{}, "builds", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert := require.New(t)
+			result := IsToolsetEnabled(tt.enabled, tt.toolset)
+			assert.Equal(tt.expected, result)
+		})
+	}
+}
+
 func TestValidateToolsets(t *testing.T) {
 	t.Run("all valid toolsets", func(t *testing.T) {
 		assert := require.New(t)

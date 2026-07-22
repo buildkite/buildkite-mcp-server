@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/toolsets"
@@ -62,27 +63,53 @@ func unauthorizedMiddleware(cb func()) mcp.Middleware {
 	}
 }
 
-// BuildkiteServerInstructions are the instructions sent to MCP clients describing
-// how to use this server's tools. Exported so other services embedding or
+// instructionSection is one paragraph of the server instructions, optionally
+// gated on a toolset being enabled. An empty toolset means always included.
+type instructionSection struct {
+	toolset string
+	text    string
+}
+
+var instructionSections = []instructionSection{
+	{text: "This is the Buildkite MCP Server. It provides access to the Buildkite CI/CD API, enabling you to manage and inspect pipelines, builds, jobs, logs, clusters, tests, artifacts, and annotations."},
+	{
+		toolset: toolsets.ToolsetUser,
+		text:    "Start here: Before using most tools, call user_token_organization to retrieve the organization slug. Nearly every other tool requires the org_slug parameter, and this call is the fastest way to discover it.",
+	},
+	{
+		toolset: toolsets.ToolsetSkills,
+		text:    "Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill (e.g. debugging a build failure, tuning search_logs), call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below.",
+	},
+	{text: "Authorization: Tools available depend on the scopes granted to the configured API token. A 401 response from a tool means the token lacks the required scope for that operation."},
+	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field."},
+	{
+		toolset: toolsets.ToolsetBuilds,
+		text:    "Job state \"broken\" means the job did not run because something inside the build prevented execution: an if conditional evaluated to false, a branch filter did not match, or an upstream dependency failed. It does not mean the job's command failed. Distinguish: broken = build configuration or dependencies prevented execution; failed = job ran but exited non-zero; skipped = external factor (e.g. a newer build superseded it). When both failed and broken jobs are present, investigate failed upstream jobs first.",
+	},
+	{
+		toolset: toolsets.ToolsetLogs,
+		text:    "Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.",
+	},
+	{
+		toolset: toolsets.ToolsetAnnotations,
+		text:    "Annotation scope: when creating an annotation with scope \"job\", job_id is required. If job_id is provided but scope is left as the default \"build\", the job_id is silently ignored.",
+	},
+}
+
+// BuildkiteServerInstructions builds the instructions sent to MCP clients
+// describing how to use this server's tools, including only the paragraphs
+// relevant to enabledToolsets. Exported so other services embedding or
 // re-implementing Buildkite MCP tools (e.g. custom/internal MCP servers) can
 // reuse the same guidance instead of maintaining their own copy.
-const BuildkiteServerInstructions = `This is the Buildkite MCP Server. It provides access to the Buildkite CI/CD API, enabling you to manage and inspect pipelines, builds, jobs, logs, clusters, tests, artifacts, and annotations.
-
-Start here: Before using most tools, call user_token_organization to retrieve the organization slug. Nearly every other tool requires the org_slug parameter, and this call is the fastest way to discover it.
-
-Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill (e.g. debugging a build failure, tuning search_logs), call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below.
-
-Authorization: Tools available depend on the scopes granted to the configured API token. A 401 response from a tool means the token lacks the required scope for that operation.
-
-Common pitfalls:
-
-build_number is a sequential integer string (e.g. "42"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field.
-
-Job state "broken" means the job did not run because something inside the build prevented execution: an if conditional evaluated to false, a branch filter did not match, or an upstream dependency failed. It does not mean the job's command failed. Distinguish: broken = build configuration or dependencies prevented execution; failed = job ran but exited non-zero; skipped = external factor (e.g. a newer build superseded it). When both failed and broken jobs are present, investigate failed upstream jobs first.
-
-Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.
-
-Annotation scope: when creating an annotation with scope "job", job_id is required. If job_id is provided but scope is left as the default "build", the job_id is silently ignored.`
+func BuildkiteServerInstructions(enabledToolsets []string) string {
+	parts := make([]string, 0, len(instructionSections))
+	for _, s := range instructionSections {
+		if s.toolset == "" || toolsets.IsToolsetEnabled(enabledToolsets, s.toolset) {
+			parts = append(parts, s.text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
 
 // NewMCPServer creates a new MCP server with the given configuration
 func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...ToolsetOption) *mcp.Server {
@@ -99,7 +126,7 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 		Name:    "buildkite-mcp-server",
 		Version: version,
 	}, &mcp.ServerOptions{
-		Instructions: BuildkiteServerInstructions,
+		Instructions: BuildkiteServerInstructions(cfg.EnabledToolsets),
 	})
 
 	log.Info().Str("version", version).Msg("Starting Buildkite MCP server")

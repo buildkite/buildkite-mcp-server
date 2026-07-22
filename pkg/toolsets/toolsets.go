@@ -122,14 +122,20 @@ func (tr *ToolsetRegistry) List() []string {
 	return names
 }
 
+// expandAllToolsets replaces the "all" sentinel with the full list of
+// registered toolset names; otherwise returns enabled unchanged.
+func (tr *ToolsetRegistry) expandAllToolsets(enabled []string) []string {
+	if slices.Contains(enabled, ToolsetAll) {
+		return tr.List()
+	}
+	return enabled
+}
+
 // GetEnabledTools returns tools from enabled toolsets, optionally filtering for read-only
 func (tr *ToolsetRegistry) GetEnabledTools(enabledToolsets []string, readOnlyMode bool) []ToolDefinition {
 	var tools []ToolDefinition
 
-	// If "all" is specified, enable all toolsets
-	if slices.Contains(enabledToolsets, "all") {
-		enabledToolsets = tr.List()
-	}
+	enabledToolsets = tr.expandAllToolsets(enabledToolsets)
 
 	for _, toolsetName := range enabledToolsets {
 		if toolset, exists := tr.toolsets[toolsetName]; exists {
@@ -192,10 +198,7 @@ func (tr *ToolsetRegistry) GetMetadata() []ToolsetMetadata {
 func (tr *ToolsetRegistry) GetRequiredScopes(enabledToolsets []string, readOnlyMode bool) []string {
 	scopeMap := make(map[string]bool)
 
-	// If "all" is specified, enable all toolsets
-	if slices.Contains(enabledToolsets, "all") {
-		enabledToolsets = tr.List()
-	}
+	enabledToolsets = tr.expandAllToolsets(enabledToolsets)
 
 	for _, toolsetName := range enabledToolsets {
 		if toolset, exists := tr.toolsets[toolsetName]; exists {
@@ -262,6 +265,12 @@ var ValidToolsets = []string{
 // IsValidToolset checks if a toolset name is valid
 func IsValidToolset(name string) bool {
 	return slices.Contains(ValidToolsets, name)
+}
+
+// IsToolsetEnabled reports whether name is enabled, treating ToolsetAll as a
+// wildcard that enables every toolset.
+func IsToolsetEnabled(enabled []string, name string) bool {
+	return slices.Contains(enabled, ToolsetAll) || slices.Contains(enabled, name)
 }
 
 // ValidateToolsets checks if all toolset names are valid
