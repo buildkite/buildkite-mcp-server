@@ -57,6 +57,16 @@ func TestGetBuildArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 }
 
+func TestGetBuildFailureSummaryArgsSchema(t *testing.T) {
+	s := schemaFor[GetBuildFailureSummaryArgs](t)
+	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, sortedRequired[GetBuildFailureSummaryArgs](t))
+
+	for _, opt := range []string{"log_tail", "max_jobs", "max_annotations", "max_test_runs", "max_failed_tests", "max_failed_tests_per_run", "include_logs", "include_annotations", "include_failed_tests", "include_failure_expanded"} {
+		require.Contains(t, s.Properties, opt)
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
 func TestGetPipelineArgsSchema(t *testing.T) {
 	req := sortedRequired[GetPipelineArgs](t)
 	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
