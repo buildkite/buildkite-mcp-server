@@ -96,6 +96,11 @@ func LoadSkill() (mcp.Tool, mcp.ToolHandlerFor[LoadSkillArgs, any], []string) {
 				}
 			}
 
+			span.SetAttributes(
+				attribute.String("skill_name", args.SkillName),
+				attribute.Bool("matched", match != nil),
+			)
+
 			if match == nil {
 				names := make([]string, len(skillRegistry))
 				for i := range skillRegistry {
