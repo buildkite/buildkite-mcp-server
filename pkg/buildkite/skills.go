@@ -8,6 +8,7 @@ import (
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type skill struct {
@@ -55,6 +56,8 @@ func ListSkills() (mcp.Tool, mcp.ToolHandlerFor[ListSkillsArgs, any], []string) 
 		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListSkillsArgs) (*mcp.CallToolResult, any, error) {
 			_, span := trace.Start(ctx, "buildkite.ListSkills")
 			defer span.End()
+
+			span.SetAttributes(attribute.String("query", args.Query))
 
 			results := []skillSummary{}
 			tokens := strings.Fields(strings.ToLower(args.Query))
