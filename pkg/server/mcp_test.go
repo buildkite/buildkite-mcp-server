@@ -15,6 +15,8 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		startHere        = "Start here:"
 		skillDiscovery   = "Skill discovery:"
 		authorization    = "Authorization:"
+		invalidToken     = "A 401 response means the token is invalid, expired, or revoked" //nolint:gosec // documentation assertion, not a credential
+		forbiddenAccess  = "A 403 response means the credentials were accepted but access was denied"
 		buildNumber      = "build_number is a sequential"
 		jobStateBroken   = `Job state "broken"`
 		logInvestigation = "Log investigation order:"
@@ -22,7 +24,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		failureSummary   = "Build failure investigation:"
 	)
 
-	always := []string{authorization, buildNumber}
+	always := []string{authorization, invalidToken, forbiddenAccess, buildNumber}
 
 	tests := []struct {
 		name     string
