@@ -41,6 +41,7 @@ func TestListAgents(t *testing.T) {
 			assert.Equal("agent-name", opts.Name)
 			assert.Equal("host-1", opts.Hostname)
 			assert.Equal("3.90.0", opts.Version)
+			assert.Equal("queue-id", opts.ClusterQueueID)
 			assert.Equal(2, opts.Page)
 			assert.Equal(50, opts.PerPage)
 
@@ -68,13 +69,14 @@ func TestListAgents(t *testing.T) {
 
 	request := createMCPRequest(t, map[string]any{})
 	result, _, err := handler(ctx, request, ListAgentsArgs{
-		OrgSlug:     "org",
-		Name:        "agent-name",
-		Hostname:    "host-1",
-		Version:     "3.90.0",
-		Page:        2,
-		PerPage:     50,
-		DetailLevel: "summary",
+		OrgSlug:        "org",
+		Name:           "agent-name",
+		Hostname:       "host-1",
+		Version:        "3.90.0",
+		ClusterQueueID: "queue-id",
+		Page:           2,
+		PerPage:        50,
+		DetailLevel:    "summary",
 	})
 	assert.NoError(err)
 

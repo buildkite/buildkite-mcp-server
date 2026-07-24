@@ -74,8 +74,8 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/buildkite/buildkite-logs v0.13.1 h1:KIdVP0OisatvZ6XA2123r/aQlQcdPMfHPyVzhwAwj1Y=
 github.com/buildkite/buildkite-logs v0.13.1/go.mod h1:lgSJ08tjx8Y63d/WLz5sO8jmobRoNslLkyy2SosDl3U=
-github.com/buildkite/go-buildkite/v5 v5.7.0 h1:UY2vlF5AceV7zqWUN+uU7bjEXgEFdKrwayvZ8bZgcj0=
-github.com/buildkite/go-buildkite/v5 v5.7.0/go.mod h1:a5uCFNQjMFxT7g4H4NDId+DRkfYBo+CqvryoDZRppPk=
+github.com/buildkite/go-buildkite/v5 v5.9.0 h1:R3T4zZPWdV0uZXPY62eUDKWKCxB8aP57flbOnVT0P9g=
+github.com/buildkite/go-buildkite/v5 v5.9.0/go.mod h1:a5uCFNQjMFxT7g4H4NDId+DRkfYBo+CqvryoDZRppPk=
 github.com/buildkite/roko v1.4.0 h1:DxixoCdpNqxu4/1lXrXbfsKbJSd7r1qoxtef/TT2J80=
 github.com/buildkite/roko v1.4.0/go.mod h1:0vbODqUFEcVf4v2xVXRfZZRsqJVsCCHTG/TBRByGK4E=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=
