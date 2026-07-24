@@ -235,17 +235,18 @@ func NewTool(tool mcp.Tool, register func(s *mcp.Server), scopes []string) ToolD
 }
 
 const (
-	ToolsetAll         = "all" // Special name to enable all toolsets
-	ToolsetClusters    = "clusters"
-	ToolsetAgents      = "agents"
-	ToolsetPipelines   = "pipelines"
-	ToolsetBuilds      = "builds"
-	ToolsetArtifacts   = "artifacts"
-	ToolsetLogs        = "logs"
-	ToolsetTests       = "tests"
-	ToolsetAnnotations = "annotations"
-	ToolsetUser        = "user"
-	ToolsetSkills      = "skills"
+	ToolsetAll            = "all" // Special name to enable all toolsets
+	ToolsetClusters       = "clusters"
+	ToolsetAgents         = "agents"
+	ToolsetPipelines      = "pipelines"
+	ToolsetBuilds         = "builds"
+	ToolsetArtifacts      = "artifacts"
+	ToolsetLogs           = "logs"
+	ToolsetTests          = "tests"
+	ToolsetAnnotations    = "annotations"
+	ToolsetInvestigations = "investigations"
+	ToolsetUser           = "user"
+	ToolsetSkills         = "skills"
 )
 
 var ValidToolsets = []string{
@@ -258,6 +259,7 @@ var ValidToolsets = []string{
 	ToolsetLogs,
 	ToolsetTests,
 	ToolsetAnnotations,
+	ToolsetInvestigations,
 	ToolsetUser,
 	ToolsetSkills,
 }
@@ -394,6 +396,13 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.ListAnnotations),
 				newToolDef(buildkite.CreateAnnotation),
+			},
+		},
+		ToolsetInvestigations: {
+			Name:        "Build Investigations",
+			Description: "Cross-domain tools for diagnosing Buildkite build failures",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.GetBuildFailureSummary),
 			},
 		},
 		ToolsetUser: {

@@ -583,6 +583,7 @@ func TestIsValidToolset(t *testing.T) {
 		{"valid toolset - logs", "logs", true},
 		{"valid toolset - tests", "tests", true},
 		{"valid toolset - annotations", "annotations", true},
+		{"valid toolset - investigations", "investigations", true},
 		{"valid toolset - user", "user", true},
 		{"valid toolset - skills", "skills", true},
 		{"invalid toolset", "invalid", false},
@@ -625,7 +626,7 @@ func TestIsToolsetEnabled(t *testing.T) {
 func TestValidateToolsets(t *testing.T) {
 	t.Run("all valid toolsets", func(t *testing.T) {
 		assert := require.New(t)
-		valid := []string{"all", "clusters", "pipelines"}
+		valid := []string{"all", "clusters", "pipelines", "investigations"}
 		err := ValidateToolsets(valid)
 		assert.NoError(err)
 	})
@@ -654,9 +655,15 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered
-	expectedToolsets := []string{"clusters", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "user", "skills"}
+	expectedToolsets := []string{"clusters", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
 	for _, name := range expectedToolsets {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
 	}
+
+	investigations, exists := registry.Get(ToolsetInvestigations)
+	assert.True(exists)
+	assert.Len(investigations.Tools, 1)
+	assert.Equal("get_build_failure_summary", investigations.Tools[0].Tool.Name)
+	assert.Equal([]string{"read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
 }

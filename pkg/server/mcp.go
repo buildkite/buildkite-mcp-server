@@ -86,6 +86,10 @@ var instructionSections = []instructionSection{
 	{text: "Authorization: Tools available depend on the scopes and organization access granted to the configured API token. A 401 response means the token is invalid, expired, or revoked and requires reauthentication. A 403 response means the credentials were accepted but access was denied, commonly because the token lacks a required scope or organization access, or the user lacks permission."},
 	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field."},
 	{
+		toolset: toolsets.ToolsetInvestigations,
+		text:    "Build failure investigation: start with get_build_failure_summary. It combines build state, failed and broken jobs, promised failures from running jobs, bounded log tails, relevant annotations, and failed tests in one response. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
+	},
+	{
 		toolset: toolsets.ToolsetBuilds,
 		text:    "Job state \"broken\" means the job did not run because something inside the build prevented execution: an if conditional evaluated to false, a branch filter did not match, or an upstream dependency failed. It does not mean the job's command failed. Distinguish: broken = build configuration or dependencies prevented execution; failed = job ran but exited non-zero; skipped = external factor (e.g. a newer build superseded it). When both failed and broken jobs are present, investigate failed upstream jobs first.",
 	},
