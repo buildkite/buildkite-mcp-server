@@ -16,13 +16,14 @@ type AgentsClient interface {
 }
 
 type ListAgentsArgs struct {
-	OrgSlug     string `json:"org_slug"`
-	Name        string `json:"name,omitempty"`
-	Hostname    string `json:"hostname,omitempty"`
-	Version     string `json:"version,omitempty"`
-	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
-	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
+	OrgSlug        string `json:"org_slug"`
+	Name           string `json:"name,omitempty"`
+	Hostname       string `json:"hostname,omitempty"`
+	Version        string `json:"version,omitempty"`
+	ClusterQueueID string `json:"cluster_queue_id,omitempty" jsonschema:"Filter agents by cluster queue ID (UUID)"`
+	Page           int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage        int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
+	DetailLevel    string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
 }
 
 type GetAgentArgs struct {
@@ -162,6 +163,7 @@ func ListAgents() (mcp.Tool, mcp.ToolHandlerFor[ListAgentsArgs, any], []string) 
 				attribute.String("name_filter", args.Name),
 				attribute.String("hostname_filter", args.Hostname),
 				attribute.String("version_filter", args.Version),
+				attribute.String("cluster_queue_id_filter", args.ClusterQueueID),
 				attribute.String("detail_level", args.DetailLevel),
 				attribute.Int("page", paginationParams.Page),
 				attribute.Int("per_page", paginationParams.PerPage),
@@ -169,10 +171,11 @@ func ListAgents() (mcp.Tool, mcp.ToolHandlerFor[ListAgentsArgs, any], []string) 
 
 			deps := DepsFromContext(ctx)
 			agents, resp, err := deps.AgentsClient.List(ctx, args.OrgSlug, &buildkite.AgentListOptions{
-				ListOptions: paginationParams,
-				Name:        args.Name,
-				Hostname:    args.Hostname,
-				Version:     args.Version,
+				ListOptions:    paginationParams,
+				Name:           args.Name,
+				Hostname:       args.Hostname,
+				Version:        args.Version,
+				ClusterQueueID: args.ClusterQueueID,
 			})
 			if err != nil {
 				return handleBuildkiteError(err)

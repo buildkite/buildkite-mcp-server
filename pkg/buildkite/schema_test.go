@@ -287,7 +287,7 @@ func TestListAgentsArgsSchema(t *testing.T) {
 	slices.Sort(req)
 	require.Equal(t, []string{"org_slug"}, req)
 
-	for _, opt := range []string{"name", "hostname", "version", "page", "per_page", "detail_level"} {
+	for _, opt := range []string{"name", "hostname", "version", "page", "per_page", "detail_level", "cluster_queue_id"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
 }

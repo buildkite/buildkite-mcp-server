@@ -422,7 +422,7 @@ func TestListJobs(t *testing.T) {
 					Items: []buildkite.Job{{
 						ID: "job-1", Name: "test", State: "failed", Command: "go test ./...",
 						CreatedAt: timestamp, StartedAt: timestamp, FinishedAt: timestamp,
-						Signal: intPtr(9), SignalReason: "agent_stop", Retried: true,
+						Signal: "9", SignalReason: "agent_stop", Retried: true,
 						RetriedInJobID: "job-2", RetriesCount: 1,
 						RetrySource:        &buildkite.JobRetrySource{JobID: "job-0", RetryType: "manual"},
 						SoftFailed:         true,
@@ -452,7 +452,7 @@ func TestListJobs(t *testing.T) {
 		assert.Equal(t, timestamp, job.CreatedAt)
 		assert.Equal(t, timestamp, job.StartedAt)
 		assert.Equal(t, timestamp, job.FinishedAt)
-		assert.Equal(t, intPtr(9), job.Signal)
+		assert.Equal(t, "9", job.Signal)
 		assert.Equal(t, "agent_stop", job.SignalReason)
 		assert.True(t, job.Retried)
 		assert.Equal(t, "job-2", job.RetriedInJobID)
