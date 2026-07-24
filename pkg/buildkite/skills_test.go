@@ -48,6 +48,30 @@ func TestListSkills(t *testing.T) {
 		textContent := getTextResult(t, result)
 		assert.JSONEq(`[]`, textContent.Text)
 	})
+
+	t.Run("multi-word query matches when all tokens appear out of order", func(t *testing.T) {
+		assert := require.New(t)
+
+		_, handler, _ := ListSkills()
+		request := createMCPRequest(t, map[string]any{"query": "debug build failure"})
+		result, _, err := handler(ctx, request, ListSkillsArgs{Query: "debug build failure"})
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.Contains(textContent.Text, "debug-logs-guide")
+	})
+
+	t.Run("multi-word query with one non-matching token returns empty list", func(t *testing.T) {
+		assert := require.New(t)
+
+		_, handler, _ := ListSkills()
+		request := createMCPRequest(t, map[string]any{"query": "debug nonexistent"})
+		result, _, err := handler(ctx, request, ListSkillsArgs{Query: "debug nonexistent"})
+		assert.NoError(err)
+
+		textContent := getTextResult(t, result)
+		assert.JSONEq(`[]`, textContent.Text)
+	})
 }
 
 func TestLoadSkill(t *testing.T) {
