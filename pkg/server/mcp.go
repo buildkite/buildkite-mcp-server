@@ -83,7 +83,7 @@ var instructionSections = []instructionSection{
 		toolset: toolsets.ToolsetSkills,
 		text:    "Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill (e.g. debugging a build failure, tuning search_logs), call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below.",
 	},
-	{text: "Authorization: Tools available depend on the scopes granted to the configured API token. A 401 response from a tool means the token lacks the required scope for that operation."},
+	{text: "Authorization: Tools available depend on the scopes and organization access granted to the configured API token. A 401 response means the token is invalid, expired, or revoked and requires reauthentication. A 403 response means the credentials were accepted but access was denied, commonly because the token lacks a required scope or organization access, or the user lacks permission."},
 	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field."},
 	{
 		toolset: toolsets.ToolsetBuilds,

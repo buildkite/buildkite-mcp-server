@@ -21,6 +21,22 @@ func TestHandleBuildkiteError_Unauthorized(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
+func TestHandleBuildkiteError_Forbidden(t *testing.T) {
+	errResp := &buildkite.ErrorResponse{
+		Response: &http.Response{StatusCode: http.StatusForbidden},
+		Message:  "Your access token doesn't have the read_suites scope",
+	}
+
+	result, data, err := handleBuildkiteError(errResp)
+
+	require.NoError(t, err)
+	require.Nil(t, data)
+	require.NotNil(t, result)
+	require.True(t, result.IsError)
+	textContent := getTextResult(t, result)
+	require.Equal(t, "Your access token doesn't have the read_suites scope", textContent.Text)
+}
+
 func TestHandleBuildkiteError_WithRawBody(t *testing.T) {
 	errResp := &buildkite.ErrorResponse{
 		Response: &http.Response{StatusCode: http.StatusUnprocessableEntity},
