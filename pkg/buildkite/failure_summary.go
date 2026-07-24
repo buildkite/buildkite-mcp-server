@@ -138,15 +138,19 @@ func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
 	}
 }
 
-func isFailureSummaryJob(job buildkite.Job) bool {
-	if job.State == "failed" || job.State == "broken" {
+func isPrimaryFailureSummaryJob(job buildkite.Job) bool {
+	if job.State == "failed" || job.State == "timed_out" {
 		return true
 	}
 	return job.State == "running" && job.PromisedExitStatus != nil && *job.PromisedExitStatus != 0
 }
 
+func isFailureSummaryJob(job buildkite.Job) bool {
+	return isPrimaryFailureSummaryJob(job) || job.State == "broken"
+}
+
 func shouldReadFailureLog(job buildkite.Job) bool {
-	return job.State == "failed" || (job.State == "running" && job.PromisedExitStatus != nil && *job.PromisedExitStatus != 0)
+	return isPrimaryFailureSummaryJob(job)
 }
 
 func failureSummaryJob(job buildkite.Job) FailureSummaryJob {
@@ -732,34 +736,56 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			result := BuildFailureSummary{Build: failureSummaryBuild(build)}
 
 			includeRetriedJobs := false
-			jobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+			primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
 				// The API's failed filter includes running jobs with a hard promised
 				// failure. Querying running separately can include promises covered by
 				// soft-fail or retry rules that do not put the build into failing.
-				State:              []string{"failed", "broken"},
+				State:              []string{"failed", "timed_out"},
 				IncludeRetriedJobs: &includeRetriedJobs,
-				PerPage:            100,
+				PerPage:            maxJobs + 1,
 			})
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
 
-			sourceJobs := make([]buildkite.Job, 0, min(len(jobsList.Items), maxJobs))
-			failureJobCount := 0
-			for _, job := range jobsList.Items {
-				if !isFailureSummaryJob(job) {
+			sourceJobs := make([]buildkite.Job, 0, maxJobs)
+			jobsTruncated := primaryJobsList.Links.Next != ""
+			for _, job := range primaryJobsList.Items {
+				if !isPrimaryFailureSummaryJob(job) {
 					continue
 				}
-				failureJobCount++
 				if len(sourceJobs) < maxJobs {
 					sourceJobs = append(sourceJobs, job)
+				} else {
+					jobsTruncated = true
+				}
+			}
+
+			remainingJobs := maxJobs - len(sourceJobs)
+			brokenJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              []string{"broken"},
+				IncludeRetriedJobs: &includeRetriedJobs,
+				PerPage:            remainingJobs + 1,
+			})
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+			jobsTruncated = jobsTruncated || brokenJobsList.Links.Next != ""
+			for _, job := range brokenJobsList.Items {
+				if !isFailureSummaryJob(job) || job.State != "broken" {
+					continue
+				}
+				if len(sourceJobs) < maxJobs {
+					sourceJobs = append(sourceJobs, job)
+				} else {
+					jobsTruncated = true
 				}
 			}
 			result.Jobs = make([]FailureSummaryJob, len(sourceJobs))
 			for i, job := range sourceJobs {
 				result.Jobs[i] = failureSummaryJob(job)
 			}
-			result.JobsTruncated = failureJobCount > maxJobs || jobsList.Links.Next != ""
+			result.JobsTruncated = jobsTruncated
 
 			if defaultTrue(args.IncludeLogs) && deps.BuildkiteLogsClient != nil {
 				if err := loadFailureLogs(ctx, deps.BuildkiteLogsClient, args, sourceJobs, result.Jobs, logTail); err != nil {
