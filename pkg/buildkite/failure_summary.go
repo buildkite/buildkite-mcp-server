@@ -45,13 +45,13 @@ type GetBuildFailureSummaryArgs struct {
 	OrgSlug                string `json:"org_slug"`
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`
-	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed or promised-failing job (default 50, max 200)"`
-	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum failed, broken, or promised-failing jobs to return (default 10, max 50)"`
+	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200)"`
+	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum terminal problem or downstream-failed jobs to return (default 10, max 50)"`
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to inspect (default 5, max 20)"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed test executions to return across all Test Engine runs (default 100, max 200)"`
 	MaxFailedTestsPerRun   int    `json:"max_failed_tests_per_run,omitempty" jsonschema:"Maximum failed test executions to return per Test Engine run (default 20, max 100)"`
-	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed and promised-failing jobs (default true)"`
+	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed, timed-out, canceled, and promised-failing jobs (default true)"`
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include failed Test Engine executions when the build has Test Engine runs (default true)"`
 	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded test failure details such as stack traces within the summary's bounded test-content budget"`
@@ -74,6 +74,7 @@ type FailureSummaryJob struct {
 	JobSummary
 	PromisedExitStatus   *int                     `json:"promised_exit_status,omitempty"`
 	PromisedExitStatusAt *buildkite.Timestamp     `json:"promised_exit_status_at,omitempty"`
+	ExpiredAt            *buildkite.Timestamp     `json:"expired_at,omitempty"`
 	LogTail              []FailureSummaryLogEntry `json:"log_tail,omitempty"`
 	LogTotalRows         int64                    `json:"log_total_rows,omitempty"`
 	LogTruncated         bool                     `json:"log_truncated,omitempty"`
@@ -139,18 +140,31 @@ func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
 }
 
 func isPrimaryFailureSummaryJob(job buildkite.Job) bool {
-	if job.State == "failed" || job.State == "timed_out" {
+	switch job.State {
+	case "failed", "timed_out", "expired":
 		return true
+	case "running":
+		return job.PromisedExitStatus != nil && *job.PromisedExitStatus != 0
+	default:
+		return false
 	}
-	return job.State == "running" && job.PromisedExitStatus != nil && *job.PromisedExitStatus != 0
+}
+
+func isSecondaryFailureSummaryJob(job buildkite.Job) bool {
+	switch job.State {
+	case "canceled", "broken", "waiting_failed", "blocked_failed", "unblocked_failed":
+		return true
+	default:
+		return false
+	}
 }
 
 func isFailureSummaryJob(job buildkite.Job) bool {
-	return isPrimaryFailureSummaryJob(job) || job.State == "broken"
+	return isPrimaryFailureSummaryJob(job) || isSecondaryFailureSummaryJob(job)
 }
 
 func shouldReadFailureLog(job buildkite.Job) bool {
-	return isPrimaryFailureSummaryJob(job)
+	return job.State == "canceled" || (job.State != "expired" && isPrimaryFailureSummaryJob(job))
 }
 
 func failureSummaryJob(job buildkite.Job) FailureSummaryJob {
@@ -158,6 +172,7 @@ func failureSummaryJob(job buildkite.Job) FailureSummaryJob {
 		JobSummary:           summarizeJob(job),
 		PromisedExitStatus:   job.PromisedExitStatus,
 		PromisedExitStatusAt: job.PromisedExitStatusAt,
+		ExpiredAt:            job.ExpiredAt,
 	}
 }
 
@@ -692,7 +707,7 @@ func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) e
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build_failure_summary",
-			Description: "Diagnose a Buildkite build failure in one call. Returns build state, failed and broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
+			Description: "Diagnose a Buildkite build failure in one call. Returns build state, terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build Failure Summary",
 				ReadOnlyHint: true,
@@ -740,7 +755,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				// The API's failed filter includes running jobs with a hard promised
 				// failure. Querying running separately can include promises covered by
 				// soft-fail or retry rules that do not put the build into failing.
-				State:              []string{"failed", "timed_out"},
+				State:              []string{"failed", "timed_out", "expired"},
 				IncludeRetriedJobs: &includeRetriedJobs,
 				PerPage:            maxJobs + 1,
 			})
@@ -762,17 +777,17 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			}
 
 			remainingJobs := maxJobs - len(sourceJobs)
-			brokenJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				State:              []string{"broken"},
+			secondaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              []string{"broken", "canceled", "waiting_failed", "blocked_failed", "unblocked_failed"},
 				IncludeRetriedJobs: &includeRetriedJobs,
 				PerPage:            remainingJobs + 1,
 			})
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
-			jobsTruncated = jobsTruncated || brokenJobsList.Links.Next != ""
-			for _, job := range brokenJobsList.Items {
-				if !isFailureSummaryJob(job) || job.State != "broken" {
+			jobsTruncated = jobsTruncated || secondaryJobsList.Links.Next != ""
+			for _, job := range secondaryJobsList.Items {
+				if !isSecondaryFailureSummaryJob(job) {
 					continue
 				}
 				if len(sourceJobs) < maxJobs {

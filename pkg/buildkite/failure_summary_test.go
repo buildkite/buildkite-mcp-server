@@ -64,7 +64,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 			require.False(t, *options.IncludeRetriedJobs)
 			switch options.State[0] {
 			case "failed":
-				require.Equal(t, []string{"failed", "timed_out"}, options.State)
+				require.Equal(t, []string{"failed", "timed_out", "expired"}, options.State)
 				require.Equal(t, defaultFailureSummaryJobs+1, options.PerPage)
 				return buildkite.JobsList{Items: []buildkite.Job{
 					{ID: "job-failed", Name: "compile", State: "failed", Command: "make build", ExitStatus: testPtr(1)},
@@ -72,7 +72,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 					{ID: "job-running", Name: "unrelated", State: "running"},
 				}}, &buildkite.Response{}, nil
 			case "broken":
-				require.Equal(t, []string{"broken"}, options.State)
+				require.Equal(t, []string{"broken", "canceled", "waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
 				require.Equal(t, defaultFailureSummaryJobs-1, options.PerPage)
 				return buildkite.JobsList{Items: []buildkite.Job{
 					{ID: "job-broken", Name: "deploy", State: "broken"},
@@ -222,13 +222,14 @@ func TestGetBuildFailureSummaryPrioritizesFailuresBeforeBrokenJobs(t *testing.T)
 		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
 			switch options.State[0] {
 			case "failed":
-				require.Equal(t, []string{"failed", "timed_out"}, options.State)
+				require.Equal(t, []string{"failed", "timed_out", "expired"}, options.State)
 				require.Equal(t, 3, options.PerPage)
 				return buildkite.JobsList{Items: []buildkite.Job{
 					{ID: "failed", State: "failed"},
 					{ID: "promised", State: "running", PromisedExitStatus: &promisedExitStatus},
 				}}, &buildkite.Response{}, nil
 			case "broken":
+				require.Equal(t, []string{"broken", "canceled", "waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
 				require.Equal(t, 1, options.PerPage)
 				return buildkite.JobsList{Items: []buildkite.Job{
 					{ID: "broken-1", State: "broken"},
@@ -267,7 +268,7 @@ func TestGetBuildFailureSummaryIncludesTimedOutJobAndLog(t *testing.T) {
 		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
 			switch options.State[0] {
 			case "failed":
-				require.Equal(t, []string{"failed", "timed_out"}, options.State)
+				require.Equal(t, []string{"failed", "timed_out", "expired"}, options.State)
 				return buildkite.JobsList{Items: []buildkite.Job{{ID: "timed-out", State: "timed_out"}}}, &buildkite.Response{}, nil
 			case "broken":
 				return buildkite.JobsList{}, &buildkite.Response{}, nil
@@ -299,6 +300,86 @@ func TestGetBuildFailureSummaryIncludesTimedOutJobAndLog(t *testing.T) {
 	require.Len(t, summary.Jobs, 1)
 	require.Equal(t, "timed_out", summary.Jobs[0].State)
 	require.Equal(t, []string{"running", "job timed out"}, []string{summary.Jobs[0].LogTail[0].C, summary.Jobs[0].LogTail[1].C})
+}
+
+func TestGetBuildFailureSummaryIncludesExpiredAndDownstreamFailedJobsWithoutLogs(t *testing.T) {
+	expiredAt := buildkite.NewTimestamp(time.Date(2026, time.July, 24, 1, 2, 3, 0, time.UTC))
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{}, nil
+		},
+	}
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			switch options.State[0] {
+			case "failed":
+				require.Equal(t, []string{"failed", "timed_out", "expired"}, options.State)
+				return buildkite.JobsList{Items: []buildkite.Job{{ID: "expired", State: "expired", ExpiredAt: expiredAt}}}, &buildkite.Response{}, nil
+			case "broken":
+				require.Equal(t, []string{"broken", "canceled", "waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
+				return buildkite.JobsList{Items: []buildkite.Job{{ID: "waiting", State: "waiting_failed"}}}, &buildkite.Response{}, nil
+			default:
+				return buildkite.JobsList{}, nil, fmt.Errorf("unexpected job states: %v", options.State)
+			}
+		},
+	}
+	logCalls := 0
+	logsClient := &MockBuildkiteLogsClient{
+		NewReaderFunc: func(context.Context, string, string, string, string, time.Duration, bool) (*buildkitelogs.ParquetReader, error) {
+			logCalls++
+			return nil, errors.New("unexpected log request")
+		},
+	}
+	include := false
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient: buildsClient, JobsClient: jobsClient, BuildkiteLogsClient: logsClient,
+	})
+
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		IncludeAnnotations: &include, IncludeFailedTests: &include,
+	})
+	require.NoError(t, err)
+
+	var summary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
+	require.Equal(t, []string{"expired", "waiting"}, []string{summary.Jobs[0].ID, summary.Jobs[1].ID})
+	require.NotNil(t, summary.Jobs[0].ExpiredAt)
+	require.Empty(t, summary.Jobs[0].LogTail)
+	require.Empty(t, summary.Jobs[1].LogTail)
+	require.Zero(t, logCalls)
+}
+
+func TestFailureSummaryJobClassification(t *testing.T) {
+	promisedExitStatus := 1
+	tests := []struct {
+		name      string
+		job       buildkite.Job
+		primary   bool
+		secondary bool
+		readLog   bool
+	}{
+		{name: "failed", job: buildkite.Job{State: "failed"}, primary: true, readLog: true},
+		{name: "timed out", job: buildkite.Job{State: "timed_out"}, primary: true, readLog: true},
+		{name: "expired", job: buildkite.Job{State: "expired"}, primary: true},
+		{name: "canceled", job: buildkite.Job{State: "canceled"}, secondary: true, readLog: true},
+		{name: "promised failure", job: buildkite.Job{State: "running", PromisedExitStatus: &promisedExitStatus}, primary: true, readLog: true},
+		{name: "broken", job: buildkite.Job{State: "broken"}, secondary: true},
+		{name: "waiting failed", job: buildkite.Job{State: "waiting_failed"}, secondary: true},
+		{name: "blocked failed", job: buildkite.Job{State: "blocked_failed"}, secondary: true},
+		{name: "unblocked failed", job: buildkite.Job{State: "unblocked_failed"}, secondary: true},
+		{name: "passed", job: buildkite.Job{State: "passed"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.primary, isPrimaryFailureSummaryJob(test.job))
+			require.Equal(t, test.secondary, isSecondaryFailureSummaryJob(test.job))
+			require.Equal(t, test.primary || test.secondary, isFailureSummaryJob(test.job))
+			require.Equal(t, test.readLog, shouldReadFailureLog(test.job))
+		})
+	}
 }
 
 func TestGetBuildFailureSummaryCanDisableOptionalSections(t *testing.T) {
