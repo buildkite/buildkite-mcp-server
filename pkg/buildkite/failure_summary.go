@@ -150,21 +150,21 @@ func isPrimaryFailureSummaryJob(job buildkite.Job) bool {
 	}
 }
 
-func isSecondaryFailureSummaryJob(job buildkite.Job) bool {
+func isCanceledFailureSummaryJob(job buildkite.Job) bool {
+	return job.State == "canceled"
+}
+
+func isDownstreamFailureSummaryJob(job buildkite.Job) bool {
 	switch job.State {
-	case "canceled", "broken", "waiting_failed", "blocked_failed", "unblocked_failed":
+	case "broken", "waiting_failed", "blocked_failed", "unblocked_failed":
 		return true
 	default:
 		return false
 	}
 }
 
-func isFailureSummaryJob(job buildkite.Job) bool {
-	return isPrimaryFailureSummaryJob(job) || isSecondaryFailureSummaryJob(job)
-}
-
 func shouldReadFailureLog(job buildkite.Job) bool {
-	return job.State == "canceled" || (job.State != "expired" && isPrimaryFailureSummaryJob(job))
+	return isCanceledFailureSummaryJob(job) || (job.State != "expired" && isPrimaryFailureSummaryJob(job))
 }
 
 func failureSummaryJob(job buildkite.Job) FailureSummaryJob {
@@ -777,17 +777,38 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			}
 
 			remainingJobs := maxJobs - len(sourceJobs)
-			secondaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				State:              []string{"broken", "canceled", "waiting_failed", "blocked_failed", "unblocked_failed"},
+			canceledJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              []string{"canceled"},
 				IncludeRetriedJobs: &includeRetriedJobs,
 				PerPage:            remainingJobs + 1,
 			})
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
-			jobsTruncated = jobsTruncated || secondaryJobsList.Links.Next != ""
-			for _, job := range secondaryJobsList.Items {
-				if !isSecondaryFailureSummaryJob(job) {
+			jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
+			for _, job := range canceledJobsList.Items {
+				if !isCanceledFailureSummaryJob(job) {
+					continue
+				}
+				if len(sourceJobs) < maxJobs {
+					sourceJobs = append(sourceJobs, job)
+				} else {
+					jobsTruncated = true
+				}
+			}
+
+			remainingJobs = maxJobs - len(sourceJobs)
+			downstreamJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
+				IncludeRetriedJobs: &includeRetriedJobs,
+				PerPage:            remainingJobs + 1,
+			})
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+			jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
+			for _, job := range downstreamJobsList.Items {
+				if !isDownstreamFailureSummaryJob(job) {
 					continue
 				}
 				if len(sourceJobs) < maxJobs {
