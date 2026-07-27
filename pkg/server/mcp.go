@@ -90,6 +90,10 @@ var instructionSections = []instructionSection{
 		text:    "Build failure investigation: start with get_build_failure_summary. It combines build state, failed and broken jobs, promised failures from running jobs, bounded log tails, relevant annotations, and failed tests in one response. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
 	},
 	{
+		toolset: toolsets.ToolsetPipelines,
+		text:    "Pipeline authoring: always check pipeline YAML with validate_pipeline before creating or updating a pipeline, or before committing changes to .buildkite/pipeline.yml. It validates against the official pipeline schema locally, requires no API token or scopes, and catches structural errors that would otherwise fail silently at upload time. A valid result does not guarantee runtime correctness (environment variable interpolation, plugin configuration, dynamically generated steps).",
+	},
+	{
 		toolset: toolsets.ToolsetBuilds,
 		text:    "Job state \"broken\" means the job did not run because something inside the build prevented execution: an if conditional evaluated to false, a branch filter did not match, or an upstream dependency failed. It does not mean the job's command failed. Distinguish: broken = build configuration or dependencies prevented execution; failed = job ran but exited non-zero; skipped = external factor (e.g. a newer build superseded it). When both failed and broken jobs are present, investigate failed upstream jobs first.",
 	},
