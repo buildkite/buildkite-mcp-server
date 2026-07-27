@@ -72,93 +72,107 @@ url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golan
 provenance = "github-attestations"
 
 [[tools.goreleaser]]
-version = "2.16.0"
+version = "2.17.0"
 backend = "aqua:goreleaser/goreleaser"
 
 [tools.goreleaser."platforms.linux-arm64"]
-checksum = "sha256:0102d974373fcdeb77042d1f5897caffa193be36620fdc6c1da43a01ef8e10d3"
-url = "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Linux_arm64.tar.gz"
+checksum = "sha256:75f93fc0e25d10d8535ffd0e4abcf39d6784a2467ba453d479ae513729a9ebbf"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.0/goreleaser_Linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/466714135"
 provenance = "github-attestations"
 
 [tools.goreleaser."platforms.linux-arm64-musl"]
-checksum = "sha256:0102d974373fcdeb77042d1f5897caffa193be36620fdc6c1da43a01ef8e10d3"
-url = "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Linux_arm64.tar.gz"
+checksum = "sha256:75f93fc0e25d10d8535ffd0e4abcf39d6784a2467ba453d479ae513729a9ebbf"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.0/goreleaser_Linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/466714135"
 provenance = "github-attestations"
 
 [tools.goreleaser."platforms.linux-x64"]
-checksum = "sha256:eaae05b5eba07533bd0f06846b68c808399504784df00c62eb219541fc04e5e2"
-url = "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Linux_x86_64.tar.gz"
+checksum = "sha256:dde10e2d5a13cef969c0eec00c74f359c0ac306d702b1bd291ad9337b4e54c1d"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.0/goreleaser_Linux_x86_64.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/466714136"
 provenance = "github-attestations"
 
 [tools.goreleaser."platforms.linux-x64-musl"]
-checksum = "sha256:eaae05b5eba07533bd0f06846b68c808399504784df00c62eb219541fc04e5e2"
-url = "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Linux_x86_64.tar.gz"
+checksum = "sha256:dde10e2d5a13cef969c0eec00c74f359c0ac306d702b1bd291ad9337b4e54c1d"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.0/goreleaser_Linux_x86_64.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/466714136"
 provenance = "github-attestations"
 
 [tools.goreleaser."platforms.macos-arm64"]
-checksum = "sha256:6a102e4d588fd3553a9ac7321ca6023a9f205843f4861ca35bd337dfa9e72ece"
-url = "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Darwin_all.tar.gz"
+checksum = "sha256:4106ff54bcaa1d387d3317047169da28aed6ce36c8e035e76cf35ba349db06ef"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.0/goreleaser_Darwin_all.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/466714160"
 provenance = "github-attestations"
 
 [tools.goreleaser."platforms.macos-x64"]
-checksum = "sha256:6a102e4d588fd3553a9ac7321ca6023a9f205843f4861ca35bd337dfa9e72ece"
-url = "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Darwin_all.tar.gz"
+checksum = "sha256:4106ff54bcaa1d387d3317047169da28aed6ce36c8e035e76cf35ba349db06ef"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.0/goreleaser_Darwin_all.tar.gz"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/466714160"
 provenance = "github-attestations"
 
 [tools.goreleaser."platforms.windows-x64"]
-checksum = "sha256:6fe5eda11f0bcac8069aff3ef3dcb0b11816c9e95f89773595564697a5278bc9"
-url = "https://github.com/goreleaser/goreleaser/releases/download/v2.16.0/goreleaser_Windows_x86_64.zip"
+checksum = "sha256:427f2928d798f9affa5ddd2412e354f90ecf9e2ba541b3e0767570eb1121482b"
+url = "https://github.com/goreleaser/goreleaser/releases/download/v2.17.0/goreleaser_Windows_x86_64.zip"
+url_api = "https://api.github.com/repos/goreleaser/goreleaser/releases/assets/466714129"
 provenance = "github-attestations"
 
 [[tools.ko]]
-version = "0.18.1"
+version = "0.19.1"
 backend = "aqua:ko-build/ko"
 
 [tools.ko."platforms.linux-arm64"]
-checksum = "sha256:9a26698876892128952fa3d038a4e99bea961d0d225865c60474b79e3db12e99"
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/ko_0.18.1_Linux_arm64.tar.gz"
+checksum = "sha256:4099b2d1170d3b8a70e049237462efc2dd14d5fa30e9d2e5e108fb4f778cdd3f"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171819"
 
 [tools.ko."platforms.linux-arm64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/multiple.intoto.jsonl"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [tools.ko."platforms.linux-arm64-musl"]
-checksum = "sha256:9a26698876892128952fa3d038a4e99bea961d0d225865c60474b79e3db12e99"
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/ko_0.18.1_Linux_arm64.tar.gz"
+checksum = "sha256:4099b2d1170d3b8a70e049237462efc2dd14d5fa30e9d2e5e108fb4f778cdd3f"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171819"
 
 [tools.ko."platforms.linux-arm64-musl".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/multiple.intoto.jsonl"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [tools.ko."platforms.linux-x64"]
-checksum = "sha256:048ab11818089a43b7b74bc554494a79a3fd0d9822c061142e5cd3cf8b30cb27"
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/ko_0.18.1_Linux_x86_64.tar.gz"
+checksum = "sha256:635ac6ea3fd376c935fee597fbb29ab2c2449f49ef1655085fe3aa9c25fed7a5"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_x86_64.tar.gz"
+url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171792"
 
 [tools.ko."platforms.linux-x64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/multiple.intoto.jsonl"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [tools.ko."platforms.linux-x64-musl"]
-checksum = "sha256:048ab11818089a43b7b74bc554494a79a3fd0d9822c061142e5cd3cf8b30cb27"
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/ko_0.18.1_Linux_x86_64.tar.gz"
+checksum = "sha256:635ac6ea3fd376c935fee597fbb29ab2c2449f49ef1655085fe3aa9c25fed7a5"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_x86_64.tar.gz"
+url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171792"
 
 [tools.ko."platforms.linux-x64-musl".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/multiple.intoto.jsonl"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [tools.ko."platforms.macos-arm64"]
-checksum = "sha256:752a639e0fbc013a35a43974b5ed87e7008bc2aee4952dfd2cc19f0013205492"
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/ko_0.18.1_Darwin_arm64.tar.gz"
+checksum = "sha256:a1338c4140c8c94e789733e21b161a3de177b467cd3c388b634fe1a869574509"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171820"
 
 [tools.ko."platforms.macos-arm64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/multiple.intoto.jsonl"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [tools.ko."platforms.macos-x64"]
-checksum = "sha256:0e0dd8fddbefebb8572ece4dca8f07a7472de862fedd7e9845fd9d651e0d5dbe"
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/ko_0.18.1_Darwin_x86_64.tar.gz"
+checksum = "sha256:1b4ed52a5e506a55b085c7f106eb743ee756c776cc90fa232a539a47ad665310"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Darwin_x86_64.tar.gz"
+url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171805"
 
 [tools.ko."platforms.macos-x64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/multiple.intoto.jsonl"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [tools.ko."platforms.windows-x64"]
-checksum = "sha256:d15c5e391279a2222d4d659ac53047e08d70e21fea54b2133f0a5c25a1f1f694"
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/ko_0.18.1_Windows_x86_64.tar.gz"
+checksum = "sha256:f70b0c9ea1874e81358a1886d478ebee9eb17d4f07e8dcaa779c4250a2aaea70"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Windows_x86_64.tar.gz"
+url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171790"
 
 [tools.ko."platforms.windows-x64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.18.1/multiple.intoto.jsonl"
+url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
