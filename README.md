@@ -1,5 +1,7 @@
 # buildkite-mcp-server
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fbuildkite%2Fbuildkite-mcp-server.svg)](https://mcptoplist.com/server/glama%2Fbuildkite%2Fbuildkite-mcp-server)
+
 [![Build status](https://badge.buildkite.com/79fefd75bc7f1898fb35249f7ebd8541a99beef6776e7da1b4.svg?branch=main)](https://buildkite.com/buildkite/buildkite-mcp-server)
 
 > **[Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server exposing Buildkite data (pipelines, builds, jobs, tests) to AI tooling and editors.**
