@@ -17,10 +17,10 @@ steps:
             - organization_id
             - organization_slug
             - pipeline_slug
-      - aws-ssm#v1.0.0:
+      - aws-ssm#v1.1.0:
           parameters:
             GITHUB_USER: /pipelines/buildkite/buildkite-mcp-server-release/github-user
             GITHUB_TOKEN: /pipelines/buildkite/buildkite-mcp-server-release/github-token
             DOCKERHUB_PASSWORD: /pipelines/buildkite/buildkite-mcp-server-release/dockerhub-password
             DOCKERHUB_USER: /pipelines/buildkite/buildkite-mcp-server-release/dockerhub-user
-      - mise#v1.1.1: ~
+      - mise#v1.1.5: ~
