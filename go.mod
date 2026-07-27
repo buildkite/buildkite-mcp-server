@@ -6,11 +6,13 @@ require (
 	github.com/alecthomas/kong v1.16.0
 	github.com/buildkite/buildkite-logs v0.13.1
 	github.com/buildkite/go-buildkite/v5 v5.7.0
+	github.com/goccy/go-yaml v1.17.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/mattn/go-isatty v0.0.23
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/rs/zerolog v1.35.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0
 	go.opentelemetry.io/otel v1.44.0
@@ -19,6 +21,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
 	golang.org/x/net v0.57.0
+	golang.org/x/text v0.40.0
 )
 
 require (
@@ -82,7 +85,6 @@ require (
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 	google.golang.org/api v0.288.0 // indirect
