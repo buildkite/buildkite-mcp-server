@@ -33,7 +33,7 @@ var (
 		BaseURL               string            `help:"The base URL of the Buildkite API to use." env:"BUILDKITE_BASE_URL" default:"https://api.buildkite.com/"`
 		CacheURL              string            `help:"The blob storage URL for job logs cache." env:"BKLOG_CACHE_URL"`
 		MaxLogBytes           int64             `help:"Maximum log size in bytes. Set to 0 to disable the limit." env:"BKLOG_MAX_LOG_BYTES" default:"104857600"`
-		FailureSummaryMaxJobs int               `help:"Maximum number of problem jobs diagnosed by one failure summary request." name:"failure-summary-max-jobs" env:"BUILDKITE_FAILURE_SUMMARY_MAX_JOBS" default:"10"`
+		FailureSummaryMaxJobs int               `help:"Maximum number of problem jobs diagnosed by one failure summary request (default 10, hard max 50; the server may enforce a lower maximum)." name:"failure-summary-max-jobs" env:"BUILDKITE_FAILURE_SUMMARY_MAX_JOBS" default:"10"`
 		MaxLogLineBytes       int               `help:"Maximum log line length in bytes to parse." env:"BKLOG_MAX_LOG_LINE_BYTES" default:"1048576"`
 		Debug                 bool              `help:"Enable debug mode." env:"DEBUG"`
 		OTELExporter          string            `help:"OpenTelemetry exporter to enable. Options are 'http/protobuf', 'grpc', or 'noop'." enum:"http/protobuf, grpc, noop" env:"OTEL_EXPORTER_OTLP_PROTOCOL" default:"noop"`
