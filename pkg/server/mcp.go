@@ -138,6 +138,11 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 		Version: version,
 	}, &mcp.ServerOptions{
 		Instructions: BuildkiteServerInstructions(cfg.EnabledToolsets, cfg.ReadOnly),
+		// A non-nil empty Capabilities stops the SDK from advertising the
+		// deprecated (as of MCP 2026-07-28) logging capability by default.
+		// Tool, prompt, and resource capabilities are still inferred as they
+		// are registered.
+		Capabilities: &mcp.ServerCapabilities{},
 	})
 
 	log.Info().Str("version", version).Msg("Starting Buildkite MCP server")
