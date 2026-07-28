@@ -6,6 +6,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// FailureSummaryConfig controls server-side resource limits for failure summaries.
+type FailureSummaryConfig struct {
+	MaxJobs int
+}
+
 // ToolDependencies holds all client interfaces needed by tool handlers.
 type ToolDependencies struct {
 	BuildsClient            BuildsClient
@@ -24,6 +29,7 @@ type ToolDependencies struct {
 	TestExecutionsClient    TestExecutionsClient
 	TestsClient             TestsClient
 	BuildkiteLogsClient     BuildkiteLogsClient
+	FailureSummary          FailureSummaryConfig
 }
 
 type contextKey struct{}

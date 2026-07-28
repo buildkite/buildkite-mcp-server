@@ -46,7 +46,7 @@ type GetBuildFailureSummaryArgs struct {
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`
 	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200)"`
-	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum terminal problem or downstream-failed jobs to return (default 10, max 50)"`
+	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum terminal problem or downstream-failed jobs to return (default 10, server may enforce a lower maximum, absolute max 50)"`
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to inspect (default 5, max 20)"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed test executions to return across all Test Engine runs (default 100, max 200)"`
@@ -106,6 +106,7 @@ type FailureSummaryTestRun struct {
 type BuildFailureSummary struct {
 	Build                BuildFailureSummaryBuild   `json:"build"`
 	Jobs                 []FailureSummaryJob        `json:"jobs"`
+	JobLimit             int                        `json:"job_limit"`
 	JobsTruncated        bool                       `json:"jobs_truncated,omitempty"`
 	Annotations          []FailureSummaryAnnotation `json:"annotations,omitempty"`
 	AnnotationsTruncated bool                       `json:"annotations_truncated,omitempty"`
@@ -127,6 +128,14 @@ func boundedValue(value, defaultValue, maxValue int) int {
 		return defaultValue
 	}
 	return min(value, maxValue)
+}
+
+func boundedFailureSummaryJobs(value, configuredMax int) int {
+	if configuredMax <= 0 {
+		configuredMax = defaultFailureSummaryJobs
+	}
+	configuredMax = min(configuredMax, maxFailureSummaryJobs)
+	return boundedValue(value, min(defaultFailureSummaryJobs, configuredMax), configuredMax)
 }
 
 func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
@@ -716,8 +725,9 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			ctx, span := trace.Start(ctx, "buildkite.GetBuildFailureSummary")
 			defer span.End()
 
+			deps := DepsFromContext(ctx)
 			logTail := boundedValue(args.LogTail, defaultFailureSummaryLogTail, maxFailureSummaryLogTail)
-			maxJobs := boundedValue(args.MaxJobs, defaultFailureSummaryJobs, maxFailureSummaryJobs)
+			maxJobs := boundedFailureSummaryJobs(args.MaxJobs, deps.FailureSummary.MaxJobs)
 			maxAnnotations := boundedValue(args.MaxAnnotations, defaultFailureSummaryAnnotations, maxFailureSummaryAnnotations)
 			maxTestRuns := boundedValue(args.MaxTestRuns, defaultFailureSummaryTestRuns, maxFailureSummaryTestRuns)
 			maxFailedTestsPerRun := boundedValue(args.MaxFailedTestsPerRun, defaultFailureSummaryTestsPerRun, maxFailureSummaryTestsPerRun)
@@ -736,7 +746,6 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
 			)
 
-			deps := DepsFromContext(ctx)
 			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
 				BuildsListOptions: buildkite.BuildsListOptions{
 					ExcludeJobs:     true,
@@ -748,7 +757,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				return handleBuildkiteError(err)
 			}
 
-			result := BuildFailureSummary{Build: failureSummaryBuild(build)}
+			result := BuildFailureSummary{Build: failureSummaryBuild(build), JobLimit: maxJobs}
 
 			includeRetriedJobs := false
 			primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
@@ -777,44 +786,48 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			}
 
 			remainingJobs := maxJobs - len(sourceJobs)
-			canceledJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				State:              []string{"canceled"},
-				IncludeRetriedJobs: &includeRetriedJobs,
-				PerPage:            remainingJobs + 1,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
-			jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
-			for _, job := range canceledJobsList.Items {
-				if !isCanceledFailureSummaryJob(job) {
-					continue
+			if remainingJobs > 0 || !jobsTruncated {
+				canceledJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+					State:              []string{"canceled"},
+					IncludeRetriedJobs: &includeRetriedJobs,
+					PerPage:            remainingJobs + 1,
+				})
+				if listErr != nil {
+					return handleBuildkiteError(listErr)
 				}
-				if len(sourceJobs) < maxJobs {
-					sourceJobs = append(sourceJobs, job)
-				} else {
-					jobsTruncated = true
+				jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
+				for _, job := range canceledJobsList.Items {
+					if !isCanceledFailureSummaryJob(job) {
+						continue
+					}
+					if len(sourceJobs) < maxJobs {
+						sourceJobs = append(sourceJobs, job)
+					} else {
+						jobsTruncated = true
+					}
 				}
 			}
 
 			remainingJobs = maxJobs - len(sourceJobs)
-			downstreamJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
-				IncludeRetriedJobs: &includeRetriedJobs,
-				PerPage:            remainingJobs + 1,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
-			jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
-			for _, job := range downstreamJobsList.Items {
-				if !isDownstreamFailureSummaryJob(job) {
-					continue
+			if remainingJobs > 0 || !jobsTruncated {
+				downstreamJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+					State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
+					IncludeRetriedJobs: &includeRetriedJobs,
+					PerPage:            remainingJobs + 1,
+				})
+				if listErr != nil {
+					return handleBuildkiteError(listErr)
 				}
-				if len(sourceJobs) < maxJobs {
-					sourceJobs = append(sourceJobs, job)
-				} else {
-					jobsTruncated = true
+				jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
+				for _, job := range downstreamJobsList.Items {
+					if !isDownstreamFailureSummaryJob(job) {
+						continue
+					}
+					if len(sourceJobs) < maxJobs {
+						sourceJobs = append(sourceJobs, job)
+					} else {
+						jobsTruncated = true
+					}
 				}
 			}
 			result.Jobs = make([]FailureSummaryJob, len(sourceJobs))

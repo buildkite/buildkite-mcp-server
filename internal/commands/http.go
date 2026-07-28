@@ -44,6 +44,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		TestExecutionsClient:    globals.Client.TestRuns,
 		TestsClient:             globals.Client.Tests,
 		BuildkiteLogsClient:     globals.BuildkiteLogsClient,
+		FailureSummary:          globals.FailureSummary,
 	}
 
 	factory := server.NewPerRequestServerFactory(globals.Version, deps, c.EnabledToolsets, c.ReadOnly)
