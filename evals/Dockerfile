@@ -1,6 +1,6 @@
 # Build the Buildkite MCP server from this repo's source, so the eval exercises
 # the code under review rather than a published release.
-ARG GO_VERSION="1.25"
+ARG GO_VERSION="1.26"
 FROM golang:${GO_VERSION} AS mcp-builder
 WORKDIR /src
 # Cache module downloads separately from the source.
