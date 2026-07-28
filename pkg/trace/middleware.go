@@ -2,9 +2,7 @@ package trace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"reflect"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
@@ -75,45 +73,20 @@ func NewMiddleware() mcp.Middleware {
 	}
 }
 
+// clientInfoRequest matches the SDK's typed ServerRequest.ClientInfo
+// accessor, which is defined for every ServerRequest[P] instantiation but not
+// exposed on the generic mcp.Request interface.
+type clientInfoRequest interface {
+	ClientInfo() *mcp.Implementation
+}
+
 // clientInfo returns the client identity for a request. Clients speaking
 // protocol >= 2026-07-28 carry it in each request's _meta (there is no
 // initialize handshake); older clients fall back to the session-level
-// InitializeParams. This mirrors the SDK's typed ServerRequest.ClientInfo
-// accessor, which is not reachable from generic middleware.
+// InitializeParams. The SDK accessor handles both, plus nil params.
 func clientInfo(req mcp.Request) *mcp.Implementation {
-	if m := requestMeta(req); m != nil {
-		if raw, ok := m[mcp.MetaKeyClientInfo]; ok && raw != nil {
-			if impl, ok := raw.(*mcp.Implementation); ok {
-				return impl
-			}
-			// After wire transit the value is a generic JSON map; remarshal
-			// it into the typed form.
-			if b, err := json.Marshal(raw); err == nil {
-				var impl mcp.Implementation
-				if json.Unmarshal(b, &impl) == nil {
-					return &impl
-				}
-			}
-		}
-	}
-	if ss, ok := req.GetSession().(*mcp.ServerSession); ok {
-		if ip := ss.InitializeParams(); ip != nil {
-			return ip.ClientInfo
-		}
+	if r, ok := req.(clientInfoRequest); ok {
+		return r.ClientInfo()
 	}
 	return nil
-}
-
-// requestMeta returns the request params' _meta map, or nil. Params
-// implementations promote GetMeta from an embedded map field, so a typed-nil
-// pointer inside the interface must be guarded before calling it.
-func requestMeta(req mcp.Request) map[string]any {
-	params := req.GetParams()
-	if params == nil {
-		return nil
-	}
-	if v := reflect.ValueOf(params); v.Kind() == reflect.Pointer && v.IsNil() {
-		return nil
-	}
-	return params.GetMeta()
 }
