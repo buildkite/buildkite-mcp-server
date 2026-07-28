@@ -17,6 +17,7 @@ type Globals struct {
 	Client              *gobuildkite.Client
 	HTTPClient          *http.Client
 	BuildkiteLogsClient buildkite.BuildkiteLogsClient
+	FailureSummary      buildkite.FailureSummaryConfig
 	HeaderPassthrough   *headerpassthrough.Config
 	Version             string
 }
