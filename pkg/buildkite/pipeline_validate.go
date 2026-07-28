@@ -120,6 +120,12 @@ func validatePipelineYAML(pipelineYAML string) (ValidatePipelineResult, error) {
 		}), nil
 	}
 
+	const maxPipelineYAMLBytes = 1 << 20 // 1 MiB
+	if len(pipelineYAML) > maxPipelineYAMLBytes {
+		return invalidPipelineResult([]PipelineValidationError{
+			{Path: "/", Message: fmt.Sprintf("pipeline YAML is too large (%d bytes); maximum is %d bytes", len(pipelineYAML), maxPipelineYAMLBytes)},
+		}), nil
+	}
 	jsonBytes, err := yaml.YAMLToJSON([]byte(pipelineYAML))
 	if err != nil {
 		return invalidPipelineResult([]PipelineValidationError{
