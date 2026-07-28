@@ -4,18 +4,19 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
-	"github.com/goccy/go-yaml"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
+	"gopkg.in/yaml.v3"
 )
 
 // pipelineSchemaJSON is a pinned copy of the Buildkite pipeline JSON schema
@@ -30,6 +31,12 @@ var pipelineSchemaJSON []byte
 // deeply broken pipeline (the schema makes heavy use of anyOf, which fans out
 // into many leaf errors) cannot flood the agent's context.
 const maxValidationErrors = 20
+
+// maxCollectedValidationErrors bounds how many leaf errors are gathered while
+// walking the validation error tree, so a pathological document cannot force
+// a huge intermediate allocation before truncation. When collection stops at
+// this cap, error_count reports the cap rather than the true total.
+const maxCollectedValidationErrors = 200
 
 // validationCaveats is returned with every result so an agent does not
 // over-trust a passing schema check.
@@ -74,8 +81,12 @@ type ValidatePipelineResult struct {
 }
 
 // collectLeafErrors walks the validation error tree and appends leaf causes,
-// which carry the most specific violation messages.
+// which carry the most specific violation messages. Collection stops once
+// maxCollectedValidationErrors have been gathered.
 func collectLeafErrors(ve *jsonschema.ValidationError, printer *message.Printer, out []PipelineValidationError) []PipelineValidationError {
+	if len(out) >= maxCollectedValidationErrors {
+		return out
+	}
 	if len(ve.Causes) == 0 {
 		out = append(out, PipelineValidationError{
 			Path:    "/" + strings.Join(ve.InstanceLocation, "/"),
@@ -126,10 +137,22 @@ func validatePipelineYAML(pipelineYAML string) (ValidatePipelineResult, error) {
 			{Path: "/", Message: fmt.Sprintf("pipeline YAML is too large (%d bytes); maximum is %d bytes", len(pipelineYAML), maxPipelineYAMLBytes)},
 		}), nil
 	}
-	jsonBytes, err := yaml.YAMLToJSON([]byte(pipelineYAML))
-	if err != nil {
+	// yaml.v3 bounds alias expansion during decode (it rejects documents
+	// with excessive aliasing), so a small source document cannot
+	// materialize an arbitrarily large structure (billion-laughs).
+	var doc any
+	if err := yaml.Unmarshal([]byte(pipelineYAML), &doc); err != nil {
 		return invalidPipelineResult([]PipelineValidationError{
 			{Path: "/", Message: fmt.Sprintf("invalid YAML syntax: %v", err)},
+		}), nil
+	}
+
+	// Round-trip through JSON to normalize YAML-specific types (integers,
+	// timestamps, binary) into the JSON value types the validator expects.
+	jsonBytes, err := json.Marshal(doc)
+	if err != nil {
+		return invalidPipelineResult([]PipelineValidationError{
+			{Path: "/", Message: fmt.Sprintf("pipeline is not representable as JSON: %v", err)},
 		}), nil
 	}
 

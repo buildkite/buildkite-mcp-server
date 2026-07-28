@@ -91,7 +91,7 @@ var instructionSections = []instructionSection{
 	},
 	{
 		toolset: toolsets.ToolsetPipelines,
-		text:    "Pipeline authoring: always check pipeline YAML with validate_pipeline before creating or updating a pipeline, or before committing changes to .buildkite/pipeline.yml. It validates against the official pipeline schema locally, requires no API token or scopes, and catches structural errors that would otherwise fail silently at upload time. A valid result does not guarantee runtime correctness (environment variable interpolation, plugin configuration, dynamically generated steps).",
+		text:    "Pipeline authoring: always check pipeline YAML with validate_pipeline before creating or updating a pipeline, or before committing changes to .buildkite/pipeline.yml. It validates against the official pipeline schema locally — the call itself never contacts the Buildkite API and works regardless of the configured token's scopes — and catches structural errors that would otherwise fail silently at upload time. A valid result does not guarantee runtime correctness (environment variable interpolation, plugin configuration, dynamically generated steps).",
 	},
 	{
 		toolset: toolsets.ToolsetBuilds,

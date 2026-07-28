@@ -107,6 +107,44 @@ steps:
 		assert.Contains(result.Errors[0].Message, "empty")
 	})
 
+	t.Run("legitimate anchors and aliases are allowed", func(t *testing.T) {
+		assert := require.New(t)
+
+		result, err := validatePipelineYAML(`
+steps:
+  - label: test
+    command: go test ./...
+    plugins: &plugins
+      - docker#v5.0.0:
+          image: golang:1.24
+  - label: lint
+    command: make lint
+    plugins: *plugins
+`)
+		assert.NoError(err)
+		assert.True(result.Valid)
+	})
+
+	t.Run("nested alias expansion is rejected", func(t *testing.T) {
+		assert := require.New(t)
+
+		// Billion-laughs style document: ~200 bytes of source that would
+		// materialize to over 10 MB if aliases expanded unboundedly, with
+		// each additional level multiplying the size by 10.
+		result, err := validatePipelineYAML(`
+a: &a ["x","x","x","x","x","x","x","x","x","x"]
+b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a,*a]
+c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b,*b]
+d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c,*c]
+e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d,*d]
+steps: [*e]
+`)
+		assert.NoError(err)
+		assert.False(result.Valid)
+		assert.Len(result.Errors, 1)
+		assert.Contains(result.Errors[0].Message, "excessive aliasing")
+	})
+
 	t.Run("invalid YAML syntax", func(t *testing.T) {
 		assert := require.New(t)
 
