@@ -1,0 +1,14 @@
+{
+    "name": "pipeline",
+    "module": "index.ts",
+    "type": "module",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "^24",
+        "prettier": "^3.6",
+        "typescript": "^5"
+    },
+    "scripts": {
+        "build": "tsc"
+    }
+}

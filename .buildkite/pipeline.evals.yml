@@ -1,0 +1,104 @@
+image: "buildkite/hosted-agent-base-images:ubuntu-jammy"
+
+env:
+  GITHUB_CLI_VERSION: "2.83.0"
+  BUILDKITE_MCP_SERVER_VERSION: "0.7.3"
+  MODEL_PROVIDER: "anthropic"
+  # CROSS-REPO DEPENDENCY: the eval's red->green CI signal lives outside this
+  # repo. babystand.sh clones EVAL_REPO_SLUG (default: the nethsix fork), pushes
+  # mcp-eval-scenario-* branches there, and the agent watches their builds on
+  # this org/pipeline, which must keep building branch pushes. Scenario branches
+  # never exist in THIS repo, so this pipeline's eval step can't recurse.
+  # Buildkite API tokens are single-org, so two are needed: the EXTERNAL_ORG
+  # token (EVAL_ORG_SLUG, used by the agent's MCP server) and the BUILDKITE_ORG
+  # token (this org, used by bk-eval-compare.sh).
+  EVAL_ORG_SLUG: "anothertest"
+  EVAL_PIPELINE_SLUG: "buildkite-mcp-server"
+
+# PR CI (lint/test) and the generator step run here. The bork PR builds the eval
+# waits on also run on this queue.
+agents:
+  queue: hosted
+
+cache:
+  name: "build-cache"
+  paths:
+    - "/gocache"
+    - "/gomodcache"
+  size: "100g"
+
+steps:
+  - group: ":mag: Quality Checks"
+    key: quality-checks
+    steps:
+    - name: ":golangci-lint: lint"
+      command: golangci-lint run --output.checkstyle.path checkstyle.xml --verbose --timeout 3m
+      artifact_paths:
+        - checkstyle.xml
+      env:
+        GOCACHE: /gocache
+        GOMODCACHE: /gomodcache
+      plugins:
+        - mise#v1.1.5: ~
+
+    - name: ":go: test"
+      artifact_paths:
+        - cover-tree.svg
+        - junit.xml
+      commands:
+        - go run gotest.tools/gotestsum@latest --junitfile junit.xml --format testname -- -coverprofile=cover.out ./...
+        - go run github.com/nikolaydubina/go-cover-treemap@latest -coverprofile cover.out > cover-tree.svg
+        - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
+      env:
+        GOCACHE: /gocache
+        GOMODCACHE: /gomodcache
+      plugins:
+        - mise#v1.1.5: ~
+  - label: ":buildkite: Running scenarios"
+    key: agent
+    depends_on: quality-checks
+    command: ./scripts/babystand.sh
+    # The scenario builds this (blocking) eval agent waits on run in the
+    # EVAL_ORG_SLUG org (see above), on a different cluster's agents, so sharing
+    # this repo's hosted queue cannot starve them.
+    agents:
+      queue: hosted
+    plugins:
+      - docker#v5.14.0:
+          image: buildkite-mcp-server-evals:latest
+          mount-checkout: false
+          mount-buildkite-agent: true
+          environment:
+            - BUILDKITE
+            - BUILDKITE_AGENT_ENDPOINT
+            - BUILDKITE_AGENT_ACCESS_TOKEN
+            - BUILDKITE_API_TOKEN
+            - EVAL_COMPARE_BUILDKITE_API_TOKEN
+            - BUILDKITE_BUILD_URL
+            - BUILDKITE_ORGANIZATION_SLUG
+            - BUILDKITE_PIPELINE_SLUG
+            - BUILDKITE_MCP_SERVER_VERSION
+            - EVAL_ORG_SLUG
+            - EVAL_PIPELINE_SLUG
+            - GITHUB_CLI_VERSION
+            - GITHUB_TOKEN
+            - MODEL_PROVIDER
+            # Select the sandboxed claude.sh execution path in babystand.sh.
+            - RUN_IN_CI=true
+            - LOCAL_CI=false
+            - DEBUG_PERMISSIONS=false
+            # Required by babystand.sh (no default). Inert in CI — claude.sh
+            # always runs bypassPermissions — but declared consciously here;
+            # see evals/README.md for the local-mode meaning.
+            - LOCAL_BYPASS_PERMISSION=false
+            # Per-message parser annotations are on by default; set to "false"
+            # (in the top-level env: block) to rely only on the curated summaries.
+            - ANNOTATE_MESSAGES
+    # Secrets are scoped to this step only: the lint/test jobs execute code
+    # from the pushed branch and must not see credentials.
+    # NOTE: secret-mapped env var names must not start with BUILDKITE/BK
+    # (BUILDKITE_API_TOKEN itself is an allowed exception).
+    secrets:
+      GITHUB_TOKEN: MCP_EVAL_FRAMEWORK_EXTERNAL_REPO_GITHUB_TOKEN
+      BUILDKITE_API_TOKEN: MCP_EVAL_FRAMEWORK_EXTERNAL_ORG_BUILDKITE_API_TOKEN
+      EVAL_COMPARE_BUILDKITE_API_TOKEN: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
