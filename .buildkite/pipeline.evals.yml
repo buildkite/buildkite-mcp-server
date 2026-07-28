@@ -39,7 +39,7 @@ steps:
         GOCACHE: /gocache
         GOMODCACHE: /gomodcache
       plugins:
-        - mise#v1.1.1: ~
+        - mise#v1.1.5: ~
 
     - name: ":go: test"
       artifact_paths:
@@ -53,7 +53,7 @@ steps:
         GOCACHE: /gocache
         GOMODCACHE: /gomodcache
       plugins:
-        - mise#v1.1.1: ~
+        - mise#v1.1.5: ~
   - label: ":buildkite: Running scenarios"
     key: agent
     depends_on: quality-checks
@@ -64,7 +64,7 @@ steps:
     agents:
       queue: hosted
     plugins:
-      - docker#v5.11.0:
+      - docker#v5.14.0:
           image: buildkite-mcp-server-evals:latest
           mount-checkout: false
           mount-buildkite-agent: true
