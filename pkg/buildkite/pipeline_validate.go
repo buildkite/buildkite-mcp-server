@@ -5,7 +5,9 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 
@@ -37,6 +39,40 @@ const maxValidationErrors = 20
 // a huge intermediate allocation before truncation. When collection stops at
 // this cap, error_count reports the cap rather than the true total.
 const maxCollectedValidationErrors = 200
+
+// Input limits enforced before a document is decoded or validated. The YAML
+// node graph represents aliases as references, so the expansion budgets are
+// enforced by walking the graph and charging each alias the full cost of its
+// target — before any expansion is materialized. The raw source cap alone is
+// not enough: aliases let a kilobytes-sized document decode into an
+// arbitrarily large value (billion-laughs), and the schema validator builds
+// its complete error tree in memory before it can be truncated, so oversized
+// documents must be rejected up front.
+const (
+	// maxPipelineYAMLBytes bounds the raw YAML source accepted.
+	maxPipelineYAMLBytes = 1 << 20 // 1 MiB
+
+	// maxExpandedYAMLNodes bounds how many values the document may
+	// materialize once anchors and aliases are resolved. Generous for real
+	// pipelines: a maximal 500-step pipeline with dense per-step
+	// configuration is on the order of 50-100 values per step.
+	maxExpandedYAMLNodes = 50_000
+
+	// maxExpandedYAMLScalarBytes bounds the total scalar bytes the document
+	// may materialize once anchors and aliases are resolved, so a large
+	// anchored scalar cannot be multiplied by aliasing.
+	maxExpandedYAMLScalarBytes = 4 << 20 // 4 MiB
+
+	// maxExpandedYAMLDepth bounds nesting depth (following aliases), keeping
+	// the complexity walk and YAML decode recursion shallow.
+	maxExpandedYAMLDepth = 100
+
+	// maxPipelineSteps mirrors Buildkite's documented limit of 500 steps per
+	// pipeline upload. Rejecting oversized pipelines before schema
+	// validation also bounds the validator's error fan-out (the pipeline
+	// schema's per-step anyOf multiplies errors for every invalid step).
+	maxPipelineSteps = 500
+)
 
 // validationCaveats is returned with every result so an agent does not
 // over-trust a passing schema check.
@@ -100,6 +136,115 @@ func collectLeafErrors(ve *jsonschema.ValidationError, printer *message.Printer,
 	return out
 }
 
+// yamlComplexity accumulates the cost of a YAML document as if every alias
+// were expanded, without materializing the expansion. Costs of completed
+// subtrees are memoized, so the walk is linear in the size of the source
+// document and fails fast once a budget is exceeded.
+type yamlComplexity struct {
+	nodes       int
+	scalarBytes int
+	memo        map[*yaml.Node]yamlCost
+	active      map[*yaml.Node]bool
+}
+
+type yamlCost struct {
+	nodes       int
+	scalarBytes int
+}
+
+// checkYAMLComplexity rejects documents whose alias-expanded form exceeds
+// the expansion budgets, before the document is decoded.
+func checkYAMLComplexity(root *yaml.Node) error {
+	c := &yamlComplexity{
+		memo:   make(map[*yaml.Node]yamlCost),
+		active: make(map[*yaml.Node]bool),
+	}
+	return c.walk(root, 0)
+}
+
+func (c *yamlComplexity) walk(n *yaml.Node, depth int) error {
+	if depth > maxExpandedYAMLDepth {
+		return fmt.Errorf("pipeline YAML is nested more than %d levels deep", maxExpandedYAMLDepth)
+	}
+	if cost, ok := c.memo[n]; ok {
+		c.nodes += cost.nodes
+		c.scalarBytes += cost.scalarBytes
+		return c.checkBudgets()
+	}
+	if c.active[n] {
+		return fmt.Errorf("pipeline YAML contains a self-referential alias")
+	}
+	c.active[n] = true
+	defer delete(c.active, n)
+
+	startNodes, startBytes := c.nodes, c.scalarBytes
+	c.nodes++
+	switch n.Kind {
+	case yaml.ScalarNode:
+		c.scalarBytes += len(n.Value)
+	case yaml.AliasNode:
+		if n.Alias != nil {
+			if err := c.walk(n.Alias, depth+1); err != nil {
+				return err
+			}
+		}
+	default:
+		for _, child := range n.Content {
+			if err := c.walk(child, depth+1); err != nil {
+				return err
+			}
+		}
+	}
+	if err := c.checkBudgets(); err != nil {
+		return err
+	}
+	c.memo[n] = yamlCost{nodes: c.nodes - startNodes, scalarBytes: c.scalarBytes - startBytes}
+	return nil
+}
+
+func (c *yamlComplexity) checkBudgets() error {
+	if c.nodes > maxExpandedYAMLNodes {
+		return fmt.Errorf("pipeline YAML is too complex to validate: it expands to more than %d values once anchors and aliases are resolved", maxExpandedYAMLNodes)
+	}
+	if c.scalarBytes > maxExpandedYAMLScalarBytes {
+		return fmt.Errorf("pipeline YAML is too complex to validate: it expands to more than %d bytes of scalar data once anchors and aliases are resolved", maxExpandedYAMLScalarBytes)
+	}
+	return nil
+}
+
+// countPipelineSteps counts entries in the pipeline's steps list, including
+// steps nested inside group steps. Counting stops as soon as the total
+// exceeds maxPipelineSteps.
+func countPipelineSteps(doc any) int {
+	root, ok := doc.(map[string]any)
+	if !ok {
+		return 0
+	}
+	steps, ok := root["steps"].([]any)
+	if !ok {
+		return 0
+	}
+	return countStepEntries(steps, 0)
+}
+
+func countStepEntries(steps []any, count int) int {
+	for _, step := range steps {
+		count++
+		if count > maxPipelineSteps {
+			return count
+		}
+		if m, ok := step.(map[string]any); ok {
+			if nested, ok := m["steps"].([]any); ok {
+				count = countStepEntries(nested, count)
+				if count > maxPipelineSteps {
+					return count
+				}
+			}
+		}
+	}
+	return count
+}
+
 // invalidPipelineResult builds a failed validation result, truncating the
 // error list to maxValidationErrors.
 func invalidPipelineResult(errors []PipelineValidationError) ValidatePipelineResult {
@@ -120,30 +265,55 @@ func invalidPipelineResult(errors []PipelineValidationError) ValidatePipelineRes
 // Syntax and schema violations are reported in the result; the error return
 // is reserved for internal failures (e.g. a broken embedded schema).
 func validatePipelineYAML(pipelineYAML string) (ValidatePipelineResult, error) {
-	schema, err := compilePipelineSchema()
-	if err != nil {
-		return ValidatePipelineResult{}, err
-	}
-
 	if strings.TrimSpace(pipelineYAML) == "" {
 		return invalidPipelineResult([]PipelineValidationError{
 			{Path: "/", Message: "pipeline is empty; expected a YAML document with a top-level steps list"},
 		}), nil
 	}
 
-	const maxPipelineYAMLBytes = 1 << 20 // 1 MiB
 	if len(pipelineYAML) > maxPipelineYAMLBytes {
 		return invalidPipelineResult([]PipelineValidationError{
 			{Path: "/", Message: fmt.Sprintf("pipeline YAML is too large (%d bytes); maximum is %d bytes", len(pipelineYAML), maxPipelineYAMLBytes)},
 		}), nil
 	}
-	// yaml.v3 bounds alias expansion during decode (it rejects documents
-	// with excessive aliasing), so a small source document cannot
-	// materialize an arbitrarily large structure (billion-laughs).
-	var doc any
-	if err := yaml.Unmarshal([]byte(pipelineYAML), &doc); err != nil {
+
+	// Parse into a node graph first: aliases stay as references there, so
+	// the graph stays proportional to the source and the document's
+	// expanded size can be bounded before anything is materialized.
+	decoder := yaml.NewDecoder(strings.NewReader(pipelineYAML))
+	var root yaml.Node
+	if err := decoder.Decode(&root); err != nil {
+		if errors.Is(err, io.EOF) {
+			return invalidPipelineResult([]PipelineValidationError{
+				{Path: "/", Message: "pipeline is empty; expected a YAML document with a top-level steps list"},
+			}), nil
+		}
 		return invalidPipelineResult([]PipelineValidationError{
 			{Path: "/", Message: fmt.Sprintf("invalid YAML syntax: %v", err)},
+		}), nil
+	}
+	if err := decoder.Decode(new(yaml.Node)); !errors.Is(err, io.EOF) {
+		return invalidPipelineResult([]PipelineValidationError{
+			{Path: "/", Message: "pipeline contains multiple YAML documents; expected a single document"},
+		}), nil
+	}
+
+	if err := checkYAMLComplexity(&root); err != nil {
+		return invalidPipelineResult([]PipelineValidationError{
+			{Path: "/", Message: err.Error()},
+		}), nil
+	}
+
+	var doc any
+	if err := root.Decode(&doc); err != nil {
+		return invalidPipelineResult([]PipelineValidationError{
+			{Path: "/", Message: fmt.Sprintf("invalid YAML: %v", err)},
+		}), nil
+	}
+
+	if count := countPipelineSteps(doc); count > maxPipelineSteps {
+		return invalidPipelineResult([]PipelineValidationError{
+			{Path: "/steps", Message: fmt.Sprintf("pipeline defines more than %d steps (including steps nested in groups); Buildkite rejects pipeline uploads with more than %d steps", maxPipelineSteps, maxPipelineSteps)},
 		}), nil
 	}
 
@@ -154,6 +324,11 @@ func validatePipelineYAML(pipelineYAML string) (ValidatePipelineResult, error) {
 		return invalidPipelineResult([]PipelineValidationError{
 			{Path: "/", Message: fmt.Sprintf("pipeline is not representable as JSON: %v", err)},
 		}), nil
+	}
+
+	schema, err := compilePipelineSchema()
+	if err != nil {
+		return ValidatePipelineResult{}, err
 	}
 
 	instance, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonBytes))
