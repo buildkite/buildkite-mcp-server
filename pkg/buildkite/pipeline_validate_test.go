@@ -236,7 +236,7 @@ steps: [*e]
 		assert.Contains(result.Errors[0].Message, "multiple YAML documents")
 	})
 
-	t.Run("at most 500 steps are accepted", func(t *testing.T) {
+	t.Run("more than 500 steps is a warning, not an error", func(t *testing.T) {
 		assert := require.New(t)
 
 		var sb strings.Builder
@@ -247,17 +247,20 @@ steps: [*e]
 		result, err := validatePipelineYAML(sb.String())
 		assert.NoError(err)
 		assert.True(result.Valid)
+		assert.Empty(result.Warnings)
 
+		// The default service quota is 500 jobs per upload, but it can be
+		// raised per organization, so a larger pipeline is still valid.
 		sb.WriteString("  - command: echo one too many\n")
 		result, err = validatePipelineYAML(sb.String())
 		assert.NoError(err)
-		assert.False(result.Valid)
-		assert.Len(result.Errors, 1)
-		assert.Equal("/steps", result.Errors[0].Path)
-		assert.Contains(result.Errors[0].Message, "more than 500 steps")
+		assert.True(result.Valid)
+		assert.Empty(result.Errors)
+		assert.Len(result.Warnings, 1)
+		assert.Contains(result.Warnings[0], "default service quota")
 	})
 
-	t.Run("steps nested in groups count toward the step limit", func(t *testing.T) {
+	t.Run("steps nested in groups count toward the step quota warning", func(t *testing.T) {
 		assert := require.New(t)
 
 		var sb strings.Builder
@@ -268,17 +271,18 @@ steps: [*e]
 		}
 		result, err := validatePipelineYAML(sb.String())
 		assert.NoError(err)
-		assert.False(result.Valid)
-		assert.Len(result.Errors, 1)
-		assert.Equal("/steps", result.Errors[0].Path)
+		assert.True(result.Valid)
+		assert.Len(result.Warnings, 1)
+		assert.Contains(result.Warnings[0], "more than 500 steps")
 	})
 
-	t.Run("mass invalid steps are rejected before schema validation", func(t *testing.T) {
+	t.Run("mass invalid steps stop error collection early", func(t *testing.T) {
 		assert := require.New(t)
 
 		// 10,000 invalid steps previously allocated >100 MB inside the
-		// schema validator building its error tree; the step-count guard
-		// must reject the document before validation starts.
+		// schema validator building its error tree in a single Validate
+		// call. Per-step validation stops after
+		// maxCollectedValidationErrors leaf errors have been gathered.
 		var sb strings.Builder
 		sb.WriteString("steps:\n")
 		for i := 0; i < 10_000; i++ {
@@ -287,8 +291,79 @@ steps: [*e]
 		result, err := validatePipelineYAML(sb.String())
 		assert.NoError(err)
 		assert.False(result.Valid)
+		assert.True(result.Truncated)
+		assert.Len(result.Errors, maxValidationErrors)
+		assert.Equal(maxCollectedValidationErrors, result.ErrorCount)
+		assert.Len(result.Warnings, 1, "should still warn about the step quota")
+	})
+
+	t.Run("a single step with mass invalid entries hits the local validation limit", func(t *testing.T) {
+		assert := require.New(t)
+
+		// One step with 40,000 invalid notify entries previously reached
+		// ~345 MB RSS inside a single schema.Validate call. The per-unit
+		// value budget must refuse to validate the step instead.
+		var sb strings.Builder
+		sb.WriteString("steps:\n  - command: echo hello\n    notify:\n")
+		for i := 0; i < 40_000; i++ {
+			fmt.Fprintf(&sb, "      - bogus%d\n", i)
+		}
+		result, err := validatePipelineYAML(sb.String())
+		assert.NoError(err)
+		assert.False(result.Valid)
 		assert.Len(result.Errors, 1)
-		assert.Equal("/steps", result.Errors[0].Path)
+		assert.Equal("/steps/0", result.Errors[0].Path)
+		assert.Contains(result.Errors[0].Message, "local safety limit")
+		assert.Contains(result.Errors[0].Message, "not a Buildkite limit")
+	})
+
+	t.Run("mass invalid pipeline-level entries hit the local validation limit", func(t *testing.T) {
+		assert := require.New(t)
+
+		var sb strings.Builder
+		sb.WriteString("notify:\n")
+		for i := 0; i < 40_000; i++ {
+			fmt.Fprintf(&sb, "  - bogus%d\n", i)
+		}
+		sb.WriteString("steps:\n  - command: echo hello\n")
+		result, err := validatePipelineYAML(sb.String())
+		assert.NoError(err)
+		assert.False(result.Valid)
+		assert.Len(result.Errors, 1)
+		assert.Equal("/", result.Errors[0].Path)
+		assert.Contains(result.Errors[0].Message, "local safety limit")
+	})
+
+	t.Run("a group child with mass invalid entries hits the local validation limit", func(t *testing.T) {
+		assert := require.New(t)
+
+		var sb strings.Builder
+		sb.WriteString("steps:\n  - group: g\n    steps:\n      - command: echo hello\n        notify:\n")
+		for i := 0; i < 40_000; i++ {
+			fmt.Fprintf(&sb, "          - bogus%d\n", i)
+		}
+		result, err := validatePipelineYAML(sb.String())
+		assert.NoError(err)
+		assert.False(result.Valid)
+		assert.Len(result.Errors, 1)
+		assert.Equal("/steps/0/steps/0", result.Errors[0].Path)
+		assert.Contains(result.Errors[0].Message, "local safety limit")
+	})
+
+	t.Run("large valid groups are validated per child", func(t *testing.T) {
+		assert := require.New(t)
+
+		// A single group with many valid children must not trip the
+		// per-unit budget, because each child is its own unit.
+		var sb strings.Builder
+		sb.WriteString("steps:\n  - group: big\n    steps:\n")
+		for i := 0; i < 400; i++ {
+			fmt.Fprintf(&sb, "      - label: step-%d\n        command: echo %d\n        agents:\n          queue: default\n", i, i)
+		}
+		result, err := validatePipelineYAML(sb.String())
+		assert.NoError(err)
+		assert.True(result.Valid)
+		assert.Empty(result.Warnings)
 	})
 
 	t.Run("invalid YAML syntax", func(t *testing.T) {
@@ -348,8 +423,8 @@ func BenchmarkValidatePipelineAdversarial(b *testing.B) {
 		return sb.String()
 	}()
 
-	// Worst accepted case: the maximum number of steps, all invalid, so the
-	// schema validator builds its largest permissible error tree.
+	// The maximum quota-sized pipeline with every step invalid: per-step
+	// validation with early stop bounds the total error-tree allocation.
 	maxInvalidSteps := func() string {
 		var sb strings.Builder
 		sb.WriteString("steps:\n")
@@ -359,10 +434,24 @@ func BenchmarkValidatePipelineAdversarial(b *testing.B) {
 		return sb.String()
 	}()
 
+	// One step with 40,000 invalid notify entries: a ~520 KB document that
+	// previously reached ~345 MB RSS (~484 MB allocated) inside a single
+	// schema.Validate call. The per-unit value budget must refuse to
+	// validate the step, keeping allocation at parse cost only.
+	massNotifyStep := func() string {
+		var sb strings.Builder
+		sb.WriteString("steps:\n  - command: echo hello\n    notify:\n")
+		for i := 0; i < 40_000; i++ {
+			fmt.Fprintf(&sb, "      - bogus%d\n", i)
+		}
+		return sb.String()
+	}()
+
 	for name, doc := range map[string]string{
-		"alias_bomb_rejected":         aliasBomb,
-		"mass_invalid_steps_rejected": massInvalidSteps,
-		"max_invalid_steps_validated": maxInvalidSteps,
+		"alias_bomb_rejected":          aliasBomb,
+		"mass_invalid_steps_truncated": massInvalidSteps,
+		"max_invalid_steps_validated":  maxInvalidSteps,
+		"mass_notify_step_local_limit": massNotifyStep,
 	} {
 		b.Run(name, func(b *testing.B) {
 			b.ReportAllocs()

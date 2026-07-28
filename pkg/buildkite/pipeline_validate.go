@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -67,19 +68,38 @@ const (
 	// the complexity walk and YAML decode recursion shallow.
 	maxExpandedYAMLDepth = 100
 
-	// maxPipelineSteps mirrors Buildkite's documented limit of 500 steps per
-	// pipeline upload. Rejecting oversized pipelines before schema
-	// validation also bounds the validator's error fan-out (the pipeline
-	// schema's per-step anyOf multiplies errors for every invalid step).
+	// maxPipelineSteps mirrors Buildkite's default service quota of 500 jobs
+	// created per pipeline upload. Larger pipelines get a warning (the quota
+	// can be raised per organization), not a validation failure.
 	maxPipelineSteps = 500
+
+	// maxValidationUnitValues bounds how many values a single
+	// schema-validation call may cover: one step, one step nested in a
+	// group, or the pipeline's configuration outside the steps list. The
+	// validator builds its complete error tree in memory before it can be
+	// truncated, and the pipeline schema's anyOf fan-out multiplies that
+	// tree for every invalid value, so each validated unit must be small.
+	// Real steps are two orders of magnitude below this limit.
+	maxValidationUnitValues = 2_000
 )
 
 // validationCaveats is returned with every result so an agent does not
 // over-trust a passing schema check.
 const validationCaveats = "Schema validation only: a valid result does not check runtime interpolation of environment variables, plugin configuration correctness, step key/dependency references, or pipeline steps generated dynamically at run time."
 
-// compilePipelineSchema compiles the embedded schema exactly once.
-var compilePipelineSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+// pipelineSchemas holds the compiled root schema plus the step subschemas
+// used to validate steps one at a time.
+type pipelineSchemas struct {
+	// root validates a complete pipeline document.
+	root *jsonschema.Schema
+	// step validates a single entry of the top-level steps list.
+	step *jsonschema.Schema
+	// groupChild validates a single step nested inside a group step.
+	groupChild *jsonschema.Schema
+}
+
+// compilePipelineSchemas compiles the embedded schema exactly once.
+var compilePipelineSchemas = sync.OnceValues(func() (*pipelineSchemas, error) {
 	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(pipelineSchemaJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse embedded pipeline schema: %w", err)
@@ -90,11 +110,22 @@ var compilePipelineSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
 		return nil, fmt.Errorf("failed to load embedded pipeline schema: %w", err)
 	}
 
-	schema, err := compiler.Compile("pipeline-schema.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile embedded pipeline schema: %w", err)
+	schemas := &pipelineSchemas{}
+	for _, s := range []struct {
+		target  **jsonschema.Schema
+		pointer string
+	}{
+		{&schemas.root, "pipeline-schema.json"},
+		{&schemas.step, "pipeline-schema.json#/definitions/pipelineSteps/items"},
+		{&schemas.groupChild, "pipeline-schema.json#/definitions/groupSteps/items"},
+	} {
+		schema, err := compiler.Compile(s.pointer)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compile embedded pipeline schema %q: %w", s.pointer, err)
+		}
+		*s.target = schema
 	}
-	return schema, nil
+	return schemas, nil
 })
 
 type ValidatePipelineArgs struct {
@@ -113,27 +144,150 @@ type ValidatePipelineResult struct {
 	Errors     []PipelineValidationError `json:"errors,omitempty"`
 	ErrorCount int                       `json:"error_count,omitempty"`
 	Truncated  bool                      `json:"truncated,omitempty"`
+	Warnings   []string                  `json:"warnings,omitempty"`
 	Caveats    string                    `json:"caveats"`
 }
 
 // collectLeafErrors walks the validation error tree and appends leaf causes,
-// which carry the most specific violation messages. Collection stops once
-// maxCollectedValidationErrors have been gathered.
-func collectLeafErrors(ve *jsonschema.ValidationError, printer *message.Printer, out []PipelineValidationError) []PipelineValidationError {
+// which carry the most specific violation messages, rebasing each instance
+// location onto prefix. Collection stops once maxCollectedValidationErrors
+// have been gathered.
+func collectLeafErrors(ve *jsonschema.ValidationError, prefix []string, printer *message.Printer, out []PipelineValidationError) []PipelineValidationError {
 	if len(out) >= maxCollectedValidationErrors {
 		return out
 	}
 	if len(ve.Causes) == 0 {
+		location := make([]string, 0, len(prefix)+len(ve.InstanceLocation))
+		location = append(location, prefix...)
+		location = append(location, ve.InstanceLocation...)
 		out = append(out, PipelineValidationError{
-			Path:    "/" + strings.Join(ve.InstanceLocation, "/"),
+			Path:    "/" + strings.Join(location, "/"),
 			Message: ve.ErrorKind.LocalizedString(printer),
 		})
 		return out
 	}
 	for _, cause := range ve.Causes {
-		out = collectLeafErrors(cause, printer, out)
+		out = collectLeafErrors(cause, prefix, printer, out)
 	}
 	return out
+}
+
+// exceedsValueBudget reports whether the decoded JSON value contains more
+// than *budget values, decrementing the budget as it walks and returning as
+// soon as the budget is exhausted.
+func exceedsValueBudget(v any, budget *int) bool {
+	*budget--
+	if *budget < 0 {
+		return true
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		for _, child := range t {
+			if exceedsValueBudget(child, budget) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range t {
+			if exceedsValueBudget(child, budget) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// validateUnit validates one bounded portion of the pipeline document
+// against a schema, appending its leaf errors to out with paths rebased onto
+// prefix. The validator builds a unit's complete error tree in memory before
+// it can be truncated, so units larger than maxValidationUnitValues are not
+// validated at all: they fail with an explicit local-safety-limit message
+// instead. Once maxCollectedValidationErrors have been gathered, remaining
+// units are skipped entirely.
+func validateUnit(schema *jsonschema.Schema, instance any, prefix []string, printer *message.Printer, out []PipelineValidationError) ([]PipelineValidationError, error) {
+	if len(out) >= maxCollectedValidationErrors {
+		return out, nil
+	}
+	budget := maxValidationUnitValues
+	if exceedsValueBudget(instance, &budget) {
+		return append(out, PipelineValidationError{
+			Path:    "/" + strings.Join(prefix, "/"),
+			Message: fmt.Sprintf("this section contains more than %d values and was not validated; this is a local safety limit of the validation tool, not a Buildkite limit", maxValidationUnitValues),
+		}), nil
+	}
+	err := schema.Validate(instance)
+	if err == nil {
+		return out, nil
+	}
+	ve, ok := err.(*jsonschema.ValidationError)
+	if !ok {
+		return out, fmt.Errorf("unexpected validation failure: %w", err)
+	}
+	return collectLeafErrors(ve, prefix, printer, out), nil
+}
+
+// placeholderSteps returns a minimal valid steps list, substituted for the
+// real steps when validating a pipeline's (or group's) own configuration so
+// that each validated unit stays within the per-unit budget. "wait" is valid
+// in both the top-level steps list and a group's steps list.
+func placeholderSteps() []any { return []any{"wait"} }
+
+// validatePipelineInstance validates the pipeline in bounded units: first
+// the top-level configuration with the steps list replaced by a placeholder,
+// then each step on its own, splitting group steps into their shell and
+// individual children. Validating unit by unit keeps every schema.Validate
+// error tree small even when the document as a whole holds tens of thousands
+// of invalid values, and lets collection stop early once enough errors have
+// been gathered.
+func validatePipelineInstance(schemas *pipelineSchemas, instance any, printer *message.Printer) ([]PipelineValidationError, error) {
+	root, isMap := instance.(map[string]any)
+	steps, hasSteps := root["steps"].([]any)
+	if !isMap || !hasSteps {
+		// Malformed at the top level (not a map, or steps is missing or not
+		// a list); validate as a single unit.
+		return validateUnit(schemas.root, instance, nil, printer, nil)
+	}
+
+	shell := make(map[string]any, len(root))
+	for k, v := range root {
+		shell[k] = v
+	}
+	shell["steps"] = placeholderSteps()
+	out, err := validateUnit(schemas.root, shell, nil, printer, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	for i, step := range steps {
+		prefix := []string{"steps", strconv.Itoa(i)}
+		group, isGroupLike := step.(map[string]any)
+		children, hasChildren := group["steps"].([]any)
+		if !isGroupLike || !hasChildren {
+			out, err = validateUnit(schemas.step, step, prefix, printer, out)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+
+		groupShell := make(map[string]any, len(group))
+		for k, v := range group {
+			groupShell[k] = v
+		}
+		groupShell["steps"] = placeholderSteps()
+		out, err = validateUnit(schemas.step, groupShell, prefix, printer, out)
+		if err != nil {
+			return nil, err
+		}
+		for j, child := range children {
+			childPrefix := []string{"steps", strconv.Itoa(i), "steps", strconv.Itoa(j)}
+			out, err = validateUnit(schemas.groupChild, child, childPrefix, printer, out)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return out, nil
 }
 
 // yamlComplexity accumulates the cost of a YAML document as if every alias
@@ -311,10 +465,12 @@ func validatePipelineYAML(pipelineYAML string) (ValidatePipelineResult, error) {
 		}), nil
 	}
 
+	// Exceeding the default upload quota is a warning, not a schema
+	// violation: the quota can be raised per organization, so the pipeline
+	// may still be accepted by Buildkite.
+	var warnings []string
 	if count := countPipelineSteps(doc); count > maxPipelineSteps {
-		return invalidPipelineResult([]PipelineValidationError{
-			{Path: "/steps", Message: fmt.Sprintf("pipeline defines more than %d steps (including steps nested in groups); Buildkite rejects pipeline uploads with more than %d steps", maxPipelineSteps, maxPipelineSteps)},
-		}), nil
+		warnings = append(warnings, fmt.Sprintf("pipeline defines more than %d steps (including steps nested in groups); Buildkite's default service quota is %d jobs per pipeline upload, so uploading this pipeline may be rejected unless the organization's quota has been raised", maxPipelineSteps, maxPipelineSteps))
 	}
 
 	// Round-trip through JSON to normalize YAML-specific types (integers,
@@ -326,7 +482,7 @@ func validatePipelineYAML(pipelineYAML string) (ValidatePipelineResult, error) {
 		}), nil
 	}
 
-	schema, err := compilePipelineSchema()
+	schemas, err := compilePipelineSchemas()
 	if err != nil {
 		return ValidatePipelineResult{}, err
 	}
@@ -338,16 +494,18 @@ func validatePipelineYAML(pipelineYAML string) (ValidatePipelineResult, error) {
 		}), nil
 	}
 
-	if err := schema.Validate(instance); err != nil {
-		ve, ok := err.(*jsonschema.ValidationError)
-		if !ok {
-			return ValidatePipelineResult{}, fmt.Errorf("unexpected validation failure: %w", err)
-		}
-		printer := message.NewPrinter(language.English)
-		return invalidPipelineResult(collectLeafErrors(ve, printer, nil)), nil
+	printer := message.NewPrinter(language.English)
+	validationErrors, err := validatePipelineInstance(schemas, instance, printer)
+	if err != nil {
+		return ValidatePipelineResult{}, err
+	}
+	if len(validationErrors) > 0 {
+		result := invalidPipelineResult(validationErrors)
+		result.Warnings = warnings
+		return result, nil
 	}
 
-	return ValidatePipelineResult{Valid: true, Caveats: validationCaveats}, nil
+	return ValidatePipelineResult{Valid: true, Warnings: warnings, Caveats: validationCaveats}, nil
 }
 
 func ValidatePipeline() (mcp.Tool, mcp.ToolHandlerFor[ValidatePipelineArgs, any], []string) {
