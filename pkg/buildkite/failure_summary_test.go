@@ -264,6 +264,64 @@ func TestGetBuildFailureSummaryPrioritizesFailuresAndCanceledJobsBeforeDownstrea
 	require.True(t, summary.JobsTruncated)
 }
 
+func TestGetBuildFailureSummaryEnforcesServerJobLimit(t *testing.T) {
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{}, nil
+		},
+	}
+
+	jobs := make([]buildkite.Job, 6)
+	for i := range jobs {
+		jobs[i] = buildkite.Job{ID: fmt.Sprintf("job-%d", i+1), State: "failed"}
+	}
+	jobListCalls := 0
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			jobListCalls++
+			require.Equal(t, []string{"failed", "timed_out", "expired"}, options.State)
+			require.Equal(t, 6, options.PerPage)
+			return buildkite.JobsList{Items: jobs}, &buildkite.Response{}, nil
+		},
+	}
+
+	var logCallsMu sync.Mutex
+	logCalls := 0
+	logsClient := &MockBuildkiteLogsClient{
+		NewReaderFunc: func(context.Context, string, string, string, string, time.Duration, bool) (*buildkitelogs.ParquetReader, error) {
+			logCallsMu.Lock()
+			logCalls++
+			logCallsMu.Unlock()
+			return nil, errors.New("log unavailable")
+		},
+	}
+
+	include := false
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient:        buildsClient,
+		JobsClient:          jobsClient,
+		BuildkiteLogsClient: logsClient,
+		FailureSummary:      FailureSummaryConfig{MaxJobs: 5},
+	})
+
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 50,
+		IncludeAnnotations: &include, IncludeFailedTests: &include,
+	})
+	require.NoError(t, err)
+
+	var summary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
+	require.Equal(t, 5, summary.JobLimit)
+	require.Len(t, summary.Jobs, 5)
+	require.True(t, summary.JobsTruncated)
+	require.Equal(t, 1, jobListCalls)
+	logCallsMu.Lock()
+	require.Equal(t, 5, logCalls)
+	logCallsMu.Unlock()
+}
+
 func TestGetBuildFailureSummaryIncludesTimedOutJobAndLog(t *testing.T) {
 	logPath := t.TempDir() + "/timed-out.parquet"
 	writeTestParquetFile(t, logPath, []string{"running", "job timed out"})
@@ -926,6 +984,21 @@ func TestApplyFailureSummaryContentLimitsPreservesWarnings(t *testing.T) {
 	require.Equal(t, "annotations unavailable after partial scan: request failed", result.Warnings[0])
 	require.True(t, result.ContentTruncated)
 	require.True(t, result.Annotations[len(result.Annotations)-1].BodyTruncated)
+}
+
+func TestFailureSummaryAnnotationsBoundsLargeBodies(t *testing.T) {
+	body := strings.Repeat("annotation line\n", 100_000)
+
+	annotations, truncated := failureSummaryAnnotations([]buildkite.Annotation{{
+		Style:    "error",
+		BodyHTML: body,
+	}}, 1)
+
+	require.False(t, truncated)
+	require.Len(t, annotations, 1)
+	require.LessOrEqual(t, len(annotations[0].BodyHTML), failureSummaryEntryContentByteLimit)
+	require.True(t, annotations[0].BodyTruncated)
+	require.NotEqual(t, body, annotations[0].BodyHTML)
 }
 
 func TestLoadFailureAnnotationsStopsAtScanLimit(t *testing.T) {
