@@ -229,7 +229,10 @@ func validateUnit(schema *jsonschema.Schema, instance any, prefix []string, prin
 // placeholderSteps returns a minimal valid steps list, substituted for the
 // real steps when validating a pipeline's (or group's) own configuration so
 // that each validated unit stays within the per-unit budget. "wait" is valid
-// in both the top-level steps list and a group's steps list.
+// in both the top-level steps list and a group's steps list. Only a
+// non-empty list may be replaced: an empty list must be validated as-is so
+// container-level constraints on the list itself (groupSteps' minItems: 1)
+// still apply.
 func placeholderSteps() []any { return []any{"wait"} }
 
 // validatePipelineInstance validates the pipeline in bounded units: first
@@ -252,7 +255,9 @@ func validatePipelineInstance(schemas *pipelineSchemas, instance any, printer *m
 	for k, v := range root {
 		shell[k] = v
 	}
-	shell["steps"] = placeholderSteps()
+	if len(steps) > 0 {
+		shell["steps"] = placeholderSteps()
+	}
 	out, err := validateUnit(schemas.root, shell, nil, printer, nil)
 	if err != nil {
 		return nil, err
@@ -274,7 +279,9 @@ func validatePipelineInstance(schemas *pipelineSchemas, instance any, printer *m
 		for k, v := range group {
 			groupShell[k] = v
 		}
-		groupShell["steps"] = placeholderSteps()
+		if len(children) > 0 {
+			groupShell["steps"] = placeholderSteps()
+		}
 		out, err = validateUnit(schemas.step, groupShell, prefix, printer, out)
 		if err != nil {
 			return nil, err

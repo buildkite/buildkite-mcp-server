@@ -350,6 +350,39 @@ steps: [*e]
 		assert.Contains(result.Errors[0].Message, "local safety limit")
 	})
 
+	t.Run("empty groups are rejected", func(t *testing.T) {
+		assert := require.New(t)
+
+		// The group's own steps list is subject to groupSteps'
+		// minItems: 1; substituting a placeholder for an empty list would
+		// hide that container-level constraint.
+		result, err := validatePipelineYAML(`
+steps:
+  - group: empty
+    steps: []
+`)
+		assert.NoError(err)
+		assert.False(result.Valid)
+		assert.NotEmpty(result.Errors)
+		found := false
+		for _, e := range result.Errors {
+			if e.Path == "/steps/0/steps" {
+				found = true
+			}
+		}
+		assert.True(found, "expected an error at /steps/0/steps, got %v", result.Errors)
+	})
+
+	t.Run("empty top-level steps list stays valid", func(t *testing.T) {
+		assert := require.New(t)
+
+		// Unlike groupSteps, the schema's pipelineSteps has no minItems, so
+		// an empty top-level list validates.
+		result, err := validatePipelineYAML("steps: []\n")
+		assert.NoError(err)
+		assert.True(result.Valid)
+	})
+
 	t.Run("large valid groups are validated per child", func(t *testing.T) {
 		assert := require.New(t)
 
