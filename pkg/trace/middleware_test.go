@@ -77,12 +77,15 @@ func TestNewMiddleware(t *testing.T) {
 	tp := otel.GetTracerProvider().(*sdktrace.TracerProvider)
 	attrs := spanAttrs(t, tp, sr, "mcp.tools/call")
 	assert.Equal("tools/call", attrs["mcp.method"], "mcp.method attribute should be set")
-	assert.Contains(attrs, "mcp.session_id", "mcp.session_id attribute should be set")
-	assert.Equal("test-client", attrs["mcp.client.name"], "mcp.client.name should be captured from initialize handshake")
-	assert.Equal("v0.0.1", attrs["mcp.client.version"], "mcp.client.version should be captured from initialize handshake")
+	assert.NotContains(attrs, "mcp.session_id", "mcp.session_id should be omitted for sessionless (2026-07-28) requests")
+	assert.Equal("test-client", attrs["mcp.client.name"], "mcp.client.name should be captured from per-request _meta")
+	assert.Equal("v0.0.1", attrs["mcp.client.version"], "mcp.client.version should be captured from per-request _meta")
 	assert.Equal("ping", attrs["mcp.tool_name"], "mcp.tool_name should be set for tools/call requests")
 }
 
+// TestNewMiddlewareHTTP covers the legacy (pre-2026-07-28) protocol path: a
+// stateful StreamableHTTP handler negotiates an initialize handshake and
+// assigns a session ID via the Mcp-Session-Id header.
 func TestNewMiddlewareHTTP(t *testing.T) {
 	assert := require.New(t)
 	ctx := context.Background()
@@ -107,8 +110,40 @@ func TestNewMiddlewareHTTP(t *testing.T) {
 	tp := otel.GetTracerProvider().(*sdktrace.TracerProvider)
 	attrs := spanAttrs(t, tp, sr, "mcp.tools/call")
 	assert.Equal("tools/call", attrs["mcp.method"], "mcp.method attribute should be set")
-	assert.NotEmpty(attrs["mcp.session_id"], "mcp.session_id should be non-empty over HTTP transport")
+	assert.NotEmpty(attrs["mcp.session_id"], "mcp.session_id should be non-empty over stateful HTTP transport")
 	assert.Equal("test-client", attrs["mcp.client.name"], "mcp.client.name should be captured from initialize handshake")
 	assert.Equal("v0.0.1", attrs["mcp.client.version"], "mcp.client.version should be captured from initialize handshake")
+	assert.Equal("ping", attrs["mcp.tool_name"], "mcp.tool_name should be set for tools/call requests")
+}
+
+// TestNewMiddlewareHTTPStateless covers the 2026-07-28 protocol path used in
+// production (internal/commands/http.go): a stateless StreamableHTTP handler
+// with no sessions, where client identity travels in each request's _meta.
+func TestNewMiddlewareHTTPStateless(t *testing.T) {
+	assert := require.New(t)
+	ctx := context.Background()
+
+	server, sr := setupMiddlewareServer(t)
+
+	handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		return server
+	}, &mcp.StreamableHTTPOptions{Stateless: true})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	assert.NoError(err)
+	defer session.Close()
+
+	_, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "ping"})
+	assert.NoError(err)
+
+	tp := otel.GetTracerProvider().(*sdktrace.TracerProvider)
+	attrs := spanAttrs(t, tp, sr, "mcp.tools/call")
+	assert.Equal("tools/call", attrs["mcp.method"], "mcp.method attribute should be set")
+	assert.NotContains(attrs, "mcp.session_id", "mcp.session_id should be omitted over stateless HTTP transport")
+	assert.Equal("test-client", attrs["mcp.client.name"], "mcp.client.name should be captured from per-request _meta")
+	assert.Equal("v0.0.1", attrs["mcp.client.version"], "mcp.client.version should be captured from per-request _meta")
 	assert.Equal("ping", attrs["mcp.tool_name"], "mcp.tool_name should be set for tools/call requests")
 }

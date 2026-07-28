@@ -2,9 +2,12 @@ package trace
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -16,10 +19,16 @@ func NewMiddleware() mcp.Middleware {
 			ctx, span := Start(ctx, fmt.Sprintf("mcp.%s", method))
 			defer span.End()
 
-			sessionID := req.GetSession().ID()
 			attrs := []attribute.KeyValue{
 				attribute.String("mcp.method", method),
-				attribute.String("mcp.session_id", sessionID),
+			}
+
+			// Session IDs only exist for stdio and legacy HTTP clients. The
+			// 2026-07-28 protocol is stateless and has no sessions, so ID()
+			// returns "" there; use the OTel trace/span IDs for correlation.
+			sessionID := req.GetSession().ID()
+			if sessionID != "" {
+				attrs = append(attrs, attribute.String("mcp.session_id", sessionID))
 			}
 
 			if params, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok && params != nil {
@@ -27,44 +36,84 @@ func NewMiddleware() mcp.Middleware {
 			}
 
 			var clientName, clientVersion string
-			if ss, ok := req.GetSession().(*mcp.ServerSession); ok {
-				if ip := ss.InitializeParams(); ip != nil && ip.ClientInfo != nil && ip.ClientInfo.Name != "" {
-					clientName = ip.ClientInfo.Name
-					clientVersion = ip.ClientInfo.Version
-					attrs = append(attrs,
-						attribute.String("mcp.client.name", clientName),
-						attribute.String("mcp.client.version", clientVersion),
-					)
-				}
+			if ci := clientInfo(req); ci != nil && ci.Name != "" {
+				clientName = ci.Name
+				clientVersion = ci.Version
+				attrs = append(attrs,
+					attribute.String("mcp.client.name", clientName),
+					attribute.String("mcp.client.version", clientVersion),
+				)
 			}
 
 			span.SetAttributes(attrs...)
 
-			baseLog := log.Debug().Str("mcp.method", method).Str("mcp.session_id", sessionID)
-			if clientName != "" {
-				baseLog = baseLog.Str("mcp.client.name", clientName).Str("mcp.client.version", clientVersion)
+			logFields := func(e *zerolog.Event) *zerolog.Event {
+				e = e.Str("mcp.method", method)
+				if sessionID != "" {
+					e = e.Str("mcp.session_id", sessionID)
+				}
+				if clientName != "" {
+					e = e.Str("mcp.client.name", clientName).Str("mcp.client.version", clientVersion)
+				}
+				return e
 			}
-			baseLog.Msg("Handling MCP request")
+
+			logFields(log.Debug()).Msg("Handling MCP request")
 
 			res, err := next(ctx, method, req)
 			if err != nil {
 				span.RecordError(err)
 				span.SetStatus(codes.Error, err.Error())
-				errLog := log.Error().Err(err).Str("mcp.method", method).Str("mcp.session_id", sessionID)
-				if clientName != "" {
-					errLog = errLog.Str("mcp.client.name", clientName).Str("mcp.client.version", clientVersion)
-				}
-				errLog.Msg("Error in MCP request")
+				logFields(log.Error().Err(err)).Msg("Error in MCP request")
 			} else {
 				span.SetStatus(codes.Ok, "OK")
-				completedLog := log.Debug().Str("mcp.method", method).Str("mcp.session_id", sessionID)
-				if clientName != "" {
-					completedLog = completedLog.Str("mcp.client.name", clientName).Str("mcp.client.version", clientVersion)
-				}
-				completedLog.Msg("Completed MCP request successfully")
+				logFields(log.Debug()).Msg("Completed MCP request successfully")
 			}
 
 			return res, err
 		}
 	}
+}
+
+// clientInfo returns the client identity for a request. Clients speaking
+// protocol >= 2026-07-28 carry it in each request's _meta (there is no
+// initialize handshake); older clients fall back to the session-level
+// InitializeParams. This mirrors the SDK's typed ServerRequest.ClientInfo
+// accessor, which is not reachable from generic middleware.
+func clientInfo(req mcp.Request) *mcp.Implementation {
+	if m := requestMeta(req); m != nil {
+		if raw, ok := m[mcp.MetaKeyClientInfo]; ok && raw != nil {
+			if impl, ok := raw.(*mcp.Implementation); ok {
+				return impl
+			}
+			// After wire transit the value is a generic JSON map; remarshal
+			// it into the typed form.
+			if b, err := json.Marshal(raw); err == nil {
+				var impl mcp.Implementation
+				if json.Unmarshal(b, &impl) == nil {
+					return &impl
+				}
+			}
+		}
+	}
+	if ss, ok := req.GetSession().(*mcp.ServerSession); ok {
+		if ip := ss.InitializeParams(); ip != nil {
+			return ip.ClientInfo
+		}
+	}
+	return nil
+}
+
+// requestMeta returns the request params' _meta map, or nil. Params
+// implementations promote GetMeta from an embedded map field, so a typed-nil
+// pointer inside the interface must be guarded before calling it.
+func requestMeta(req mcp.Request) map[string]any {
+	params := req.GetParams()
+	if params == nil {
+		return nil
+	}
+	if v := reflect.ValueOf(params); v.Kind() == reflect.Pointer && v.IsNil() {
+		return nil
+	}
+	return params.GetMeta()
 }
