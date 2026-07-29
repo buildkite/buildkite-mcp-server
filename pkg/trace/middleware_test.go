@@ -1,12 +1,17 @@
 package trace
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -81,6 +86,80 @@ func TestNewMiddleware(t *testing.T) {
 	assert.Equal("test-client", attrs["mcp.client.name"], "mcp.client.name should be captured from per-request _meta")
 	assert.Equal("v0.0.1", attrs["mcp.client.version"], "mcp.client.version should be captured from per-request _meta")
 	assert.Equal("ping", attrs["mcp.tool_name"], "mcp.tool_name should be set for tools/call requests")
+}
+
+// captureLogs redirects the global zerolog logger to a buffer for the
+// duration of the test and returns it.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	orig := log.Logger
+	log.Logger = zerolog.New(&buf)
+	t.Cleanup(func() { log.Logger = orig })
+	return &buf
+}
+
+// logLines decodes each JSON log line in buf whose mcp.method matches.
+func logLines(t *testing.T, buf *bytes.Buffer, method string) []map[string]any {
+	t.Helper()
+	var lines []map[string]any
+	for _, raw := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if raw == "" {
+			continue
+		}
+		var line map[string]any
+		require.NoError(t, json.Unmarshal([]byte(raw), &line), "log line should be valid JSON: %s", raw)
+		if line["mcp.method"] == method {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// TestNewMiddlewareLogCorrelation verifies that on the sessionless
+// (2026-07-28) path the request log lines omit mcp.session_id but carry
+// matching trace_id/span_id fields so they can be correlated with each other
+// and with the emitted span.
+func TestNewMiddlewareLogCorrelation(t *testing.T) {
+	assert := require.New(t)
+	ctx := context.Background()
+
+	buf := captureLogs(t)
+	server, sr := setupMiddlewareServer(t)
+
+	t1, t2 := mcp.NewInMemoryTransports()
+	_, err := server.Connect(ctx, t1, nil)
+	assert.NoError(err)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	session, err := client.Connect(ctx, t2, nil)
+	assert.NoError(err)
+	defer session.Close()
+
+	_, err = session.CallTool(ctx, &mcp.CallToolParams{Name: "ping"})
+	assert.NoError(err)
+
+	lines := logLines(t, buf, "tools/call")
+	assert.Len(lines, 2, "expected a handling and a completed log line for tools/call")
+
+	for _, line := range lines {
+		assert.NotContains(line, "mcp.session_id", "mcp.session_id should be omitted for sessionless requests")
+		assert.NotEmpty(line["trace_id"], "trace_id should be set for log correlation")
+		assert.NotEmpty(line["span_id"], "span_id should be set for log correlation")
+	}
+	assert.Equal(lines[0]["trace_id"], lines[1]["trace_id"], "both log lines should share a trace_id")
+	assert.Equal(lines[0]["span_id"], lines[1]["span_id"], "both log lines should share a span_id")
+
+	// The logged trace_id must match the span emitted for the request.
+	tp := otel.GetTracerProvider().(*sdktrace.TracerProvider)
+	assert.NoError(tp.ForceFlush(ctx))
+	for _, s := range sr.Ended() {
+		if s.Name() == "mcp.tools/call" {
+			assert.Equal(s.SpanContext().TraceID().String(), lines[0]["trace_id"], "logged trace_id should match the span's trace ID")
+			return
+		}
+	}
+	t.Fatal("expected a span named mcp.tools/call")
 }
 
 // TestNewMiddlewareHTTP covers the legacy (pre-2026-07-28) protocol path: a

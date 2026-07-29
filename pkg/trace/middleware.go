@@ -50,6 +50,9 @@ func NewMiddleware() mcp.Middleware {
 				if sessionID != "" {
 					e = e.Str("mcp.session_id", sessionID)
 				}
+				if sc := span.SpanContext(); sc.IsValid() {
+					e = e.Str("trace_id", sc.TraceID().String()).Str("span_id", sc.SpanID().String())
+				}
 				if clientName != "" {
 					e = e.Str("mcp.client.name", clientName).Str("mcp.client.version", clientVersion)
 				}
