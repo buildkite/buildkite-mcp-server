@@ -1,9 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-# Resolve the harness directory so sibling scripts keep resolving after we cd
-# into a separate git checkout (the subject under test) below.
+# Resolve the harness directory so sibling scripts (and the harness copies of
+# evals.yaml / prompts) keep resolving after we cd into a separate git checkout
+# (the subject under test) below.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# The eval matrix. Each entry is one run: agent + model + prompt + scenario +
+# mcp_version (+ optional compare base/target). Override with EVALS_CONFIG.
+EVALS_CONFIG="${EVALS_CONFIG:-$ROOT_DIR/evals.yaml}"
+
+command -v jq >/dev/null || { echo "babystand: jq is required" >&2; exit 1; }
+command -v yq >/dev/null || { echo "babystand: yq is required to parse $EVALS_CONFIG" >&2; exit 1; }
+[[ -f "$EVALS_CONFIG" ]] || { echo "babystand: config not found: $EVALS_CONFIG" >&2; exit 1; }
 
 if [[ "${LOCAL_CI}" == "true" ]]; then
   WAIT_STATUS_STRING="(perform local CI)"
@@ -17,10 +27,32 @@ else
   DEBUG_STRING=""
 fi
 
+# Permission posture.
+# CI: claude.sh runs with --permission-mode bypassPermissions and no allowlist
+# — tool CHOICE (MCP tools vs raw curl/gh against the API) is part of what the
+# eval measures, and the agent is contained by the container sandbox, the
+# server's --read-only mode, and the read-only API token.
+# Local: the same posture is opt-in via LOCAL_BYPASS_PERMISSION=true, because
+# it gives the agent unrestricted Bash on the host. With it false, a restricted
+# allowlist applies, which must include the MCP server's tools (headless
+# denials are silent) — the server name is derived from mcp.json, overridable
+# via MCP_SERVER_NAME, and missing both is a loud failure.
+# LOCAL_BYPASS_PERMISSION has NO default, deliberately: every caller (CI sets
+# it in the docker plugin env) must make the choice consciously.
+: "${LOCAL_BYPASS_PERMISSION:?must be set to true or false — see evals/README.md}"
+if [[ "${RUN_IN_CI:-false}" != "true" && "$LOCAL_BYPASS_PERMISSION" != "true" ]]; then
+    MCP_SERVER_NAME="${MCP_SERVER_NAME:-$(jq -r '.mcpServers | keys | first // empty' "$ROOT_DIR/mcp.json")}"
+    if [[ -z "$MCP_SERVER_NAME" ]]; then
+        echo "ERROR: MCP_SERVER_NAME is unset and could not be derived from $ROOT_DIR/mcp.json" >&2
+        exit 1
+    fi
+fi
+
+# One timestamp for the whole build; entries are disambiguated by ENTRY_ID.
 DATETIME=$(date +%Y-%m-%d-%H%M%S)
 
 # Both modes clone a fresh working copy of the EVAL repo — the repo holding the
-# scenario base branch, which is NOT the repo this script ships in — for the
+# scenario base branches, which is NOT the repo this script ships in — for the
 # eval (and the agent) to operate on.
 REPO_SLUG="${EVAL_REPO_SLUG:-nethsix/buildkite-mcp-server}"
 WORKDIR="$HOME/eval-repo-$DATETIME"
@@ -49,232 +81,307 @@ else
 fi
 cd "$WORKDIR"
 
-# Create the scenario branch from the deliberately-broken base branch and push it.
-# We push the BRANCH only and deliberately do NOT open a PR: the branch push
-# triggers its own Quality Checks build (build_branches), which is the red->green
-# CI signal the agent fixes.
-SCENARIO_BRANCH="mcp-eval-scenario-$DATETIME"
-git fetch && git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
-git push -u origin HEAD
-
-# The org/pipeline the agent watches for the scenario branch's builds. This is
+# The org/pipeline the agent watches for the scenario branches' builds. This is
 # the EVAL repo's pipeline (see EVAL_REPO_SLUG above), NOT the ambient
 # BUILDKITE_ORGANIZATION_SLUG/BUILDKITE_PIPELINE_SLUG of the build running this
 # script — those refer to the pipeline hosting the eval, which never builds
 # scenario branches.
 ORG_SLUG="${EVAL_ORG_SLUG:-anothertest}"
 PIPELINE_SLUG="${EVAL_PIPELINE_SLUG:-buildkite-mcp-server}"
-LLM_PROMPT="/goal make the CI for git branch '$SCENARIO_BRANCH' (Buildkite org '$ORG_SLUG', pipeline '$PIPELINE_SLUG') from red $WAIT_STATUS_STRING to green. Push your fixes to that same branch and confirm its build passes. Do NOT read/reverse-engineer babystand.sh.$DEBUG_STRING"
 
-# Echo env vars
+# Run bundles live under <harness>/runs/<id>/ — NOT the clone, which is
+# recreated per invocation — so local runs accumulate a comparison store across
+# invocations. Gitignored. This is the canonical comparison store; in CI we
+# ALSO upload the same files as build artifacts named runs/<id>/* (see below).
+RUNS_ROOT="$ROOT_DIR/runs"
+
 echo "*** Initial Env Vars"
 echo "***"
 echo "*** LOCAL_CI: $LOCAL_CI"
 echo "*** DEBUG_PERMISSIONS: $DEBUG_PERMISSIONS"
 echo "*** RUN_IN_CI: ${RUN_IN_CI:-false}"
 echo "*** LOCAL_BYPASS_PERMISSION: $LOCAL_BYPASS_PERMISSION"
+echo "*** EVALS_CONFIG: $EVALS_CONFIG"
+echo "*** DATETIME: $DATETIME"
+echo "*** ORG_SLUG: $ORG_SLUG"
+echo "*** PIPELINE_SLUG: $PIPELINE_SLUG"
 echo "***"
-echo "----------------------"
-echo "***"
-echo "*** Derived Env Vars"
-echo "***"
-echo "*** SCENARIO_BRANCH: $SCENARIO_BRANCH"
-echo "*** WAIT_STATUS_STRING: $WAIT_STATUS_STRING"
-echo "*** DEBUG_STRING: $DEBUG_STRING"
-echo "***"
-echo "----------------------"
-echo "***"
-echo "*** LLM_PROMPT: $LLM_PROMPT"
-echo "***"
-
-LOG="/tmp/babystand-$DATETIME.log"
 
 # Format a duration in whole seconds as "Nm Ns".
 fmt_elapsed() { printf '%dm %ds' $(($1 / 60)) $(($1 % 60)); }
 
-# Claude args shared by both execution modes.
-CLAUDE_TOOL_ARGS=(
-    --output-format stream-json --verbose
-)
+# Render a prompt template: replace {{.KEY}} with VALUE for every KEY=VALUE line
+# in the vars file. Line-oriented (values are single-line: urls, branch names).
+#   render_prompt <template_file> <vars_file>   -> rendered prompt on stdout
+render_prompt() {
+    local template="$1" vars="$2" content key val
+    content="$(cat "$template")"
+    while IFS='=' read -r key val; do
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        content="${content//\{\{.$key\}\}/$val}"
+    done < "$vars"
+    printf '%s' "$content"
+}
 
-# Permission posture.
-# CI: claude.sh runs with --permission-mode bypassPermissions and no allowlist
-# — tool CHOICE (MCP tools vs raw curl/gh against the API) is part of what the
-# eval measures, and the agent is contained by the container sandbox, the
-# server's --read-only mode, and the read-only API token.
-# Local: the same posture is opt-in via LOCAL_BYPASS_PERMISSION=true, because
-# it gives the agent unrestricted Bash on the host. With it false, a restricted
-# allowlist applies, which must include the MCP server's tools (headless
-# denials are silent) — the server name is derived from mcp.json, overridable
-# via MCP_SERVER_NAME, and missing both is a loud failure.
-# LOCAL_BYPASS_PERMISSION has NO default, deliberately: every caller (CI sets
-# it in the docker plugin env) must make the choice consciously.
-: "${LOCAL_BYPASS_PERMISSION:?must be set to true or false — see evals/README.md}"
-if [[ "${RUN_IN_CI:-false}" != "true" ]]; then
-    if [[ "$LOCAL_BYPASS_PERMISSION" == "true" ]]; then
-        CLAUDE_TOOL_ARGS+=(--permission-mode bypassPermissions)
-    else
-        MCP_SERVER_NAME="${MCP_SERVER_NAME:-$(jq -r '.mcpServers | keys | first // empty' "$SCRIPT_DIR/../mcp.json")}"
-        if [[ -z "$MCP_SERVER_NAME" ]]; then
-            echo "ERROR: MCP_SERVER_NAME is unset and could not be derived from $SCRIPT_DIR/../mcp.json" >&2
-            exit 1
+# annotate_markdown <context> <title> <file> <meta> [style] -- collapsible markdown
+annotate_markdown() {
+    local context="$1" title="$2" file="$3" meta="$4" style="${5:-info}"
+    {
+        printf '<details><summary>%s' "$title"
+        [[ -n "$meta" ]] && printf ' — %s' "$meta"
+        printf '</summary>\n\n'
+        if [[ -s "$file" ]]; then cat "$file"; else printf '_(no final output captured)_\n'; fi
+        printf '\n\n</details>\n'
+    } | buildkite-agent annotate --context "$context" --style "$style" --priority 10 \
+        || echo "WARNING: failed to annotate '$context'" >&2
+}
+
+# annotate_codeblock <context> <title> <file>  -- plain text, collapsed
+annotate_codeblock() {
+    local context="$1" title="$2" file="$3"
+    if [[ ! -s "$file" ]]; then echo "WARNING: nothing to annotate for '$context'" >&2; return 0; fi
+    { printf '<details><summary>%s</summary>\n\n```\n' "$title"; cat "$file"; printf '\n```\n\n</details>\n'; } \
+        | buildkite-agent annotate --context "$context" --style info --priority 10 \
+        || echo "WARNING: failed to annotate '$context'" >&2
+}
+
+# run_claude <rendered_prompt_file> <model> <log_file>  -- runs the agent,
+# streaming its output to the build log (via tee), and sets the caller's
+# SESSION_ID / TRANSCRIPT / EVAL_RESULT_FILE variables (bash dynamic scoping: the
+# caller declares them `local` before calling). $ENTRY_ID is also read from the
+# caller's scope to namespace the parser annotations.
+run_claude() {
+    local prompt_file="$1" model="$2" log="$3"
+    local args=(
+        --output-format stream-json --verbose --model "$model"
+    )
+    # Permission posture (see the block near the top): CI adds nothing —
+    # claude.sh bypasses; local either bypasses (opt-in) or gets an allowlist
+    # that must include the MCP server's tools.
+    if [[ "${RUN_IN_CI:-false}" != "true" ]]; then
+        if [[ "$LOCAL_BYPASS_PERMISSION" == "true" ]]; then
+            args+=(--permission-mode bypassPermissions)
+        else
+            args+=(--allowedTools "Edit" "Bash(go:*)" "Bash(make:*)" "Bash(git:*)" "mcp__${MCP_SERVER_NAME}")
         fi
-        CLAUDE_TOOL_ARGS+=(--allowedTools "Edit" "Bash(go:*)" "Bash(make:*)" "Bash(git:*)" "mcp__${MCP_SERVER_NAME}")
     fi
-fi
-
-EVAL_START=$(date +%s)
-if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
-    # Sandboxed CI execution: run inside the container via claude.sh, which owns
-    # the mcp_in_ci.json config, appends the system prompt, and pipes through the
-    # parser. It prints CLAUDE_SESSION_ID / CLAUDE_TRANSCRIPT pointers on stdout.
-    GOAL_FILE="$(mktemp)"
-    echo "$LLM_PROMPT" > "$GOAL_FILE"
-    ANNOTATION_CONTEXT_PREFIX=eval \
-        "$SCRIPT_DIR/claude.sh" "$GOAL_FILE" "${CLAUDE_TOOL_ARGS[@]}" | tee "$LOG"
-
-    # Recover the session transcript location from claude.sh's emitted pointers
-    # (resolved in the agent's user context, so the $HOME is correct).
-    SESSION_ID=$(sed -n 's/^CLAUDE_SESSION_ID=//p' "$LOG" | tail -n1)
-    TRANSCRIPT=$(sed -n 's/^CLAUDE_TRANSCRIPT=//p' "$LOG" | tail -n1)
-    EVAL_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$LOG" | tail -n1)
-else
-    # Local execution: run claude directly against the harness mcp.json (cwd is
-    # now the eval-repo clone, so a relative path would not resolve).
-    claude -p "$LLM_PROMPT" \
-        --mcp-config "$SCRIPT_DIR/../mcp.json" \
-        "${CLAUDE_TOOL_ARGS[@]}" \
-        | tee "$LOG"
-
-    # The raw stream-json is in $LOG, so derive the session id / transcript here.
-    SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_id' "$LOG" | head -n1)
-    TRANSCRIPT=~/.claude/projects/$(pwd | sed -e 's/[\/.]/-/g')/$SESSION_ID.jsonl
-fi
-EVAL_ELAPSED=$(fmt_elapsed $(( $(date +%s) - EVAL_START )))
-echo "*** EVAL ELAPSED (red-to-green): $EVAL_ELAPSED"
-
-echo "*** SESSION_ID: $SESSION_ID"
-echo "*** TRANSCRIPT: $TRANSCRIPT"
-
-# Upload the eval session log (transcript) as a build artifact. Best-effort and
-# CI-only (buildkite-agent is unavailable locally); never fail the build.
-if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
-    if [[ -s "$TRANSCRIPT" ]]; then
-        buildkite-agent artifact upload "$TRANSCRIPT" \
-            || echo "WARNING: failed to upload session transcript artifact" >&2
+    if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+        # Sandboxed CI execution via claude.sh (owns mcp_in_ci.json, the system
+        # prompt, and the parser). The prompt is already rendered, so pass it as a
+        # plain prompt file with no KEY=VALUE substitution args. Output streams to
+        # the build log; the CLAUDE_* pointers land in $log for recovery below.
+        ANNOTATION_CONTEXT_PREFIX="eval-$ENTRY_ID" \
+            "$SCRIPT_DIR/claude.sh" "$prompt_file" "${args[@]}" | tee "$log"
+        SESSION_ID=$(sed -n 's/^CLAUDE_SESSION_ID=//p' "$log" | tail -n1)
+        TRANSCRIPT=$(sed -n 's/^CLAUDE_TRANSCRIPT=//p' "$log" | tail -n1)
+        EVAL_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$log" | tail -n1)
     else
-        echo "WARNING: session transcript not found or empty: $TRANSCRIPT" >&2
+        # Local execution: run claude directly against the harness mcp.json (cwd
+        # is the eval-repo clone, so a relative path would not resolve).
+        claude -p "$(cat "$prompt_file")" --mcp-config "$ROOT_DIR/mcp.json" "${args[@]}" | tee "$log"
+        SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_id' "$log" | head -n1)
+        TRANSCRIPT="$HOME/.claude/projects/$(pwd | sed -e 's/[\/.]/-/g')/$SESSION_ID.jsonl"
+        EVAL_RESULT_FILE="$(mktemp)"
+        jq -r 'select(.type == "result") | .result // empty' "$log" > "$EVAL_RESULT_FILE" 2>/dev/null || true
     fi
-fi
+}
 
-AUDIT_TOOLS_FILE="$(mktemp)"
-AUDIT_METRICS_FILE="$(mktemp)"
-echo "*** Session Details ***"
-"$SCRIPT_DIR/bk-tool-audit-v2.sh" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE"
-echo "*** Session Metrics ***"
-"$SCRIPT_DIR/bk-tool-audit-v2.sh" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE"
+# run_entry <entry_json> -- execute one matrix entry end to end. Best-effort: a
+# failure in one entry logs and returns without aborting the rest of the matrix.
+run_entry() {
+    local entry="$1"
+    local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV
+    ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
+    AGENT=$(jq -r '.agent // "claude"'        <<<"$entry")
+    MODEL=$(jq -r '.model // "claude-opus-4-8"' <<<"$entry")
+    PROMPT_NAME=$(jq -r '.prompt'             <<<"$entry")
+    MCP_VERSION=$(jq -r '.mcp_version // "source"' <<<"$entry")
+    SETUP=$(jq -r '.scenario.setup // ""'     <<<"$entry")
+    COMPARE_BASE=$(jq -r '.compare_base // ""'   <<<"$entry")
+    COMPARE_TARGET=$(jq -r '.compare_target // ""' <<<"$entry")
+    TOKEN_ENV=$(jq -r '.token_env // ""'      <<<"$entry")
 
-# --- Review the eval session with the klaren prompt -------------------------
-# Best-effort, post-run analysis: a failure here must NOT fail the eval, which
-# has already completed. klaren.md requires the session log path, so append it
-# to the prompt. Use the harness copy of the prompt (alongside this script), not
-# the checked-out subject-under-test copy.
-echo "--- :female-detective: Reviewing the session (klaren)"
-KLAREN_LOG="/tmp/klaren-$DATETIME.log"
-KLAREN_PROMPT_FILE="$(mktemp)"
-{
-    cat "$SCRIPT_DIR/../prompts/klaren.md"
-    echo
-    echo "The LLM session log file to analyze is: $TRANSCRIPT"
-} > "$KLAREN_PROMPT_FILE"
+    echo "+++ :robot_face: Eval entry: $ENTRY_ID"
 
-# klaren reads the transcript and inspects the repo; it needs read/search tools.
-# Same permission posture as the eval run above: CI bypasses via claude.sh;
-# local bypasses only when LOCAL_BYPASS_PERMISSION=true, else an allowlist
-# (no MCP entry — klaren analyzes the transcript file, not Buildkite).
-KLAREN_TOOL_ARGS=(
-    --output-format stream-json --verbose
-)
-if [[ "${RUN_IN_CI:-false}" != "true" ]]; then
-    if [[ "$LOCAL_BYPASS_PERMISSION" == "true" ]]; then
-        KLAREN_TOOL_ARGS+=(--permission-mode bypassPermissions)
-    else
-        KLAREN_TOOL_ARGS+=(--allowedTools "Read" "Grep" "Glob" "Bash")
+    if [[ "$AGENT" != "claude" ]]; then
+        echo "WARNING: entry '$ENTRY_ID' uses agent '$AGENT' which is not implemented yet; skipping." >&2
+        return 0
     fi
-fi
-
-KLAREN_RESULT_FILE=""
-KLAREN_START=$(date +%s)
-if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
-    if ! ANNOTATION_CONTEXT_PREFIX=klaren \
-        "$SCRIPT_DIR/claude.sh" "$KLAREN_PROMPT_FILE" "${KLAREN_TOOL_ARGS[@]}" | tee "$KLAREN_LOG"; then
-        echo "WARNING: klaren review failed" >&2
+    if [[ -n "$MCP_VERSION" && "$MCP_VERSION" != "source" ]]; then
+        echo "NOTICE: entry '$ENTRY_ID' requests mcp_version '$MCP_VERSION', which is not yet wired into the image build (follow-up); running the in-image 'source' binary." >&2
     fi
-    KLAREN_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$KLAREN_LOG" | tail -n1)
-    buildkite-agent artifact upload "$KLAREN_LOG" || echo "WARNING: failed to upload klaren artifact" >&2
-else
-    if ! claude -p "$(cat "$KLAREN_PROMPT_FILE")" \
-        --mcp-config "$SCRIPT_DIR/../mcp.json" \
-        "${KLAREN_TOOL_ARGS[@]}" \
-        | tee "$KLAREN_LOG"; then
-        echo "WARNING: klaren review failed" >&2
-    fi
-fi
-KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
-echo "*** KLAREN ELAPSED: $KLAREN_ELAPSED"
 
-echo "*** KLAREN_LOG: $KLAREN_LOG"
-
-# --- Curated summary annotations --------------------------------------------
-# In addition to the per-message annotations from the parser (which stay on
-# unless ANNOTATE_MESSAGES=false), surface a few high-signal summaries at the top
-# of the build (priority 10 > the parser's 5). CI-only: buildkite-agent annotate
-# is unavailable locally. All best-effort; never fail the build.
-if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
-    # annotate_markdown <context> <title> <file> <meta> [style]
-    # content is already markdown; collapsed by default (like the code-block
-    # annotations). The always-visible summary shows the title + <meta> (e.g.
-    # elapsed time); the markdown body is inside the collapsed <details>.
-    annotate_markdown() {
-        local context="$1" title="$2" file="$3" meta="$4" style="${5:-info}"
-        {
-            printf '<details><summary>%s' "$title"
-            [[ -n "$meta" ]] && printf ' — %s' "$meta"
-            printf '</summary>\n\n'
-            if [[ -s "$file" ]]; then
-                cat "$file"
-            else
-                printf '_(no final output captured)_\n'
-            fi
-            printf '\n\n</details>\n'
-        } | buildkite-agent annotate --context "$context" --style "$style" --priority 10 \
-            || echo "WARNING: failed to annotate '$context'" >&2
-    }
-
-    # annotate_codeblock <context> <title> <file>  -- content is plain text; collapse it
-    annotate_codeblock() {
-        local context="$1" title="$2" file="$3"
-        if [[ ! -s "$file" ]]; then
-            echo "WARNING: nothing to annotate for '$context'" >&2
+    # --- Per-entry API token (token_env) -------------------------------------
+    # Scenarios can live in ANY Buildkite org, and API tokens are single-org, so
+    # an entry may name (token_env) the env var holding the token for ITS org
+    # (convention: MCP_EVAL_FRAMEWORK_<ORG>_ORG_BUILDKITE_API_TOKEN, matching the
+    # secret names in .buildkite/pipeline.evals.yml). The value is handed to the
+    # agent's MCP server as BUILDKITE_API_TOKEN — the server's fixed interface
+    # (see mcp.json / mcp_in_ci.json) — for this entry's run only. Without
+    # token_env the ambient BUILDKITE_API_TOKEN is used, as before.
+    local ENTRY_TOKEN="${BUILDKITE_API_TOKEN:-}"
+    if [[ -n "$TOKEN_ENV" ]]; then
+        if [[ ! "$TOKEN_ENV" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+            echo "WARNING: entry '$ENTRY_ID' has an invalid token_env name '$TOKEN_ENV'; skipping." >&2
             return 0
         fi
-        { printf '<details><summary>%s</summary>\n\n```\n' "$title"; cat "$file"; printf '\n```\n\n</details>\n'; } \
-            | buildkite-agent annotate --context "$context" --style info --priority 10 \
-            || echo "WARNING: failed to annotate '$context'" >&2
-    }
+        ENTRY_TOKEN="${!TOKEN_ENV:-}"
+        if [[ -z "$ENTRY_TOKEN" ]]; then
+            echo "WARNING: entry '$ENTRY_ID' requires \$${TOKEN_ENV} (token_env) which is unset or empty; skipping." >&2
+            return 0
+        fi
+    fi
 
-    annotate_markdown "eval-final"    ":robot_face: Eval — final output"      "${EVAL_RESULT_FILE:-}" "⏱️ Red-to-green elapsed: ${EVAL_ELAPSED}" "success"
-    annotate_codeblock "eval-metrics" ":bar_chart: Eval — session metrics"    "$AUDIT_METRICS_FILE"
-    annotate_codeblock "eval-tools"   ":hammer_and_wrench: Eval — tool calls" "$AUDIT_TOOLS_FILE"
-    annotate_markdown "klaren-final"  ":female-detective: Klaren — session review" "${KLAREN_RESULT_FILE:-}" "⏱️ Klaren elapsed: ${KLAREN_ELAPSED}"
-fi
+    local RUN_KEY="${ENTRY_ID}-${DATETIME}"
+    local RUN_DIR="$RUNS_ROOT/$ENTRY_ID"
+    mkdir -p "$RUN_DIR"
+    local PREFIX="$RUN_DIR/$RUN_KEY"
 
-# --- Compare against last passing main build (best-effort) ------------------
-# Diffs this build's eval summary, metrics, and klaren report against the last
-# passing `main` build, and publishes an `eval-compare` annotation. Best-effort:
-# never fails the eval, which has already completed.
-EVAL_RESULT_FILE="${EVAL_RESULT_FILE:-}" \
-AUDIT_METRICS_FILE="$AUDIT_METRICS_FILE" \
-AUDIT_TOOLS_FILE="$AUDIT_TOOLS_FILE" \
-KLAREN_RESULT_FILE="${KLAREN_RESULT_FILE:-}" \
-  "$SCRIPT_DIR/bk-eval-compare.sh" || echo "WARNING: eval comparison failed" >&2
+    # --- Scenario setup -----------------------------------------------------
+    # setup bash runs in the eval-repo clone (cwd); it may push branches, etc.
+    # It exposes values to the prompt by appending KEY=VALUE lines to
+    # $SCENARIO_VARS_FILE.
+    local SCENARIO_VARS_FILE; SCENARIO_VARS_FILE="$(mktemp)"
+    if [[ -n "$SETUP" ]]; then
+        echo "--- :gear: [$ENTRY_ID] scenario setup"
+        if ! env ENTRY_ID="$ENTRY_ID" DATETIME="$DATETIME" ORG_SLUG="$ORG_SLUG" \
+                 PIPELINE_SLUG="$PIPELINE_SLUG" SCENARIO_VARS_FILE="$SCENARIO_VARS_FILE" \
+                 bash -c "$SETUP"; then
+            echo "WARNING: scenario setup failed for '$ENTRY_ID'; skipping entry." >&2
+            return 0
+        fi
+    fi
+
+    # --- Assemble substitution vars: globals + scenario.vars + setup vars ---
+    local VARS_FILE; VARS_FILE="$(mktemp)"
+    {
+        printf 'ENTRY_ID=%s\n' "$ENTRY_ID"
+        printf 'DATETIME=%s\n' "$DATETIME"
+        printf 'ORG_SLUG=%s\n' "$ORG_SLUG"
+        printf 'PIPELINE_SLUG=%s\n' "$PIPELINE_SLUG"
+        printf 'WAIT_STATUS=%s\n' "$WAIT_STATUS_STRING"
+        printf 'DEBUG_STRING=%s\n' "$DEBUG_STRING"
+        jq -r '.scenario.vars // {} | to_entries[] | "\(.key)=\(.value)"' <<<"$entry"
+        cat "$SCENARIO_VARS_FILE"
+    } > "$VARS_FILE"
+
+    # --- Render the prompt --------------------------------------------------
+    local TEMPLATE="$ROOT_DIR/prompts/$PROMPT_NAME.md"
+    if [[ ! -f "$TEMPLATE" ]]; then
+        echo "WARNING: prompt template not found for '$ENTRY_ID': $TEMPLATE; skipping." >&2
+        return 0
+    fi
+    local RENDERED; RENDERED="$(mktemp)"
+    render_prompt "$TEMPLATE" "$VARS_FILE" > "$RENDERED"
+    echo "--- :scroll: [$ENTRY_ID] rendered prompt"
+    cat "$RENDERED"; echo
+
+    # --- Run the agent ------------------------------------------------------
+    local LOG="/tmp/babystand-$RUN_KEY.log"
+    local SESSION_ID="" TRANSCRIPT="" EVAL_RESULT_FILE=""   # set by run_claude (dynamic scope)
+    local EVAL_START; EVAL_START=$(date +%s)
+    BUILDKITE_API_TOKEN="$ENTRY_TOKEN" run_claude "$RENDERED" "$MODEL" "$LOG"
+    local EVAL_ELAPSED; EVAL_ELAPSED=$(fmt_elapsed $(( $(date +%s) - EVAL_START )))
+    echo "*** [$ENTRY_ID] EVAL ELAPSED: $EVAL_ELAPSED  SESSION_ID: $SESSION_ID"
+    echo "*** [$ENTRY_ID] TRANSCRIPT: $TRANSCRIPT"
+
+    # --- Audit: tools + metrics --------------------------------------------
+    local AUDIT_TOOLS_FILE AUDIT_METRICS_FILE
+    AUDIT_TOOLS_FILE="$(mktemp)"; AUDIT_METRICS_FILE="$(mktemp)"
+    echo "--- :hammer_and_wrench: [$ENTRY_ID] tool calls"
+    "$SCRIPT_DIR/bk-tool-audit-v2.sh" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE" || true
+    echo "--- :bar_chart: [$ENTRY_ID] session metrics"
+    "$SCRIPT_DIR/bk-tool-audit-v2.sh" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE" || true
+
+    # --- Klaren review (best-effort) ---------------------------------------
+    # Use the harness copy of the prompt, not the checked-out subject-under-test
+    # copy.
+    echo "--- :female-detective: [$ENTRY_ID] klaren review"
+    local KLAREN_LOG="/tmp/klaren-$RUN_KEY.log"
+    local KLAREN_PROMPT_FILE KLAREN_RESULT_FILE=""
+    KLAREN_PROMPT_FILE="$(mktemp)"
+    {
+        cat "$ROOT_DIR/prompts/klaren.md"
+        echo
+        echo "The LLM session log file to analyze is: $TRANSCRIPT"
+    } > "$KLAREN_PROMPT_FILE"
+    # klaren reads the transcript and inspects the repo; it needs read/search
+    # tools. Same permission posture as the eval run above: CI bypasses via
+    # claude.sh; local bypasses only when LOCAL_BYPASS_PERMISSION=true, else an
+    # allowlist (no MCP entry — klaren analyzes the transcript file, not
+    # Buildkite).
+    local KLAREN_ARGS=( --output-format stream-json --verbose )
+    if [[ "${RUN_IN_CI:-false}" != "true" ]]; then
+        if [[ "$LOCAL_BYPASS_PERMISSION" == "true" ]]; then
+            KLAREN_ARGS+=(--permission-mode bypassPermissions)
+        else
+            KLAREN_ARGS+=(--allowedTools "Read" "Grep" "Glob" "Bash")
+        fi
+    fi
+    local KLAREN_START; KLAREN_START=$(date +%s)
+    if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+        if ! ANNOTATION_CONTEXT_PREFIX="klaren-$ENTRY_ID" \
+            "$SCRIPT_DIR/claude.sh" "$KLAREN_PROMPT_FILE" "${KLAREN_ARGS[@]}" | tee "$KLAREN_LOG"; then
+            echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
+        fi
+        KLAREN_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$KLAREN_LOG" | tail -n1)
+    else
+        if ! claude -p "$(cat "$KLAREN_PROMPT_FILE")" --mcp-config "$ROOT_DIR/mcp.json" "${KLAREN_ARGS[@]}" | tee "$KLAREN_LOG"; then
+            echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
+        fi
+        KLAREN_RESULT_FILE="$(mktemp)"
+        jq -r 'select(.type == "result") | .result // empty' "$KLAREN_LOG" > "$KLAREN_RESULT_FILE" 2>/dev/null || true
+    fi
+    local KLAREN_ELAPSED; KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
+    echo "*** [$ENTRY_ID] KLAREN ELAPSED: $KLAREN_ELAPSED"
+
+    # --- Write the run bundle to <harness>/runs/<id>/<id>-<datetime>.<ext> ---
+    [[ -s "$EVAL_RESULT_FILE"   ]] && cp "$EVAL_RESULT_FILE"   "$PREFIX.eval-final.md"     || : > "$PREFIX.eval-final.md"
+    [[ -s "$AUDIT_METRICS_FILE" ]] && cp "$AUDIT_METRICS_FILE" "$PREFIX.metrics.json"      || : > "$PREFIX.metrics.json"
+    [[ -s "$AUDIT_TOOLS_FILE"   ]] && cp "$AUDIT_TOOLS_FILE"   "$PREFIX.tools.txt"         || : > "$PREFIX.tools.txt"
+    [[ -s "$KLAREN_RESULT_FILE" ]] && cp "$KLAREN_RESULT_FILE" "$PREFIX.klaren.md"         || : > "$PREFIX.klaren.md"
+    [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
+    echo "*** [$ENTRY_ID] run bundle: $PREFIX.*"
+
+    # --- CI: upload the bundle as build artifacts (dual store) + annotate ---
+    if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+        # runs/ lives under the harness root, not cwd (the clone); upload from
+        # there so artifact names keep the runs/<id>/... form that
+        # bk-eval-compare.sh downloads.
+        (cd "$ROOT_DIR" && buildkite-agent artifact upload "runs/$ENTRY_ID/$RUN_KEY.*") \
+            || echo "WARNING: failed to upload run bundle for '$ENTRY_ID'" >&2
+
+        annotate_markdown "eval-final-$ENTRY_ID"  ":robot_face: [$ENTRY_ID] Eval — final output" \
+            "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED}" "success"
+        annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics" "$PREFIX.metrics.json"
+        annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls" "$PREFIX.tools.txt"
+        annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
+            "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
+    fi
+
+    # --- Compare against the baseline (best-effort) -------------------------
+    echo "--- :scales: [$ENTRY_ID] comparison"
+    ENTRY_ID="$ENTRY_ID" \
+    RUN_KEY="$RUN_KEY" \
+    RUN_DIR="$RUN_DIR" \
+    CUR_EVAL="$PREFIX.eval-final.md" \
+    CUR_METRICS="$PREFIX.metrics.json" \
+    CUR_TOOLS="$PREFIX.tools.txt" \
+    CUR_KLAREN="$PREFIX.klaren.md" \
+    COMPARE_BASE="$COMPARE_BASE" \
+    COMPARE_TARGET="$COMPARE_TARGET" \
+        "$SCRIPT_DIR/bk-eval-compare.sh" \
+        || echo "WARNING: comparison failed for '$ENTRY_ID'" >&2
+}
+
+# --- Drive the matrix -------------------------------------------------------
+MATRIX_JSON="$(yq -o=json '.matrix' "$EVALS_CONFIG")"
+ENTRY_COUNT="$(jq 'length' <<<"$MATRIX_JSON")"
+echo "*** Matrix entries: $ENTRY_COUNT"
+[[ "$ENTRY_COUNT" -gt 0 ]] || { echo "babystand: matrix is empty; nothing to run." >&2; exit 0; }
+
+for i in $(seq 0 $((ENTRY_COUNT - 1))); do
+    entry="$(jq -c ".[$i]" <<<"$MATRIX_JSON")"
+    # Never let one entry abort the rest of the matrix.
+    run_entry "$entry" || echo "WARNING: entry index $i failed" >&2
+done

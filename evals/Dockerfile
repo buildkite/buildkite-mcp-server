@@ -31,6 +31,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+# Install yq (mikefarah) so babystand.sh can parse the eval matrix (evals.yaml).
+RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+    -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
+
 # Install the GitHub CLI.
 RUN curl -fsSL https://github.com/cli/cli/releases/download/v${GITHUB_CLI_VERSION}/gh_${GITHUB_CLI_VERSION}_linux_amd64.tar.gz | tar -xz -C /tmp
 RUN cp /tmp/gh_${GITHUB_CLI_VERSION}_linux_amd64/bin/gh /usr/local/bin/
@@ -54,6 +58,7 @@ COPY evals/prompts /workspace/prompts
 COPY evals/package*.json /workspace/
 COPY evals/tsconfig.json /workspace/
 COPY evals/mcp_in_ci.json /workspace/
+COPY evals/evals.yaml /workspace/
 
 # Run the build.
 RUN npm ci && npm run build
