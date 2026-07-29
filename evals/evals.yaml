@@ -92,11 +92,13 @@ matrix:
   # A no-build scenario: analyze an existing build and propose speedups. Produces
   # only a written proposal — no git push, no new Buildkite build — so it is
   # compared purely via its runs/ bundle.
-  - id: analyze-build-speed
-    agent: claude
-    model: claude-opus-4-8
-    prompt: analyze-build
-    scenario:
-      vars:
-        BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
-    mcp_version: source
+  # UNCOMMENT: This is an example of eval using analyze-build prompt. Uncomment to
+  #            test
+  # - id: analyze-build-speed
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   prompt: analyze-build
+  #   scenario:
+  #     vars:
+  #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
+  #   mcp_version: source
