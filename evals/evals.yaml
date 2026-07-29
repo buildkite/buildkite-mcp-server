@@ -95,7 +95,8 @@ matrix:
   # A no-build scenario: analyze an existing build and propose speedups. Produces
   # only a written proposal — no git push, no new Buildkite build — so it is
   # compared purely via its runs/ bundle.
-  # NOTE: Tweak and uncomment to run this
+  # UNCOMMENT: This is an example of eval using analyze-build prompt. Uncomment to
+  #            test
   # - id: analyze-build-speed
   #   agent: claude
   #   model: claude-opus-4-8
