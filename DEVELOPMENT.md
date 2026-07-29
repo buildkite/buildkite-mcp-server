@@ -72,7 +72,7 @@ Then log into the web UI and hit connect.
 # Publishing a release
 
 - Draft a new release on GitHub: https://github.com/buildkite/buildkite-mcp-server/releases/new
-- Select a new tag version, bumping the minor or patch versions as appropriate. This project is pre-1.0, so we don't make strong compatibility guarantees.
+- Select a new tag version, bumping the minor or patch versions as appropriate
 - Generate release notes
 - Save the release as a draft, and mention internal contributors on Slack before publishing
 - Publish the release
