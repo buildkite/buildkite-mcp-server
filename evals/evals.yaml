@@ -72,7 +72,11 @@ matrix:
         # Hand the generated branch name to the prompt template.
         echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
     mcp_version: source
-    # compare_base defaults to the last successful `main` build for this id.
+    # Pin the baseline to build 45 (the latest complete run of this entry, with
+    # a full runs/ bundle): the default — last passed `main` build — currently
+    # resolves to a pre-matrix build (#41) with no bundle, so comparisons no-op.
+    # Remove this once a post-migration build has landed on `main`.
+    compare_base: build:45
     # compare_target defaults to this run.
 
   # Diagnosis-only variant: point at ANY existing red build — including one on a
