@@ -21,9 +21,9 @@ func NewMiddleware() mcp.Middleware {
 				attribute.String("mcp.method", method),
 			}
 
-			// Session IDs only exist for stdio and legacy HTTP clients. The
-			// 2026-07-28 protocol is stateless and has no sessions, so ID()
-			// returns "" there; use the OTel trace/span IDs for correlation.
+			// Only legacy stateful Streamable HTTP sessions expose an ID.
+			// Stateless HTTP, stdio, and in-memory transports return ""; use the
+			// OTel trace/span IDs for correlation when no session ID is available.
 			sessionID := req.GetSession().ID()
 			if sessionID != "" {
 				attrs = append(attrs, attribute.String("mcp.session_id", sessionID))
