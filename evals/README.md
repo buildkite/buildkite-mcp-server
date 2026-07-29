@@ -33,16 +33,39 @@ Locally there is no container sandbox, so the posture is a conscious choice via 
 All new code are mostly in `evals/` folder
 
 * Add pipeline (.buildkite/pipeline.evals.yml) which run evals
+* evals.yaml
+  * The eval matrix: each entry pins an agent, model, prompt template, scenario
+    (setup bash + vars), MCP version, and optional comparison base/target.
+    babystand.sh executes every entry in order. Override the file with
+    `EVALS_CONFIG`. The per-field semantics are documented at the top of the file.
+  * Scenarios can live in ANY Buildkite org (tokens are single-org), so an entry
+    may set `token_env` to the name of the env var holding its org's token —
+    convention `MCP_EVAL_FRAMEWORK_<ORG>_ORG_BUILDKITE_API_TOKEN`, identical to
+    the secret names in .buildkite/pipeline.evals.yml. babystand.sh hands the
+    value to that entry's MCP server as `BUILDKITE_API_TOKEN` (the server's
+    fixed interface); entries whose named var is unset are skipped loudly
 * In 'evals/prompts/' folder:
   * klaren.md
     * Review LLM agent session log and complain loudly about what could've been better
+  * Other `<name>.md` files are prompt templates referenced by evals.yaml entries,
+    rendered per entry with `{{.KEY}}` substitution (globals + scenario vars +
+    setup vars)
 * In 'evals/scripts/' folder:
   * babystand.sh
+    * Drives the evals.yaml matrix: per entry it runs the scenario setup, renders
+      the prompt, runs the LLM agent, audits the session, runs the klaren review,
+      writes a run bundle to `evals/runs/<id>/<id>-<datetime>.<ext>` (eval-final,
+      metrics, tools, klaren, transcript; gitignored; also uploaded as build
+      artifacts in CI), publishes per-entry annotations (`eval-final-<id>`,
+      `eval-metrics-<id>`, ...), and compares against a baseline via
+      bk-eval-compare.sh
     * This script actually can be run locally as well for testing/debugging
       * `LOCAL_CI`: If false, then prompt specifically instructs LLM agent not to cheat by running local CI to uncover issues, but instead wait for CI to be red before attempting to turn it green
       * `DEBUG_PERMISSIONS`: If true, then prompt specifically instructs LLM agent to fail instead of trying to bypass. This is useful when you're trying to setup the env to run scenarios.
       * `LOCAL_BYPASS_PERMISSION`: See "Permission posture" above. Required, no default.
-    * Running locally: from this repo's root, with `./buildkite-mcp-server` built (`make build`) and your git credentials able to push to the eval repo:
+    * Running locally: from this repo's root, with `./buildkite-mcp-server` built
+      (`make build`), `jq` and `yq` (mikefarah) installed, and your git
+      credentials able to push to the eval repo:
       ```bash
       BUILDKITE_API_TOKEN=... \
       LOCAL_CI=false \
@@ -50,12 +73,11 @@ All new code are mostly in `evals/` folder
       LOCAL_BYPASS_PERMISSION=false \
       ./evals/scripts/babystand.sh
       ```
-      The script clones the eval repo (`EVAL_REPO_SLUG`) into `~/eval-repo-<timestamp>`, copies your built server binary into it, and runs the agent there — the scenario branches live in the eval repo, not this one.
-    * Setup various scenarios 
-    * Calls LLM agent with prompts to evaluate scenarios
-    * Calls klaren.md prompt to review LLM agent performance
   * bk-eval-compare.sh
-    * Compare current eval result with previous 
+    * Compare one matrix entry's run against a baseline. Base/target are each a
+      Buildkite build (its uploaded `runs/<id>/*` artifacts) or a local
+      `evals/runs` path; the default base is the entry's bundle from the last
+      successful `main` build, the default target is the current run
   * bk-tool-audit-v2.sh
     * Retrieve stats about tool calls, input/output token/cache usage from LLM session logs
   * parser.ts
@@ -78,6 +100,6 @@ All new code are mostly in `evals/` folder
     * Upload .buildkite/pipeline.evals.yml
     * Use buildkite-mcp-evals cluster (https://buildkite.com/organizations/buildkite/clusters/1295e59e-8fa9-4525-b873-f3a0ce2efe45/queues)
     * Secrets for
-      * Github to access scenarios (read/write) in external repo
+      * Github to access scenarios (read/write) in external repo, e.g., where scnearios are, so we can access/create branches and push, etc.
       * Buildkite for bk org to retrieve the last successful build (read) to compare
-      * Buildkite for anothertest org where the external repo scenario pipelines (read) are (to monitor scenarios from red-to-green)
+      * Buildkite for orgs where the scenario pipelines (read) are (to monitor scenarios from red-to-green)
