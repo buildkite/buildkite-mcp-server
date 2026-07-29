@@ -28,35 +28,8 @@ cache:
   size: "100g"
 
 steps:
-  - group: ":mag: Quality Checks"
-    key: quality-checks
-    steps:
-    - name: ":golangci-lint: lint"
-      command: golangci-lint run --output.checkstyle.path checkstyle.xml --verbose --timeout 3m
-      artifact_paths:
-        - checkstyle.xml
-      env:
-        GOCACHE: /gocache
-        GOMODCACHE: /gomodcache
-      plugins:
-        - mise#v1.1.5: ~
-
-    - name: ":go: test"
-      artifact_paths:
-        - cover-tree.svg
-        - junit.xml
-      commands:
-        - go run gotest.tools/gotestsum@latest --junitfile junit.xml --format testname -- -coverprofile=cover.out ./...
-        - go run github.com/nikolaydubina/go-cover-treemap@latest -coverprofile cover.out > cover-tree.svg
-        - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
-      env:
-        GOCACHE: /gocache
-        GOMODCACHE: /gomodcache
-      plugins:
-        - mise#v1.1.5: ~
   - label: ":buildkite: Running scenarios"
     key: agent
-    depends_on: quality-checks
     command: ./scripts/babystand.sh
     # The scenario builds this (blocking) eval agent waits on run in the
     # EVAL_ORG_SLUG org (see above), on a different cluster's agents, so sharing
