@@ -313,7 +313,6 @@ run_entry() {
     fi
     local RENDERED; RENDERED="$(mktemp)"
     render_prompt "$TEMPLATE" "$VARS_FILE" > "$RENDERED"
-    # Any {{.KEY}} the vars didn't supply survives verbatim into the prompt —
     # the agent would silently receive a literal placeholder. Surface it.
     local UNRESOLVED
     UNRESOLVED="$(grep -oE '\{\{\.[A-Za-z_][A-Za-z0-9_]*\}\}' "$RENDERED" | sort -u | tr '\n' ' ' || true)"
