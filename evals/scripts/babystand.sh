@@ -27,6 +27,11 @@ command -v yq >/dev/null || { echo "babystand: yq is required to parse $EVALS_CO
 # would resolve to a different file or none at all.
 EVALS_CONFIG="$(cd "$(dirname "$EVALS_CONFIG")" && pwd)/$(basename "$EVALS_CONFIG")"
 
+# Both are required (no default), like LOCAL_BYPASS_PERMISSION below; fail with
+# a clear message instead of set -u's bare "unbound variable".
+: "${LOCAL_CI:?must be set to true or false — see evals/README.md}"
+: "${DEBUG_PERMISSIONS:?must be set to true or false — see evals/README.md}"
+
 if [[ "${LOCAL_CI}" == "true" ]]; then
   WAIT_STATUS_STRING="(perform local CI)"
 else
