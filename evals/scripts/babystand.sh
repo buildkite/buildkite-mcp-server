@@ -15,6 +15,11 @@ command -v jq >/dev/null || { echo "babystand: jq is required" >&2; exit 1; }
 command -v yq >/dev/null || { echo "babystand: yq is required to parse $EVALS_CONFIG" >&2; exit 1; }
 [[ -f "$EVALS_CONFIG" ]] || { echo "babystand: config not found: $EVALS_CONFIG" >&2; exit 1; }
 
+# Both are required (no default), like LOCAL_BYPASS_PERMISSION below; fail with
+# a clear message instead of set -u's bare "unbound variable".
+: "${LOCAL_CI:?must be set to true or false — see evals/README.md}"
+: "${DEBUG_PERMISSIONS:?must be set to true or false — see evals/README.md}"
+
 if [[ "${LOCAL_CI}" == "true" ]]; then
   WAIT_STATUS_STRING="(perform local CI)"
 else
@@ -244,9 +249,11 @@ run_entry() {
     local SCENARIO_VARS_FILE; SCENARIO_VARS_FILE="$(mktemp)"
     if [[ -n "$SETUP" ]]; then
         echo "--- :gear: [$ENTRY_ID] scenario setup"
+        # -euo pipefail: a failing mid-setup command (e.g. git fetch) must fail
+        # the setup, not let later commands run against the wrong state.
         if ! env ENTRY_ID="$ENTRY_ID" DATETIME="$DATETIME" ORG_SLUG="$ORG_SLUG" \
                  PIPELINE_SLUG="$PIPELINE_SLUG" SCENARIO_VARS_FILE="$SCENARIO_VARS_FILE" \
-                 bash -c "$SETUP"; then
+                 bash -euo pipefail -c "$SETUP"; then
             echo "WARNING: scenario setup failed for '$ENTRY_ID'; skipping entry." >&2
             return 0
         fi

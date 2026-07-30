@@ -16,6 +16,7 @@ FROM ubuntu:22.04
 # Expected arguments for tool versions.
 ARG NODE_VERSION="24"
 ARG GITHUB_CLI_VERSION
+ARG YQ_VERSION="v4.47.1"
 
 # Install system dependencies.
 RUN apt-get update && apt-get install -y \
@@ -32,7 +33,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # Install yq (mikefarah) so babystand.sh can parse the eval matrix (evals.yaml).
-RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+# Pinned like the other tools above: 'latest' would make image builds
+# unreproducible and is a supply-chain risk.
+RUN curl -fsSL https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64 \
     -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
 
 # Install the GitHub CLI.

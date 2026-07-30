@@ -9,7 +9,8 @@
 # A "comparison source" is either:
 #   * a Buildkite build   — its uploaded run bundle (runs/<id>/*) is downloaded
 #   * a local path        — a ./runs/<id>/ dir or a <id>-<datetime> file prefix
-# Each resolves to a bundle directory holding <run>.eval-final.md, <run>.metrics.json,
+# Each resolves to a bundle source — a directory (newest run wins) or an exact
+# <id>-<datetime> file prefix — holding <run>.eval-final.md, <run>.metrics.json,
 # <run>.klaren.md (and .tools.txt / .transcript.jsonl).
 #
 # ENV (set by babystand.sh):
@@ -44,8 +45,17 @@ CUR_BUILD_NUM="${BUILDKITE_BUILD_NUMBER:-}"
 api="https://api.buildkite.com/v2/organizations/$ORG/pipelines/$PIPELINE/builds"
 
 # ---------------------------------------------------------------------------
-# pick DIR SUFFIX  -> first file in DIR matching *.SUFFIX (e.g. metrics.json)
-pick() { ls "$1"/*."$2" 2>/dev/null | head -n1; }
+# pick SRC SUFFIX -> the bundle file for SRC. SRC is either a bundle directory
+# (the NEWEST *.SUFFIX wins — run keys embed a sortable datetime) or a
+# <id>-<datetime> file prefix (the exact <prefix>.SUFFIX file).
+pick() {
+    local src="$1" suf="$2"
+    if [[ -d "$src" ]]; then
+        ls "$src"/*."$suf" 2>/dev/null | sort | tail -n1
+    else
+        ls "$src.$suf" 2>/dev/null
+    fi
+}
 
 # build_id_from_number N -> the build UUID (needed for artifact download)
 build_id_from_number() {
@@ -64,25 +74,33 @@ download_build_bundle() {
     echo "$d/runs/$eid"
 }
 
-# resolve_dir SPEC ENTRY_ID -> a bundle directory for an explicit source spec.
+# _resolve_path P -> P when it is a bundle directory or a <id>-<datetime> file
+# prefix with at least one bundle file; non-zero otherwise (typos must not
+# silently fall back to a sibling bundle).
+_resolve_path() {
+    local p="$1"
+    if [[ -d "$p" ]]; then echo "$p"
+    elif compgen -G "$p.*" >/dev/null; then echo "$p"
+    else return 1; fi
+}
+
+# resolve_dir SPEC ENTRY_ID -> a bundle source (directory or file prefix, see
+# pick) for an explicit source spec.
 # Returns non-zero for empty/default sentinels so the caller applies its default.
 resolve_dir() {
-    local spec="$1" eid="$2" p ref id
+    local spec="$1" eid="$2" ref id
     case "$spec" in
         ''|last-successful-main) return 1 ;;
-        local:*) p="${spec#local:}"
-                 if [[ -d "$p" ]]; then echo "$p"; else echo "$(dirname "$p")"; fi ;;
+        local:*) _resolve_path "${spec#local:}" ;;
         build:*) ref="${spec#build:}"
                  if [[ "$ref" =~ ^[0-9]+$ ]]; then id="$(build_id_from_number "$ref")"; else id="$ref"; fi
                  [[ -n "$id" ]] && download_build_bundle "$id" "$eid" ;;
         http*://*) ref="${spec##*/}"; id="$(build_id_from_number "$ref")"
                    [[ -n "$id" ]] && download_build_bundle "$id" "$eid" ;;
-        /*|./*|../*) if [[ -d "$spec" ]]; then echo "$spec"; else echo "$(dirname "$spec")"; fi ;;
+        /*|./*|../*) _resolve_path "$spec" ;;
         *) if [[ "$spec" =~ ^[0-9]+$ ]]; then
                id="$(build_id_from_number "$spec")"; [[ -n "$id" ]] && download_build_bundle "$id" "$eid"
-           elif [[ -e "$spec" ]]; then
-               if [[ -d "$spec" ]]; then echo "$spec"; else echo "$(dirname "$spec")"; fi
-           else return 1; fi ;;
+           else _resolve_path "$spec"; fi ;;
     esac
 }
 
@@ -212,7 +230,7 @@ main() {
     local TGT_EVAL TGT_METRICS TGT_KLAREN TGT_LABEL
     if [[ -n "${COMPARE_TARGET:-}" ]]; then
         local td; td="$(resolve_dir "$COMPARE_TARGET" "$ENTRY_ID")"
-        if [[ -z "$td" || ! -d "$td" ]]; then
+        if [[ -z "$td" ]]; then
             annotate_note "$ctx" "$title" "_Could not resolve compare_target \`$COMPARE_TARGET\` for \`$ENTRY_ID\`._"; return 0
         fi
         TGT_EVAL="$(pick "$td" eval-final.md)"; TGT_METRICS="$(pick "$td" metrics.json)"; TGT_KLAREN="$(pick "$td" klaren.md)"
@@ -227,7 +245,7 @@ main() {
     if [[ -n "${COMPARE_BASE:-}" ]]; then
         bd="$(resolve_dir "$COMPARE_BASE" "$ENTRY_ID")"
         BASE_LABEL="$COMPARE_BASE"
-        if [[ -z "$bd" || ! -d "$bd" ]]; then
+        if [[ -z "$bd" ]]; then
             annotate_note "$ctx" "$title" "_Could not resolve compare_base \`$COMPARE_BASE\` for \`$ENTRY_ID\`._"; return 0
         fi
     else
