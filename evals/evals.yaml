@@ -49,28 +49,28 @@
 
 matrix:
   # The original babystand scenario: drive a red CI branch to green.
-  - id: red-to-green-complete
-    agent: claude
-    model: claude-opus-4-8
-    prompt: red-to-green-complete
-    scenario:
-      setup: |
-        # Establish the red CI signal: branch from the deliberately-broken base
-        # and push it (the branch push triggers its own Quality Checks build,
-        # which is what the agent then fixes). The branch is pushed to the EVAL
-        # repo (EVAL_REPO_SLUG — this setup runs inside babystand.sh's clone of
-        # it), so its builds run on the EVAL org's pipeline; scenario branches
-        # never exist in the repo hosting this eval, so the eval pipeline cannot
-        # recurse (see the CROSS-REPO note in .buildkite/pipeline.evals.yml).
-        SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
-        git fetch
-        git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
-        git push -u origin HEAD
-        # Hand the generated branch name to the prompt template.
-        echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
-    mcp_version: source
-    # compare_base defaults to the last successful `main` build for this id.
-    # compare_target defaults to this run.
+  # - id: red-to-green-complete
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   prompt: red-to-green-complete
+  #   scenario:
+  #     setup: |
+  #       # Establish the red CI signal: branch from the deliberately-broken base
+  #       # and push it (the branch push triggers its own Quality Checks build,
+  #       # which is what the agent then fixes). The branch is pushed to the EVAL
+  #       # repo (EVAL_REPO_SLUG — this setup runs inside babystand.sh's clone of
+  #       # it), so its builds run on the EVAL org's pipeline; scenario branches
+  #       # never exist in the repo hosting this eval, so the eval pipeline cannot
+  #       # recurse (see the CROSS-REPO note in .buildkite/pipeline.evals.yml).
+  #       SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
+  #       git fetch
+  #       git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
+  #       git push -u origin HEAD
+  #       # Hand the generated branch name to the prompt template.
+  #       echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
+  #   mcp_version: source
+  #   # compare_base defaults to the last successful `main` build for this id.
+  #   # compare_target defaults to this run.
 
   # Diagnosis-only variant: point at ANY existing red build — including one on a
   # pipeline we don't own and must not mutate — and produce a written diagnosis.
@@ -78,16 +78,16 @@ matrix:
   # compared purely via its runs/ bundle.
   # WARN: This is a difficult scenario for MCP to resolve, and it takes a while
   #       to run. Uncomment if you want to test MCP against it.
-  #- id: red-to-green-comment-only
-  #  agent: claude
-  #  model: claude-opus-4-8
-  #  prompt: red-to-green-comment-only
-  #  scenario:
-  #    vars:
-  #      BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
-  #  # The build above lives in the `buildkite` org, not the default eval org.
-  #  token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
-  #  mcp_version: source
+  - id: red-to-green-comment-only
+    agent: claude
+    model: claude-opus-4-8
+    prompt: red-to-green-comment-only
+    scenario:
+      vars:
+        BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/206280
+    # The build above lives in the `buildkite` org, not the default eval org.
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
 
   # A no-build scenario: analyze an existing build and propose speedups. Produces
   # only a written proposal — no git push, no new Buildkite build — so it is
@@ -99,5 +99,5 @@ matrix:
   #   prompt: analyze-build
   #   scenario:
   #     vars:
-  #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
+  #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/206280
   #   mcp_version: source
