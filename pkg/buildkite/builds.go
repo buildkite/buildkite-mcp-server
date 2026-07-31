@@ -2,14 +2,43 @@ package buildkite
 
 import (
 	"context"
+	"time"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog/log"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 const annotationSummaryPageSize = 100
+
+// Timing budget for wait_for_build. MCP clients commonly enforce a 60 second
+// request timeout that server progress notifications do not reset, see
+// https://github.com/modelcontextprotocol/typescript-sdk/issues/245. The poll
+// window plus the trailing annotation fetch stay inside that budget, so the
+// call always returns rather than being killed client-side; the caller waits
+// longer by invoking the tool again.
+//
+// These are vars only so tests can shorten them; they are not runtime tunable.
+var (
+	// waitForBuildMaxDuration bounds the polling loop and the API calls it makes.
+	waitForBuildMaxDuration = 45 * time.Second
+	// waitForBuildPollInterval is how often the build is re-checked while waiting.
+	waitForBuildPollInterval = 5 * time.Second
+	// waitForBuildAnnotationTimeout bounds the single annotation fetch made once
+	// the poll window closes.
+	waitForBuildAnnotationTimeout = 10 * time.Second
+)
+
+// MaxWaitForBuildBudget is the longest a single wait_for_build call can take:
+// the poll window plus the annotation fetch that follows it. wait_for_build is
+// deliberately the slowest tool here, so any transport imposing its own write
+// deadline must allow at least this long or it will close the connection before
+// the handler can respond.
+func MaxWaitForBuildBudget() time.Duration {
+	return waitForBuildMaxDuration + waitForBuildAnnotationTimeout
+}
 
 type BuildsClient interface {
 	Get(ctx context.Context, org, pipelineSlug, buildNumber string, options *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
@@ -310,16 +339,11 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 				return handleBuildkiteError(err)
 			}
 
-			annotations, annotationsResponse, err := deps.AnnotationsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
-				ListOptions: buildkite.ListOptions{Page: 1, PerPage: annotationSummaryPageSize},
-				Scope:       "all",
-				OmitBody:    boolPtr(true),
-			})
+			annotations, annotationsTruncated, err := listAnnotationSummaries(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber)
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
 
-			annotationsTruncated := annotationsResponse != nil && annotationsResponse.NextPage > 0
 			span.SetAttributes(
 				attribute.Int("annotation_count", len(annotations)),
 				attribute.Bool("annotations_truncated", annotationsTruncated),
@@ -328,6 +352,212 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 			result := detailBuild(build, annotations, annotationsTruncated)
 			return mcpTextResult(span, &result)
 		}, []string{"read_builds"}
+}
+
+// listAnnotationSummaries fetches the first page of body-less annotations for a
+// build, reporting whether further pages were left behind.
+func listAnnotationSummaries(ctx context.Context, orgSlug, pipelineSlug, buildNumber string) ([]buildkite.Annotation, bool, error) {
+	deps := DepsFromContext(ctx)
+	annotations, resp, err := deps.AnnotationsClient.ListByBuild(ctx, orgSlug, pipelineSlug, buildNumber, &buildkite.AnnotationListOptions{
+		ListOptions: buildkite.ListOptions{Page: 1, PerPage: annotationSummaryPageSize},
+		Scope:       "all",
+		OmitBody:    boolPtr(true),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
+	return annotations, resp != nil && resp.NextPage > 0, nil
+}
+
+type WaitForBuildArgs struct {
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+	BuildNumber  string `json:"build_number"`
+}
+
+// WaitForBuildResult reports whether the build settled within this call's
+// polling window. When finished is false the build is still in progress and the
+// caller should invoke the tool again to keep waiting.
+//
+// Build is only populated once finished is true. Waiting on a long build means
+// repeating this call, and the build detail is near-identical every time, so
+// interim responses carry just the fields that actually change. Callers that
+// want detail mid-flight can ask for it directly with get_build.
+type WaitForBuildResult struct {
+	Finished bool   `json:"finished"`
+	State    string `json:"state"`
+	Number   int    `json:"number"`
+	// WaitedSeconds is how long this single call waited, not the total across
+	// retries. BuildElapsedSeconds covers that: it is measured from the build's
+	// own start time, so it is independent of how many times the tool has been
+	// called and is the field to judge a long-running build by. It is omitted
+	// for a build that has not started yet.
+	WaitedSeconds       int          `json:"waited_seconds"`
+	BuildElapsedSeconds int          `json:"build_elapsed_seconds,omitempty"`
+	Build               *BuildDetail `json:"build,omitempty"`
+}
+
+// buildElapsedSeconds reports how long the build has been going: its full
+// duration once finished, or time so far while it is still running. Returns 0
+// when the build has not started, which omits the field.
+func buildElapsedSeconds(build buildkite.Build) int {
+	if build.StartedAt == nil {
+		return 0
+	}
+
+	end := time.Now()
+	if build.FinishedAt != nil {
+		end = build.FinishedAt.Time
+	}
+
+	elapsed := end.Sub(build.StartedAt.Time)
+	if elapsed < 0 {
+		return 0
+	}
+
+	return int(elapsed.Round(time.Second).Seconds())
+}
+
+func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "wait_for_build",
+			Description: "Wait for a build to reach a terminal state (passed, failed, canceled, skipped, not_run, or blocked on a block step), polling for up to 45 seconds. Returns finished=true along with the build once it settles. If the build is still in progress when the window closes it returns finished=false and the current state only, with no build detail — call this tool again to keep waiting. Judge a long build by build_elapsed_seconds, which counts from the build's own start time and does not reset between calls; waited_seconds covers only the latest call. Do not wait indefinitely: after roughly ten consecutive calls, stop and report the build as still running with its elapsed time rather than continuing to poll. Jobs and annotation bodies are never included — use list_jobs or get_job for job detail, and list_annotations to read annotations",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "Wait for Build",
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args WaitForBuildArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.WaitForBuild")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("build_number", args.BuildNumber),
+			)
+
+			// Jobs are excluded; use list_jobs/get_job for job detail.
+			options := &buildkite.BuildGetOptions{
+				BuildsListOptions: buildkite.BuildsListOptions{
+					ExcludeJobs:     true,
+					ExcludePipeline: true,
+				},
+				IncludeTestEngine: true,
+			}
+
+			// Bound the polling loop, and the API calls it makes, so the tool
+			// always responds inside the client's request timeout.
+			waitCtx, cancel := context.WithTimeout(ctx, waitForBuildMaxDuration)
+			defer cancel()
+
+			ticker := time.NewTicker(waitForBuildPollInterval)
+			defer ticker.Stop()
+
+			deps := DepsFromContext(ctx)
+			started := time.Now()
+
+			var build buildkite.Build
+			var polled bool
+
+		POLL:
+			for {
+				current, _, err := deps.BuildsClient.Get(waitCtx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
+				if err != nil {
+					// The caller has gone away, so there is no result to return and
+					// no point paying for the annotation fetch a result would need.
+					if ctx.Err() != nil {
+						return handleBuildkiteError(err)
+					}
+
+					// Before the first successful poll there is no state to fall back
+					// on, and an authentication failure will not resolve itself, so
+					// both of those propagate.
+					if !polled || isBuildkiteUnauthorized(err) {
+						return handleBuildkiteError(err)
+					}
+
+					// Otherwise fall back to the last state we saw. This covers both
+					// the wait deadline and a transient API error: the caller retries
+					// either way, and reporting a build we just saw running beats
+					// discarding it because one poll failed.
+					log.Ctx(ctx).Warn().Err(err).
+						Str("last_known_state", build.State).
+						Msg("Build poll failed, returning last known state")
+
+					break POLL
+				}
+
+				build, polled = current, true
+
+				if isTerminalBuildState(build.State) {
+					break POLL
+				}
+
+				select {
+				case <-ticker.C:
+				case <-waitCtx.Done():
+					break POLL
+				}
+			}
+
+			finished := isTerminalBuildState(build.State)
+			waited := time.Since(started)
+
+			log.Ctx(ctx).Info().
+				Str("build_id", build.ID).
+				Str("state", build.State).
+				Bool("finished", finished).
+				Dur("waited", waited).
+				Msg("Finished waiting for build")
+
+			span.SetAttributes(
+				attribute.String("build_state", build.State),
+				attribute.Bool("finished", finished),
+			)
+
+			result := WaitForBuildResult{
+				Finished:            finished,
+				State:               build.State,
+				Number:              build.Number,
+				WaitedSeconds:       int(waited.Round(time.Second).Seconds()),
+				BuildElapsedSeconds: buildElapsedSeconds(build),
+			}
+
+			// Build detail, and the annotation fetch it needs, are only worth
+			// paying for once the build has settled. Skipping them on interim
+			// responses keeps a long wait from repeating the same static build
+			// metadata on every retry.
+			if finished {
+				// This runs outside the poll window, so it carries its own budget.
+				annCtx, annCancel := context.WithTimeout(ctx, waitForBuildAnnotationTimeout)
+				defer annCancel()
+
+				annotations, annotationsTruncated, err := listAnnotationSummaries(annCtx, args.OrgSlug, args.PipelineSlug, args.BuildNumber)
+				if err != nil {
+					return handleBuildkiteError(err)
+				}
+
+				detail := detailBuild(build, annotations, annotationsTruncated)
+				result.Build = &detail
+			}
+
+			return mcpTextResult(span, &result)
+		}, []string{"read_builds"}
+}
+
+// isTerminalBuildState reports whether a build state is settled, meaning further
+// polling cannot change it without outside intervention. "blocked" counts: the
+// build is waiting on a block step and will not move until a human unblocks it.
+// See https://buildkite.com/docs/pipelines/configure/notifications#build-states
+func isTerminalBuildState(state string) bool {
+	switch state {
+	case "passed", "failed", "canceled", "skipped", "not_run", "blocked":
+		return true
+	default:
+		return false
+	}
 }
 
 type Entry struct {
