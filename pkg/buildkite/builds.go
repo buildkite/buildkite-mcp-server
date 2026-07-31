@@ -376,17 +376,44 @@ type WaitForBuildArgs struct {
 // interim responses carry just the fields that actually change. Callers that
 // want detail mid-flight can ask for it directly with get_build.
 type WaitForBuildResult struct {
-	Finished      bool         `json:"finished"`
-	State         string       `json:"state"`
-	Number        int          `json:"number"`
-	WaitedSeconds int          `json:"waited_seconds"`
-	Build         *BuildDetail `json:"build,omitempty"`
+	Finished bool   `json:"finished"`
+	State    string `json:"state"`
+	Number   int    `json:"number"`
+	// WaitedSeconds is how long this single call waited, not the total across
+	// retries. BuildElapsedSeconds covers that: it is measured from the build's
+	// own start time, so it is independent of how many times the tool has been
+	// called and is the field to judge a long-running build by. It is omitted
+	// for a build that has not started yet.
+	WaitedSeconds       int          `json:"waited_seconds"`
+	BuildElapsedSeconds int          `json:"build_elapsed_seconds,omitempty"`
+	Build               *BuildDetail `json:"build,omitempty"`
+}
+
+// buildElapsedSeconds reports how long the build has been going: its full
+// duration once finished, or time so far while it is still running. Returns 0
+// when the build has not started, which omits the field.
+func buildElapsedSeconds(build buildkite.Build) int {
+	if build.StartedAt == nil {
+		return 0
+	}
+
+	end := time.Now()
+	if build.FinishedAt != nil {
+		end = build.FinishedAt.Time
+	}
+
+	elapsed := end.Sub(build.StartedAt.Time)
+	if elapsed < 0 {
+		return 0
+	}
+
+	return int(elapsed.Round(time.Second).Seconds())
 }
 
 func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "wait_for_build",
-			Description: "Wait for a build to reach a terminal state (passed, failed, canceled, skipped, not_run, or blocked on a block step), polling for up to 45 seconds. Returns finished=true along with the build once it settles. If the build is still in progress when the window closes it returns finished=false and the current state only, with no build detail — call this tool again to keep waiting. Jobs and annotation bodies are never included — use list_jobs or get_job for job detail, and list_annotations to read annotations",
+			Description: "Wait for a build to reach a terminal state (passed, failed, canceled, skipped, not_run, or blocked on a block step), polling for up to 45 seconds. Returns finished=true along with the build once it settles. If the build is still in progress when the window closes it returns finished=false and the current state only, with no build detail — call this tool again to keep waiting. Judge a long build by build_elapsed_seconds, which counts from the build's own start time and does not reset between calls; waited_seconds covers only the latest call. Do not wait indefinitely: after roughly ten consecutive calls, stop and report the build as still running with its elapsed time rather than continuing to poll. Jobs and annotation bodies are never included — use list_jobs or get_job for job detail, and list_annotations to read annotations",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Wait for Build",
 				ReadOnlyHint: true,
@@ -466,10 +493,11 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 			)
 
 			result := WaitForBuildResult{
-				Finished:      finished,
-				State:         build.State,
-				Number:        build.Number,
-				WaitedSeconds: int(waited.Round(time.Second).Seconds()),
+				Finished:            finished,
+				State:               build.State,
+				Number:              build.Number,
+				WaitedSeconds:       int(waited.Round(time.Second).Seconds()),
+				BuildElapsedSeconds: buildElapsedSeconds(build),
 			}
 
 			// Build detail, and the annotation fetch it needs, are only worth

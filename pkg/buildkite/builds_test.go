@@ -917,3 +917,73 @@ func TestIsTerminalBuildState(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildElapsedSeconds(t *testing.T) {
+	ts := func(d time.Duration) *buildkite.Timestamp {
+		return &buildkite.Timestamp{Time: time.Now().Add(d)}
+	}
+
+	t.Run("OmittedWhenBuildHasNotStarted", func(t *testing.T) {
+		require.Zero(t, buildElapsedSeconds(buildkite.Build{}))
+	})
+
+	t.Run("CountsFromStartWhileRunning", func(t *testing.T) {
+		// Independent of how long any single wait call ran.
+		require.InDelta(t, 600, buildElapsedSeconds(buildkite.Build{
+			State: "running", StartedAt: ts(-10 * time.Minute),
+		}), 2)
+	})
+
+	t.Run("UsesFinishedAtOnceSettled", func(t *testing.T) {
+		// A build that finished an hour ago still reports its own duration,
+		// not the time since it finished.
+		start := time.Now().Add(-2 * time.Hour)
+		require.Equal(t, 900, buildElapsedSeconds(buildkite.Build{
+			State:      "passed",
+			StartedAt:  &buildkite.Timestamp{Time: start},
+			FinishedAt: &buildkite.Timestamp{Time: start.Add(15 * time.Minute)},
+		}))
+	})
+
+	t.Run("ClampsNegativeSkew", func(t *testing.T) {
+		start := time.Now()
+		require.Zero(t, buildElapsedSeconds(buildkite.Build{
+			StartedAt:  &buildkite.Timestamp{Time: start},
+			FinishedAt: &buildkite.Timestamp{Time: start.Add(-time.Minute)},
+		}))
+	})
+}
+
+func TestWaitForBuildReportsBuildElapsed(t *testing.T) {
+	assert := require.New(t)
+	shortenBuildWait(t, 50*time.Millisecond, time.Millisecond)
+
+	client := &MockBuildsClient{
+		GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+				ID: "123", Number: 1, State: "running",
+				StartedAt: &buildkite.Timestamp{Time: time.Now().Add(-9 * time.Minute)},
+			}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient:      client,
+		AnnotationsClient: &MockAnnotationsClient{},
+	})
+	_, handler, _ := WaitForBuild()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+	})
+	assert.NoError(err)
+
+	// The caller can tell a 9-minute build from a 9-second one without a
+	// separate get_build, and without counting its own retries.
+	text := getTextResult(t, result).Text
+	assert.Contains(text, `"build_elapsed_seconds":540,`)
+	assert.Contains(text, `"finished":false`)
+
+	// Still lean.
+	assert.Less(len(text), 120)
+}
