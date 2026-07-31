@@ -112,14 +112,21 @@ fmt_elapsed() { printf '%dm %ds' $(($1 / 60)) $(($1 % 60)); }
 
 # Render a prompt template: replace {{.KEY}} with VALUE for every KEY=VALUE line
 # in the vars file. Line-oriented (values are single-line: urls, branch names).
+# When a KEY appears more than once (globals, then scenario.vars, then setup
+# output are concatenated), the LAST value wins — so e.g. a setup script can
+# override a global such as ORG_SLUG.
 #   render_prompt <template_file> <vars_file>   -> rendered prompt on stdout
 render_prompt() {
     local template="$1" vars="$2" content key val
     content="$(cat "$template")"
+    # Collapse to the last value per key first: the substitution is destructive
+    # (the first replacement consumes every {{.KEY}} occurrence), so without this
+    # the FIRST value would win instead of the last. awk keeps the last KEY=VALUE
+    # line per key; $0 preserves values that themselves contain '='.
     while IFS='=' read -r key val; do
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
         content="${content//\{\{.$key\}\}/$val}"
-    done < "$vars"
+    done < <(awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { last[$1] = $0 } END { for (k in last) print last[k] }' "$vars")
     printf '%s' "$content"
 }
 
@@ -273,6 +280,13 @@ run_entry() {
     fi
     local RENDERED; RENDERED="$(mktemp)"
     render_prompt "$TEMPLATE" "$VARS_FILE" > "$RENDERED"
+    # Any {{.KEY}} the vars didn't supply survives verbatim into the prompt —
+    # the agent would silently receive a literal placeholder. Surface it.
+    local UNRESOLVED
+    UNRESOLVED="$(grep -oE '\{\{\.[A-Za-z_][A-Za-z0-9_]*\}\}' "$RENDERED" | sort -u | tr '\n' ' ' || true)"
+    if [[ -n "${UNRESOLVED// }" ]]; then
+        echo "WARNING: [$ENTRY_ID] prompt has unresolved placeholder(s): ${UNRESOLVED% }" >&2
+    fi
     echo "--- :scroll: [$ENTRY_ID] rendered prompt"
     cat "$RENDERED"; echo
 
@@ -379,6 +393,33 @@ MATRIX_JSON="$(yq -o=json '.matrix' "$EVALS_CONFIG")"
 ENTRY_COUNT="$(jq 'length' <<<"$MATRIX_JSON")"
 echo "*** Matrix entries: $ENTRY_COUNT"
 [[ "$ENTRY_COUNT" -gt 0 ]] || { echo "babystand: matrix is empty; nothing to run." >&2; exit 0; }
+
+# --- Validate entry ids before running anything -----------------------------
+# ids namespace run artifacts (runs/<id>/) and per-entry annotations
+# (eval-final-<id>, ...), and key each entry to its counterpart in a prior build
+# for comparison. A missing id deserializes to the literal string "null"; a
+# duplicate id makes two entries clobber the same bundle and annotations. Both
+# silently corrupt results, so fail loudly here rather than mid-run.
+ALL_IDS="$(jq -r '.[].id // ""' <<<"$MATRIX_JSON")"
+# Missing id → jq null → coalesced to "" above; empty string id also counts.
+# Detected via jq rather than a grep empty-alternation, which BSD grep rejects.
+MISSING_COUNT="$(jq '[.[] | select((.id // "") == "")] | length' <<<"$MATRIX_JSON")"
+if [[ "$MISSING_COUNT" -gt 0 ]]; then
+    echo "babystand: every matrix entry needs a non-empty 'id' ($MISSING_COUNT missing)." >&2
+    exit 1
+fi
+DUP_IDS="$(printf '%s\n' "$ALL_IDS" | sort | uniq -d | tr '\n' ' ' || true)"
+if [[ -n "${DUP_IDS// }" ]]; then
+    echo "babystand: duplicate matrix entry id(s): ${DUP_IDS% }" >&2
+    echo "  ids must be unique — they namespace runs/<id>/ and eval-<id> annotations." >&2
+    exit 1
+fi
+BAD_IDS="$(printf '%s\n' "$ALL_IDS" | grep -vxE '[A-Za-z0-9._-]+' | tr '\n' ' ' || true)"
+if [[ -n "${BAD_IDS// }" ]]; then
+    echo "babystand: invalid matrix entry id(s): ${BAD_IDS% }" >&2
+    echo "  ids may contain only letters, digits, dot, underscore and hyphen (they appear in paths and annotation names)." >&2
+    exit 1
+fi
 
 for i in $(seq 0 $((ENTRY_COUNT - 1))); do
     entry="$(jq -c ".[$i]" <<<"$MATRIX_JSON")"
