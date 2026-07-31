@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/stretchr/testify/require"
@@ -679,4 +680,240 @@ func TestRebuildBuild(t *testing.T) {
 		textContent := getTextResult(t, result)
 		assert.Contains(textContent.Text, "build not found")
 	})
+}
+
+// shortenBuildWait shrinks the wait window and poll interval so wait_for_build
+// tests exercise the polling loop without sleeping for real build durations.
+func shortenBuildWait(t *testing.T, maxDuration, pollInterval time.Duration) {
+	t.Helper()
+	origMax, origPoll := waitForBuildMaxDuration, waitForBuildPollInterval
+	waitForBuildMaxDuration, waitForBuildPollInterval = maxDuration, pollInterval
+	t.Cleanup(func() {
+		waitForBuildMaxDuration, waitForBuildPollInterval = origMax, origPoll
+	})
+}
+
+func TestWaitForBuild(t *testing.T) {
+	t.Run("ToolDefinition", func(t *testing.T) {
+		tool, handler, scopes := WaitForBuild()
+		require.Equal(t, "wait_for_build", tool.Name)
+		require.True(t, tool.Annotations.ReadOnlyHint)
+		require.Equal(t, []string{"read_builds"}, scopes)
+		require.NotNil(t, handler)
+	})
+
+	t.Run("ReturnsImmediatelyWhenBuildAlreadyTerminal", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 45*time.Second, 5*time.Second)
+
+		var getCalls int
+		var capturedOptions *buildkite.BuildGetOptions
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				getCalls++
+				capturedOptions = opt
+				return buildkite.Build{ID: "123", Number: 1, State: "passed"}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		started := time.Now()
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		elapsed := time.Since(started)
+		assert.NoError(err)
+
+		// A settled build must not pay for a poll interval it does not need.
+		assert.Equal(1, getCalls)
+		assert.Less(elapsed, waitForBuildPollInterval)
+
+		text := getTextResult(t, result).Text
+		assert.Contains(text, `"finished":true`)
+		assert.Contains(text, `"state":"passed"`)
+		assert.Contains(text, `"id":"123"`)
+
+		// Jobs stay excluded; list_jobs/get_job own that detail.
+		assert.True(capturedOptions.ExcludeJobs)
+		assert.True(capturedOptions.ExcludePipeline)
+	})
+
+	t.Run("PollsUntilBuildReachesTerminalState", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		var getCalls int
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				getCalls++
+				state := "running"
+				if getCalls >= 3 {
+					state = "failed"
+				}
+				return buildkite.Build{ID: "123", Number: 1, State: state}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+		assert.Equal(3, getCalls)
+
+		text := getTextResult(t, result).Text
+		assert.Contains(text, `"finished":true`)
+		assert.Contains(text, `"state":"failed"`)
+	})
+
+	t.Run("ReturnsUnfinishedWhenWaitWindowCloses", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 50*time.Millisecond, time.Millisecond)
+
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{ID: "123", Number: 1, State: "running"}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+
+		var annotationCalls int
+		annotationsClient := &MockAnnotationsClient{
+			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+				annotationCalls++
+				return nil, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: annotationsClient,
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+
+		// A build that is merely still running is a normal result, not an error.
+		assert.False(result.IsError)
+
+		// No annotation fetch is worth paying for until the build settles.
+		assert.Zero(annotationCalls)
+
+		text := getTextResult(t, result).Text
+		assert.Contains(text, `"finished":false`)
+		assert.Contains(text, `"state":"running"`)
+		assert.Contains(text, `"waited_seconds":`)
+
+		// Interim responses stay lean: a caller polling a long build repeats this
+		// payload, and the build detail is identical every time.
+		assert.NotContains(text, `"build":`)
+		assert.NotContains(text, `"author":`)
+		assert.NotContains(text, `"annotations":`)
+		assert.Less(len(text), 100)
+	})
+
+	t.Run("ReturnsErrorWhenFirstPollFails", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{}, nil, errors.New("boom")
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+		assert.True(result.IsError)
+		assert.Contains(getTextResult(t, result).Text, "boom")
+	})
+
+	t.Run("IncludesAnnotationSummariesOnce", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		var getCalls, annotationCalls int
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				getCalls++
+				state := "running"
+				if getCalls >= 3 {
+					state = "passed"
+				}
+				return buildkite.Build{ID: "123", Number: 1, State: state}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+		annotationsClient := &MockAnnotationsClient{
+			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+				annotationCalls++
+				return []buildkite.Annotation{
+					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", BodyHTML: "<p>large body</p>"},
+				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: annotationsClient,
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+
+		// Annotations are fetched on the way out, not once per poll.
+		assert.Equal(3, getCalls)
+		assert.Equal(1, annotationCalls)
+
+		text := getTextResult(t, result).Text
+		assert.Contains(text, `"id":"annotation-1"`)
+		assert.NotContains(text, "large body")
+	})
+}
+
+func TestIsTerminalBuildState(t *testing.T) {
+	terminal := []string{"passed", "failed", "canceled", "skipped", "not_run", "blocked"}
+	for _, state := range terminal {
+		t.Run(state, func(t *testing.T) {
+			require.True(t, isTerminalBuildState(state))
+		})
+	}
+
+	// "failing" and "canceling" are transitional: the build is still moving.
+	inProgress := []string{"creating", "scheduled", "running", "failing", "canceling", ""}
+	for _, state := range inProgress {
+		t.Run("not_terminal_"+state, func(t *testing.T) {
+			require.False(t, isTerminalBuildState(state))
+		})
+	}
 }
