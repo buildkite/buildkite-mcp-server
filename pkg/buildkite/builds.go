@@ -31,6 +31,15 @@ var (
 	waitForBuildAnnotationTimeout = 10 * time.Second
 )
 
+// MaxWaitForBuildBudget is the longest a single wait_for_build call can take:
+// the poll window plus the annotation fetch that follows it. wait_for_build is
+// deliberately the slowest tool here, so any transport imposing its own write
+// deadline must allow at least this long or it will close the connection before
+// the handler can respond.
+func MaxWaitForBuildBudget() time.Duration {
+	return waitForBuildMaxDuration + waitForBuildAnnotationTimeout
+}
+
 type BuildsClient interface {
 	Get(ctx context.Context, org, pipelineSlug, buildNumber string, options *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
 	ListByOrg(ctx context.Context, org string, options *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
@@ -456,12 +465,28 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 			for {
 				current, _, err := deps.BuildsClient.Get(waitCtx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
 				if err != nil {
-					// Once we have a build, a poll cancelled by the wait deadline is
-					// the expected way to exit, not a failure worth reporting.
-					if polled && waitCtx.Err() != nil {
-						break POLL
+					// The caller has gone away, so there is no result to return and
+					// no point paying for the annotation fetch a result would need.
+					if ctx.Err() != nil {
+						return handleBuildkiteError(err)
 					}
-					return handleBuildkiteError(err)
+
+					// Before the first successful poll there is no state to fall back
+					// on, and an authentication failure will not resolve itself, so
+					// both of those propagate.
+					if !polled || isBuildkiteUnauthorized(err) {
+						return handleBuildkiteError(err)
+					}
+
+					// Otherwise fall back to the last state we saw. This covers both
+					// the wait deadline and a transient API error: the caller retries
+					// either way, and reporting a build we just saw running beats
+					// discarding it because one poll failed.
+					log.Ctx(ctx).Warn().Err(err).
+						Str("last_known_state", build.State).
+						Msg("Build poll failed, returning last known state")
+
+					break POLL
 				}
 
 				build, polled = current, true

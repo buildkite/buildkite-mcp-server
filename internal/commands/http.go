@@ -55,7 +55,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 
 	mux := http.NewServeMux()
-	srv := newServerWithTimeouts(mux, 30*time.Second)
+	srv := newServerWithTimeouts(mux, httpWriteTimeout)
 
 	mux.HandleFunc("/health", healthHandler)
 
@@ -78,6 +78,14 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 
 	return srv.Serve(listener)
 }
+
+// httpWriteTimeout must outlast the slowest tool call. Go applies this deadline
+// to the connection from when the request headers are read, so a handler that
+// runs longer never delivers its response: the client sees the connection close,
+// not an error it can act on. wait_for_build polls for tens of seconds by
+// design, so this is sized off buildkite.MaxWaitForBuildBudget with headroom.
+// TestWriteTimeoutOutlastsSlowestTool keeps the two in step.
+const httpWriteTimeout = 90 * time.Second
 
 func newServerWithTimeouts(mux *http.ServeMux, writeTimeout time.Duration) *http.Server {
 	return &http.Server{

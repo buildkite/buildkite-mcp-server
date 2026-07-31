@@ -987,3 +987,119 @@ func TestWaitForBuildReportsBuildElapsed(t *testing.T) {
 	// Still lean.
 	assert.Less(len(text), 120)
 }
+
+func TestWaitForBuildPollErrorHandling(t *testing.T) {
+	runningThenError := func(failAfter int, failWith error) (*MockBuildsClient, *int) {
+		calls := 0
+		return &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				calls++
+				if calls > failAfter {
+					return buildkite.Build{}, nil, failWith
+				}
+				return buildkite.Build{ID: "123", Number: 1, State: "running"}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}, &calls
+	}
+
+	t.Run("TransientErrorReturnsLastKnownState", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		client, _ := runningThenError(2, errors.New("500 internal server error"))
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+
+		// One blip must not discard a build we saw running moments ago; the
+		// caller retries exactly as it would after a window timeout.
+		assert.False(result.IsError)
+		text := getTextResult(t, result).Text
+		assert.Contains(text, `"finished":false`)
+		assert.Contains(text, `"state":"running"`)
+	})
+
+	t.Run("UnauthorizedPropagatesRatherThanLookingLikeProgress", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		client, _ := runningThenError(2, &buildkite.ErrorResponse{
+			Response: &http.Response{StatusCode: http.StatusUnauthorized},
+		})
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		_, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+
+		// A revoked token never fixes itself, so it must not be reported as
+		// "still running" and retried forever.
+		assert.ErrorIs(err, ErrUnauthorized)
+	})
+
+	t.Run("ClientAbortSkipsTheAnnotationFetch", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		var annotationCalls, calls int
+		client := &MockBuildsClient{
+			GetFunc: func(reqCtx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				calls++
+				if calls > 2 {
+					// Caller hangs up mid-wait.
+					cancel()
+					return buildkite.Build{}, nil, context.Canceled
+				}
+				// Stay non-terminal so the loop keeps polling until the abort.
+				return buildkite.Build{ID: "123", Number: 1, State: "running"}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+
+		deps := ToolDependencies{
+			BuildsClient: client,
+			AnnotationsClient: &MockAnnotationsClient{
+				ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+					annotationCalls++
+					return nil, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+				},
+			},
+		}
+		_, handler, _ := WaitForBuild()
+
+		_, _, _ = handler(ContextWithDeps(ctx, deps), createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+
+		// Nobody is listening, so we must not pay for more API calls.
+		assert.Zero(annotationCalls)
+	})
+}
+
+// TestWaitForBuildBudgetFitsClientTimeout pins the constraint the whole design
+// exists to satisfy. Only a comment enforced it before.
+func TestWaitForBuildBudgetFitsClientTimeout(t *testing.T) {
+	// MCP clients commonly enforce a 60s request timeout that progress
+	// notifications do not reset, see
+	// https://github.com/modelcontextprotocol/typescript-sdk/issues/245
+	const clientRequestTimeout = 60 * time.Second
+
+	require.Less(t, MaxWaitForBuildBudget(), clientRequestTimeout,
+		"a single wait_for_build call must return inside the client's request timeout")
+}
