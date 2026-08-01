@@ -65,7 +65,7 @@ type JobDetail struct {
 	Type               string               `json:"type,omitempty"`
 	Label              string               `json:"label,omitempty"`
 	GroupKey           string               `json:"group_key,omitempty"`
-	Signal             *int                 `json:"signal,omitempty"`
+	Signal             string               `json:"signal,omitempty"`
 	CreatedAt          *buildkite.Timestamp `json:"created_at,omitempty"`
 	StartedAt          *buildkite.Timestamp `json:"started_at,omitempty"`
 	FinishedAt         *buildkite.Timestamp `json:"finished_at,omitempty"`
