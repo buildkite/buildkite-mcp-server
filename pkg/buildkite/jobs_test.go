@@ -422,7 +422,7 @@ func TestListJobs(t *testing.T) {
 					Items: []buildkite.Job{{
 						ID: "job-1", Name: "test", State: "failed", Command: "go test ./...",
 						CreatedAt: timestamp, StartedAt: timestamp, FinishedAt: timestamp,
-						Signal: intPtr(9), SignalReason: "agent_stop", Retried: true,
+						Signal: "SIGKILL", SignalReason: "agent_stop", Retried: true,
 						RetriedInJobID: "job-2", RetriesCount: 1,
 						RetrySource:        &buildkite.JobRetrySource{JobID: "job-0", RetryType: "manual"},
 						SoftFailed:         true,
@@ -452,7 +452,7 @@ func TestListJobs(t *testing.T) {
 		assert.Equal(t, timestamp, job.CreatedAt)
 		assert.Equal(t, timestamp, job.StartedAt)
 		assert.Equal(t, timestamp, job.FinishedAt)
-		assert.Equal(t, intPtr(9), job.Signal)
+		assert.Equal(t, "SIGKILL", job.Signal)
 		assert.Equal(t, "agent_stop", job.SignalReason)
 		assert.True(t, job.Retried)
 		assert.Equal(t, "job-2", job.RetriedInJobID)
@@ -806,4 +806,52 @@ func TestGetJob(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, getTextResult(t, result).Text, "provide both")
 	})
+}
+
+// TestJobSignalDecodesFromWire guards against the Signal field drifting back to a
+// numeric type. The REST API sends the symbolic signal name (the agent sets it via
+// process.SignalString), so a *int typed field fails the whole response with
+// "cannot unmarshal string into Go struct field Job.items.signal of type int" —
+// one signal-killed job in a large build takes out every other job with it.
+//
+// The other tests in this file build buildkite.Job values directly through the
+// mock, which never exercises JSON decoding; this one starts from wire bytes.
+func TestJobSignalDecodesFromWire(t *testing.T) {
+	t.Parallel()
+
+	const payload = `{"items":[
+		{"id":"job-1","state":"timed_out","signal":"SIGKILL","signal_reason":"timed_out"},
+		{"id":"job-2","state":"failed","signal":"SIGTERM","signal_reason":"agent_stop"},
+		{"id":"job-3","state":"passed","signal":null},
+		{"id":"job-4","state":"passed"}
+	]}`
+
+	var list buildkite.JobsList
+	require.NoError(t, json.Unmarshal([]byte(payload), &list))
+	require.Len(t, list.Items, 4)
+	assert.Equal(t, "SIGKILL", list.Items[0].Signal)
+	assert.Equal(t, "SIGTERM", list.Items[1].Signal)
+	assert.Empty(t, list.Items[2].Signal, "explicit null should decode to the zero value")
+	assert.Empty(t, list.Items[3].Signal, "absent signal should decode to the zero value")
+
+	// And that the decoded name survives the passthrough into the tool response.
+	mockJobs := &MockJobsClient{
+		ListByBuildFunc: func(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			return list, &buildkite.Response{}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+	_, handler, _ := ListJobs()
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListJobsArgs{
+		OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", DetailLevel: "detailed",
+	})
+	require.NoError(t, err)
+
+	var jobs JobListResult[JobDetail]
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &jobs))
+	require.Len(t, jobs.Items, 4)
+	assert.Equal(t, "SIGKILL", jobs.Items[0].Signal)
+	assert.Equal(t, "SIGTERM", jobs.Items[1].Signal)
+	assert.Empty(t, jobs.Items[2].Signal)
 }
