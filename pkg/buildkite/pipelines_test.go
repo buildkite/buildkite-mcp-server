@@ -207,10 +207,11 @@ steps:
 	assert.True(webhookCalled, "AddWebhook should have been called when CreateWebhook is true")
 
 	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"webhook":{"created":true,"note":"Pipeline and webhook created successfully."}`)
-	assert.Contains(textContent.Text, `"id":"123"`)
-	assert.Contains(textContent.Text, `"name":"Test Pipeline"`)
-	assert.Contains(textContent.Text, `"slug":"test-pipeline"`)
+	requireJSONPathEqual(t, textContent.Text, true, "webhook", "created")
+	requireJSONPathEqual(t, textContent.Text, "Pipeline and webhook created successfully.", "webhook", "note")
+	requireJSONPathEqual(t, textContent.Text, "123", "pipeline", "id")
+	requireJSONPathEqual(t, textContent.Text, "Test Pipeline", "pipeline", "name")
+	requireJSONPathEqual(t, textContent.Text, "test-pipeline", "pipeline", "slug")
 }
 
 func TestCreatePipelineWithWebhook(t *testing.T) {
@@ -288,10 +289,11 @@ steps:
 	assert.True(webhookCalled, "AddWebhook should have been called")
 
 	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"webhook":{"created":true,"note":"Pipeline and webhook created successfully."}`)
-	assert.Contains(textContent.Text, `"id":"123"`)
-	assert.Contains(textContent.Text, `"name":"Test Pipeline"`)
-	assert.Contains(textContent.Text, `"slug":"test-pipeline"`)
+	requireJSONPathEqual(t, textContent.Text, true, "webhook", "created")
+	requireJSONPathEqual(t, textContent.Text, "Pipeline and webhook created successfully.", "webhook", "note")
+	requireJSONPathEqual(t, textContent.Text, "123", "pipeline", "id")
+	requireJSONPathEqual(t, textContent.Text, "Test Pipeline", "pipeline", "name")
+	requireJSONPathEqual(t, textContent.Text, "test-pipeline", "pipeline", "slug")
 }
 
 func TestCreatePipelineWithWebhookError(t *testing.T) {
@@ -361,9 +363,9 @@ steps:
 	assert.True(webhookCalled, "AddWebhook should have been called")
 
 	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"webhook":{"created":false,`)
-	assert.Contains(textContent.Text, `"error":"Auto-creating webhooks is not supported for your repository."`)
-	assert.Contains(textContent.Text, `"note":"Pipeline created successfully, but webhook creation failed.`)
+	requireJSONPathEqual(t, textContent.Text, false, "webhook", "created")
+	requireJSONPathEqual(t, textContent.Text, "Auto-creating webhooks is not supported for your repository.", "webhook", "error")
+	requireJSONPathEqual(t, textContent.Text, "Pipeline created successfully, but webhook creation failed.", "webhook", "note")
 }
 
 func TestUpdatePipeline(t *testing.T) {
