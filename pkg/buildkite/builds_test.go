@@ -145,7 +145,8 @@ func TestGetBuild(t *testing.T) {
 		assert.NotContains(text, "SECRET_TOKEN")
 		assert.NotContains(text, "PIPELINE_SECRET")
 		assert.NotContains(text, "steps:")
-		assert.Contains(text, `"annotations":[{`)
+		// Record arrays are serialized one element per line.
+		assert.Contains(text, "\"annotations\":[\n{")
 		assert.Contains(text, `{"context":"test-results","id":"annotation-1","priority":5,"scope":"build","style":"error"}`)
 		assert.Contains(text, `{"context":"lint","id":"annotation-2","job_id":"job-2","priority":3,"scope":"job","style":"warning"}`)
 		assert.Contains(text, `"annotations_truncated":true`)

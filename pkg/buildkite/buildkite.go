@@ -75,7 +75,7 @@ func marshalSanitizedJSON(result any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to sanitize result: %v", err)
 	}
-	return sanitized, nil
+	return formatJSONRecordsPerLine(sanitized), nil
 }
 
 func mcpSanitizedTextResult(span trace.Span, sanitized []byte) (*mcp.CallToolResult, any, error) {
@@ -231,15 +231,22 @@ func maxJSONStringBytes(value any) int {
 
 func marshalJSONWithContentBytes(value map[string]any) ([]byte, error) {
 	if _, ok := value["content_bytes"]; !ok {
-		return json.Marshal(value)
+		payload, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("marshal limited JSON: %w", err)
+		}
+		return formatJSONRecordsPerLine(payload), nil
 	}
 
+	// content_bytes must equal the size of the delivered payload, so count the
+	// record-per-line form, not the compact form.
 	value["content_bytes"] = 0
 	for {
 		payload, err := json.Marshal(value)
 		if err != nil {
 			return nil, fmt.Errorf("marshal limited JSON: %w", err)
 		}
+		payload = formatJSONRecordsPerLine(payload)
 		if value["content_bytes"] == len(payload) {
 			return payload, nil
 		}
