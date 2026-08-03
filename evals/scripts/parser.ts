@@ -48,6 +48,12 @@ interface Message {
     session_id?: string;
     tools?: string[];
     model?: string;
+    // Cursor CLI stream-json only: tool calls are standalone events keyed by
+    // tool name ({"type":"tool_call","subtype":"started"|"completed",
+    // "call_id":..., "tool_call":{"<tool>ToolCall":{args,result}}}), unlike
+    // Claude's tool_use/tool_result content blocks.
+    call_id?: string;
+    tool_call?: Record<string, { args?: any; result?: any }>;
 }
 
 interface ChatEntry {
@@ -196,6 +202,39 @@ function createBuildkiteAnnotation(
     }
 }
 
+// formatCursorToolCall renders a Cursor CLI tool_call event (see the Message
+// interface). started events read as the assistant invoking a tool; completed
+// events read as the tool result coming back — mirroring how Claude's
+// tool_use/tool_result pairs are labelled so the two dialects render alike.
+function formatCursorToolCall(msg: Message): {
+    speaker: string;
+    content: string;
+    hasError: boolean;
+} {
+    const tc = msg.tool_call ?? {};
+    const name = Object.keys(tc)[0] ?? "unknown";
+    const payload = tc[name] ?? {};
+
+    if (msg.subtype === "completed") {
+        const result = payload.result;
+        // Cursor reports success under result.success; anything else (error
+        // key, or no result at all) is treated as a failure.
+        const hasError = !(result && typeof result === "object" && "success" in result);
+        const body = JSON.stringify(hasError ? (result ?? {}) : result.success, null, 2) ?? "";
+        const indicator = hasError ? "❌ Tool error:" : "✅ Tool result:";
+        const trimmed = body.length > 400 ? body.slice(0, 400) + "..." : body;
+        return { speaker: "USER", content: `${indicator} ${name}\n${trimmed}`, hasError };
+    }
+
+    // started (and any future subtypes) — show the invocation.
+    let content = `🔧 Using tool: ${name}`;
+    if (payload.args && Object.keys(payload.args).length > 0) {
+        const argsStr = JSON.stringify(payload.args);
+        content += ` with ${argsStr.length > 300 ? argsStr.slice(0, 300) + "..." : argsStr}`;
+    }
+    return { speaker: "ASSISTANT", content, hasError: false };
+}
+
 // extractCleanJSONContentWithErrorCheck extracts clean content from JSON message without ANSI codes and detects errors
 function extractCleanJSONContentWithErrorCheck(msg: Message): {
     speaker: string;
@@ -212,6 +251,9 @@ function extractCleanJSONContentWithErrorCheck(msg: Message): {
                 };
             }
             return { speaker: "SYSTEM", content: "System message", hasError: false };
+
+        case "tool_call":
+            return formatCursorToolCall(msg);
 
         case "assistant": {
             const speaker = "ASSISTANT";
@@ -384,6 +426,11 @@ function formatJSONMessage(msg: Message): { speaker: string; content: string } {
                 };
             }
             return { speaker: "SYSTEM", content: "System message" };
+
+        case "tool_call": {
+            const { speaker, content } = formatCursorToolCall(msg);
+            return { speaker, content };
+        }
 
         case "assistant": {
             let speaker = "ASSISTANT";

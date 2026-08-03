@@ -52,6 +52,11 @@ steps:
             # evals/evals.yaml). Add one line here (and a secrets mapping
             # below) per additional org.
             - MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+            # Cursor CLI auth, for evals.yaml entries with `agent: cursor`.
+            # cursor-agent talks to Cursor's backend, so the Buildkite Hosted
+            # Models Anthropic proxy (BUILDKITE_AGENT_ENDPOINT above) cannot
+            # front it.
+            - CURSOR_API_KEY
             - BUILDKITE_BUILD_URL
             - BUILDKITE_ORGANIZATION_SLUG
             - BUILDKITE_PIPELINE_SLUG
@@ -84,3 +89,6 @@ steps:
       # MCP_EVAL_FRAMEWORK_<ORG>_ORG_BUILDKITE_API_TOKEN convention), so the
       # mapping is 1:1.
       MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+      # Cursor CLI API key (generate in the Cursor Dashboard). Maps into
+      # the CURSOR_API_KEY env line above.
+      CURSOR_API_KEY: MCP_EVAL_FRAMEWORK_CURSOR_API_KEY
