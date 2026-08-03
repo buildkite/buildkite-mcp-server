@@ -20,6 +20,11 @@
 #   --names      Print only "<count> <tool>" summary instead of full params
 #   --results    Also show each call's tool_result (matched by tool_use_id)
 #   --project P  Use project dir for path P instead of the current directory
+#   --agent A    Transcript dialect: 'claude' (default; Claude Code session
+#                jsonl / stream-json — tool calls are tool_use content blocks)
+#                or 'cursor' (cursor-agent stream-json capture — tool calls are
+#                standalone tool_call started/completed events, and NO token
+#                usage is emitted, so `metrics` reports tokens/cost as null).
 #
 # Pricing for `metrics` (USD per million tokens) is overridable via env vars;
 # defaults are Claude Opus 4.8 rates:
@@ -35,10 +40,11 @@ BK_PRICE_CACHE_5M="${BK_PRICE_CACHE_5M:-6.25}"
 BK_PRICE_CACHE_1H="${BK_PRICE_CACHE_1H:-10}"
 BK_PRICE_CACHE_READ="${BK_PRICE_CACHE_READ:-0.5}"
 
-TOOL_FILTER='startswith("mcp__buildkite-mcp-server__")'
+TOOL_FILTER=''
 NAMES_ONLY=0
 WITH_RESULTS=0
 PROJECT_PATH="$PWD"
+AGENT="claude"
 
 # --- parse options ---------------------------------------------------------
 while [[ "${1:-}" == -* ]]; do
@@ -47,10 +53,21 @@ while [[ "${1:-}" == -* ]]; do
     --names)   NAMES_ONLY=1; shift ;;
     --results) WITH_RESULTS=1; shift ;;
     --project) PROJECT_PATH="${2:?--project needs a path}"; shift 2 ;;
-    -h|--help) sed -n '2,34p' "$0"; exit 0 ;;
+    --agent)   AGENT="${2:?--agent needs claude or cursor}"; shift 2 ;;
+    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
+case "$AGENT" in claude|cursor) ;; *) echo "unsupported --agent: $AGENT" >&2; exit 2 ;; esac
+
+# Default tool filter (without --all): claude MCP tool names carry the
+# mcp__<server>__ prefix; cursor's tool_call event keys are per-tool camelCase
+# names (readToolCall, mcpToolCall, ...) with no comparable server prefix, so
+# no default narrowing is possible there — everything is included.
+if [[ -z "$TOOL_FILTER" ]]; then
+  if [[ "$AGENT" == "cursor" ]]; then TOOL_FILTER='true'
+  else TOOL_FILTER='startswith("mcp__buildkite-mcp-server__")'; fi
+fi
 
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
@@ -66,15 +83,29 @@ newest_session() {
   ls -t "$PROJECT_DIR"/*.jsonl 2>/dev/null | head -1
 }
 
-# Emit one compact JSON object per tool_use in a transcript.
+# Emit one compact JSON object per tool call in a transcript.
+# claude: tool_use content blocks inside assistant messages.
+# cursor: standalone {"type":"tool_call","subtype":"started",...} events whose
+#   .tool_call object has exactly one key naming the tool (readToolCall, ...),
+#   with the call's arguments under that key's .args.
 extract() {
   local f="$1"
-  jq -c --argjson names "$NAMES_ONLY" '
-    select(.message.content) | .message.content[]?
-    | select(.type=="tool_use" and (.name | '"$TOOL_FILTER"'))
-    | if $names == 1 then {tool: .name}
-      else {id: .id, tool: .name, input: .input} end
-  ' "$f"
+  if [[ "$AGENT" == "cursor" ]]; then
+    jq -c --argjson names "$NAMES_ONLY" '
+      select(.type=="tool_call" and .subtype=="started" and (.tool_call|type=="object"))
+      | (.tool_call | to_entries[0]) as $t
+      | select($t.key | '"$TOOL_FILTER"')
+      | if $names == 1 then {tool: $t.key}
+        else {id: (.call_id // null), tool: $t.key, input: ($t.value.args // {})} end
+    ' "$f"
+  else
+    jq -c --argjson names "$NAMES_ONLY" '
+      select(.message.content) | .message.content[]?
+      | select(.type=="tool_use" and (.name | '"$TOOL_FILTER"'))
+      | if $names == 1 then {tool: .name}
+        else {id: .id, tool: .name, input: .input} end
+    ' "$f"
+  fi
 }
 
 print_session() {
@@ -88,14 +119,26 @@ print_session() {
   fi
 
   if [[ "$WITH_RESULTS" == 1 ]]; then
-    # Map tool_use_id -> truncated result text.
-    local map; map="$(jq -cn '
-      [ inputs | (.message.content? // []) | select(type=="array") | .[]
-        | select(.type=="tool_result")
-        | {(.tool_use_id): ((.content // "")
-             | if type=="array" then (map(.text // "") | join("")) else tostring end
-             | gsub("\n";" ") | .[0:300])} ]
-      | add // {}' "$f")"
+    # Map call id -> truncated result text (claude: tool_use_id on tool_result
+    # blocks; cursor: call_id on tool_call completed events, result under the
+    # tool key's .result — .success on success, the whole object otherwise).
+    local map
+    if [[ "$AGENT" == "cursor" ]]; then
+      map="$(jq -cn '
+        [ inputs
+          | select(.type=="tool_call" and .subtype=="completed" and .call_id and (.tool_call|type=="object"))
+          | (.tool_call | to_entries[0].value.result // {}) as $r
+          | {(.call_id): (($r.success // $r) | tostring | gsub("\n";" ") | .[0:300])} ]
+        | add // {}' "$f")"
+    else
+      map="$(jq -cn '
+        [ inputs | (.message.content? // []) | select(type=="array") | .[]
+          | select(.type=="tool_result")
+          | {(.tool_use_id): ((.content // "")
+               | if type=="array" then (map(.text // "") | join("")) else tostring end
+               | gsub("\n";" ") | .[0:300])} ]
+        | add // {}' "$f")"
+    fi
     extract "$f" | jq -c --argjson map "$map" \
       '. + {result: ($map[.id] // "(no result captured)")} | del(.id)'
   else
@@ -114,6 +157,34 @@ metrics() {
   local snap; snap="$(mktemp -t bk-audit.XXXXXX)"
   trap 'rm -f "$snap"' RETURN
   cp "$f" "$snap"
+
+  # cursor-agent's stream-json emits no token usage and no per-event
+  # timestamps, so the cursor dialect reports what IS available — message and
+  # tool-call counts, the init event's model, and the result event's
+  # duration_ms — with tokens/cost explicitly null (comparisons must not read
+  # them as zero-cost runs). Keys match the claude output where the meaning
+  # matches, so bk-eval-compare.sh diffs stay line-comparable.
+  if [[ "$AGENT" == "cursor" ]]; then
+    echo "# session: $f" >&2
+    jq -nr '
+      [inputs | select(type=="object")] as $all
+      | ($all | map(select(.type=="tool_call" and .subtype=="started" and (.tool_call|type=="object"))
+                    | .tool_call | to_entries[0].key)) as $tools
+      | ($all | map(select(.type=="result")) | last) as $res
+      | ($all | map(select(.type=="system" and .subtype=="init")) | first) as $init
+      | {
+          user_messages: ($all | map(select(.type=="user")) | length),
+          assistant_responses: ($all | map(select(.type=="assistant")) | length),
+          duration_min: (if ($res.duration_ms? // null) != null then ($res.duration_ms/60000|floor) else null end),
+          models: {(($init.model? // "unknown")): 1},
+          tokens: null,
+          tool_calls_total: ($tools | length),
+          tool_calls_by_name: ($tools | group_by(.) | map("\(length) \(.[0])") | sort | reverse),
+          est_cost_usd: null
+        }
+    ' "$snap"
+    return
+  fi
 
   local prices
   prices="$(jq -n \

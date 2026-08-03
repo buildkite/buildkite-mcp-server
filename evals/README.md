@@ -13,9 +13,34 @@ A set of artifacts, and annotations in the Buildkite build showing:
   * LLM agent metrics
   * High-level steps taken by LLM agent to complete scenarios
 
+## Supported agents
+
+`evals.yaml` entries choose the agent per scenario (`agent:` key):
+
+* `claude` — Claude Code CLI, run via `scripts/claude.sh` in CI. Auth comes from Buildkite Hosted Models (`ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY` derived from the agent endpoint), the MCP server is passed with `--mcp-config`, and the session transcript under `~/.claude/projects/` feeds the audit and klaren steps.
+* `cursor` — Cursor CLI (`cursor-agent`), run via `scripts/cursor.sh` in CI. Differences, all forced by the CLI surface:
+  * Auth is `CURSOR_API_KEY` (Cursor's own backend; the Hosted Models Anthropic proxy can't front it). Map the secret in `.buildkite/pipeline.evals.yml`; entries are skipped loudly while it's unset.
+  * `model` must be a Cursor model id (`composer-1`, `sonnet-4.5`, `gpt-5.2`, ... — `cursor-agent --list-models`).
+  * No `--mcp-config` flag: a `.cursor/mcp.json` is generated inside the throwaway eval-repo clone, with the entry's `BUILDKITE_API_TOKEN` value substituted in, and servers are auto-approved with `--approve-mcps`.
+  * No `--append-system-prompt`: `prompts/system.md` is prepended to the user prompt (it lands in the user turn, not the system turn — a fidelity caveat when comparing against claude runs).
+  * No on-disk transcript: the raw `stream-json` capture stands in for it. That stream records tool calls as `tool_call` started/completed events and carries NO token usage, so `bk-tool-audit-v2.sh --agent cursor` reports tokens/cost as `null` — compare cursor runs on tool calls, duration, and the klaren review instead.
+  * Locally, cursor entries require `LOCAL_BYPASS_PERMISSION=true` (`--force`); the restricted allowlist mode below is claude-only for now (cursor's `.cursor/cli.json` permissions are not wired up).
+
+The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
+
+### Cursor cloud agents (not implemented — options)
+
+Besides the CLI, Cursor exposes hosted "cloud agents" that could run scenarios without us managing the container/CLI at all, via its REST API (Bearer/Basic auth with a Cursor Dashboard API key):
+
+* `POST https://api.cursor.com/v1/agents` with `prompt.text`, `repos[]` (GitHub URL + `startingRef`), and optional `model.id` — the agent clones the repo, works, and pushes branches/PRs itself.
+* Poll `GET /v1/agents/{agentId}/runs/{runId}` for `status` (`RUNNING`/`FINISHED`/`ERROR`/...), or stream `GET .../stream` (SSE) for real-time tool calls and assistant text — that stream could feed the same parser/annotation pipeline.
+* Terminal runs return `result` (final reply), `durationMs`, and `git.branches` (pushed branches / PR URLs); `GET /v1/agents/{agentId}/usage` returns token usage (which the CLI's stream-json lacks).
+
+Fit with this harness: a `run_cursor_cloud()` would replace the clone + CLI invocation with create-agent → poll/stream → collect results. Three impedance mismatches to solve first: (1) MCP — cloud agents run in Cursor's environment and cannot spawn our locally-built `--read-only` stdio binary, so the scenario repo would need Buildkite's hosted HTTP MCP server configured in its `.cursor/mcp.json`, which changes what's under test from "this PR's source build" to a deployed server; (2) scenario setup (the branch push) still has to happen from CI before launching the agent; (3) containment shifts from our throwaway container to Cursor's sandbox plus the repo/token permissions granted to it. Cursor's Slack bot (`@Cursor`) and BugBot are further entry points, but they're interactive/review-oriented and a poor fit for a scripted matrix.
+
 ## Permission posture
 
-In CI the LLM agent runs with `--permission-mode bypassPermissions` and NO tool allowlist. This is deliberate: real users rarely restrict tools, so tool CHOICE is part of what the eval measures — an agent that reaches for `curl` against the Buildkite API instead of the MCP tools is signal that the tools aren't compelling. Check the `eval-tools` annotation on each build to see what was actually called.
+In CI the LLM agent runs with `--permission-mode bypassPermissions` (claude) / `--force --approve-mcps` (cursor) and NO tool allowlist. This is deliberate: real users rarely restrict tools, so tool CHOICE is part of what the eval measures — an agent that reaches for `curl` against the Buildkite API instead of the MCP tools is signal that the tools aren't compelling. Check the `eval-tools` annotation on each build to see what was actually called.
 
 Containment does not come from permissions; it comes from layers the agent cannot talk its way around:
 * The docker container sandbox (throwaway, non-root)
@@ -23,8 +48,8 @@ Containment does not come from permissions; it comes from layers the agent canno
 * The read-only Buildkite API token
 
 Locally there is no container sandbox, so the posture is a conscious choice via `LOCAL_BYPASS_PERMISSION` (required, deliberately NO default — the script fails loudly and points here):
-* `false`: restricted mode — the agent gets `Edit`, `go`/`make`/`git` Bash, and the MCP server's tools (server name derived from `mcp.json`, override with `MCP_SERVER_NAME`). Safe on a host machine, but NOT comparable to CI runs since the agent's tool choice is constrained.
-* `true`: CI parity — `bypassPermissions`, i.e. the agent has unrestricted Bash ON YOUR MACHINE. Use with care.
+* `false`: restricted mode — the agent gets `Edit`, `go`/`make`/`git` Bash, and the MCP server's tools (server name derived from `mcp.json`, override with `MCP_SERVER_NAME`). Safe on a host machine, but NOT comparable to CI runs since the agent's tool choice is constrained. Claude-only: cursor entries are skipped in this mode (see "Supported agents").
+* `true`: CI parity — `bypassPermissions` / `--force`, i.e. the agent has unrestricted Bash ON YOUR MACHINE. Use with care.
 
 ## Setup
 

@@ -73,5 +73,13 @@ RUN chown -R agent:agent /workspace
 # Switch to the non-root user.
 USER agent
 
+# Install the Cursor CLI (cursor-agent) for evals.yaml entries with
+# `agent: cursor`. Installed as the agent user because the installer targets
+# $HOME/.local. NOTE: unlike the pinned tools above, Cursor's installer has no
+# documented version pin — an unreproducibility/supply-chain trade-off we
+# accept for now; revisit if Cursor publishes pinned release artifacts.
+RUN curl -fsS https://cursor.com/install | bash
+ENV PATH="/home/agent/.local/bin:${PATH}"
+
 # Default command
 CMD ["/bin/bash"]
