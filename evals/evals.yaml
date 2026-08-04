@@ -14,10 +14,11 @@
 #   scenario:
 #     setup       Optional bash run BEFORE the prompt to establish state (e.g.
 #                 create a branch, push it). It runs inside babystand.sh's clone
-#                 of the EVAL repo (EVAL_REPO_SLUG), with ENTRY_ID, DATETIME,
-#                 ORG_SLUG, PIPELINE_SLUG exported into its environment. To pass
-#                 values on to the prompt, append KEY=VALUE lines to the file at
-#                 $SCENARIO_VARS_FILE.
+#                 of the EVAL repo (EVAL_REPO_SLUG), under `set -euo pipefail`
+#                 (any failing command fails the setup — and the entry), with
+#                 ENTRY_ID, DATETIME, ORG_SLUG, PIPELINE_SLUG exported into its
+#                 environment. To pass values on to the prompt, append KEY=VALUE
+#                 lines to the file at $SCENARIO_VARS_FILE.
 #     vars        Static KEY=VALUE map substituted into the prompt template.
 #   token_env     Optional. NAME of an env var holding the Buildkite API token
 #                 for the org this entry's scenario lives in — scenarios can

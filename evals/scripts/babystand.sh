@@ -274,9 +274,13 @@ run_entry() {
     local SCENARIO_VARS_FILE; SCENARIO_VARS_FILE="$(mktemp)"
     if [[ -n "$SETUP" ]]; then
         echo "--- :gear: [$ENTRY_ID] scenario setup"
+        # -euo pipefail: the setup is a fresh child shell, which does NOT
+        # inherit this script's errexit — without it, a multi-line setup whose
+        # last command succeeds (e.g. the vars-file echo) would mask an earlier
+        # failed fetch/checkout/push and exit 0.
         if ! env ENTRY_ID="$ENTRY_ID" DATETIME="$DATETIME" ORG_SLUG="$ORG_SLUG" \
                  PIPELINE_SLUG="$PIPELINE_SLUG" SCENARIO_VARS_FILE="$SCENARIO_VARS_FILE" \
-                 bash -c "$SETUP"; then
+                 bash -euo pipefail -c "$SETUP"; then
             # A failure, not a skip: setup does real work (fetch/checkout/push),
             # so a transient or auth failure must fail the entry, not green it.
             echo "ERROR: [$ENTRY_ID] scenario setup failed; entry not run." >&2
