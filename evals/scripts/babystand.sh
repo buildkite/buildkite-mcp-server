@@ -22,6 +22,10 @@ EVALS_CONFIG="${EVALS_CONFIG:-$ROOT_DIR/evals.yaml}"
 command -v jq >/dev/null || { echo "babystand: jq is required" >&2; exit 1; }
 command -v yq >/dev/null || { echo "babystand: yq is required to parse $EVALS_CONFIG" >&2; exit 1; }
 [[ -f "$EVALS_CONFIG" ]] || { echo "babystand: config not found: $EVALS_CONFIG" >&2; exit 1; }
+# Canonicalize: a relative EVALS_CONFIG is validated above in the CALLER's cwd,
+# but only read (yq) after the cd into the eval-repo clone below, where it
+# would resolve to a different file or none at all.
+EVALS_CONFIG="$(cd "$(dirname "$EVALS_CONFIG")" && pwd)/$(basename "$EVALS_CONFIG")"
 
 if [[ "${LOCAL_CI}" == "true" ]]; then
   WAIT_STATUS_STRING="(perform local CI)"
