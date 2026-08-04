@@ -75,7 +75,21 @@ func marshalSanitizedJSON(result any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to sanitize result: %v", err)
 	}
-	return sanitized, nil
+
+	formatted, err := marshalMultilineJSON(json.RawMessage(sanitized))
+	if err != nil {
+		return nil, fmt.Errorf("failed to format sanitized result: %v", err)
+	}
+	return formatted, nil
+}
+
+// marshalMultilineJSON encodes JSON with structural newlines but no leading
+// indentation. Remote MCP servers cannot recover a result after the host has
+// spilled it to a host-local file, so the text returned by the tool must be
+// line-oriented already. This lets the host or agent search and read bounded
+// line ranges without paying the byte cost of conventional indentation.
+func marshalMultilineJSON(value any) ([]byte, error) {
+	return json.MarshalIndent(value, "", "")
 }
 
 func mcpSanitizedTextResult(span trace.Span, sanitized []byte) (*mcp.CallToolResult, any, error) {
@@ -231,12 +245,18 @@ func maxJSONStringBytes(value any) int {
 
 func marshalJSONWithContentBytes(value map[string]any) ([]byte, error) {
 	if _, ok := value["content_bytes"]; !ok {
-		return json.Marshal(value)
+		payload, err := marshalMultilineJSON(value)
+		if err != nil {
+			return nil, fmt.Errorf("marshal limited JSON: %w", err)
+		}
+		return payload, nil
 	}
 
+	// content_bytes must equal the size of the delivered payload, so count the
+	// multiline form, not the compact form.
 	value["content_bytes"] = 0
 	for {
-		payload, err := json.Marshal(value)
+		payload, err := marshalMultilineJSON(value)
 		if err != nil {
 			return nil, fmt.Errorf("marshal limited JSON: %w", err)
 		}

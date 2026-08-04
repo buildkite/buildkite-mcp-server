@@ -134,9 +134,9 @@ func TestGetBuild(t *testing.T) {
 		assert.NoError(err)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"id":"123"`)
-		assert.Contains(text, `"number":1`)
-		assert.Contains(text, `"state":"passed"`)
+		requireJSONPathEqual(t, text, "123", "id")
+		requireJSONPathEqual(t, text, 1, "number")
+		requireJSONPathEqual(t, text, "passed", "state")
 		// Job detail lives in list_jobs/get_job, not here.
 		assert.NotContains(text, `"jobs":`)
 		// Build env and pipeline config are intentionally omitted from read_builds.
@@ -145,10 +145,10 @@ func TestGetBuild(t *testing.T) {
 		assert.NotContains(text, "SECRET_TOKEN")
 		assert.NotContains(text, "PIPELINE_SECRET")
 		assert.NotContains(text, "steps:")
-		assert.Contains(text, `"annotations":[{`)
-		assert.Contains(text, `{"context":"test-results","id":"annotation-1","priority":5,"scope":"build","style":"error"}`)
-		assert.Contains(text, `{"context":"lint","id":"annotation-2","job_id":"job-2","priority":3,"scope":"job","style":"warning"}`)
-		assert.Contains(text, `"annotations_truncated":true`)
+		requireJSONPathEqual(t, text, "test-results", "annotations", 0, "context")
+		requireJSONPathEqual(t, text, "lint", "annotations", 1, "context")
+		requireJSONPathEqual(t, text, "job-2", "annotations", 1, "job_id")
+		requireJSONPathEqual(t, text, true, "annotations_truncated")
 		assert.NotContains(text, "large body")
 		assert.NotContains(text, "body_html")
 
@@ -189,7 +189,7 @@ func TestGetBuild(t *testing.T) {
 			BuildNumber:  "1",
 		})
 		assert.NoError(err)
-		assert.Contains(getTextResult(t, result).Text, `"annotations":[]`)
+		requireJSONPathEqual(t, getTextResult(t, result).Text, []any{}, "annotations")
 		assert.NotContains(getTextResult(t, result).Text, `"annotations_truncated"`)
 	})
 
@@ -283,10 +283,9 @@ func TestListBuilds(t *testing.T) {
 		assert.NoError(err)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"headers":{"Link":""}`)
-		assert.Contains(text, `"items":[`)
-		assert.Contains(text, `"id":"123"`)
-		assert.Contains(text, `"state":"running"`)
+		requireJSONPathEqual(t, text, "", "headers", "Link")
+		requireJSONPathEqual(t, text, "123", "items", 0, "id")
+		requireJSONPathEqual(t, text, "running", "items", 0, "state")
 		assert.NotContains(text, `"job_summary"`)
 		assert.NotContains(text, `"jobs":`)
 
@@ -363,7 +362,7 @@ func TestListBuilds(t *testing.T) {
 		})
 		assert.NoError(err)
 		assert.True(called)
-		assert.Contains(getTextResult(t, result).Text, `"id":"123"`)
+		requireJSONPathEqual(t, getTextResult(t, result).Text, "123", "items", 0, "id")
 	})
 
 	t.Run("APIError", func(t *testing.T) {
@@ -589,8 +588,8 @@ func TestCancelBuild(t *testing.T) {
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"id":"123"`)
-		assert.Contains(textContent.Text, `"state":"canceling"`)
+		requireJSONPathEqual(t, textContent.Text, "123", "id")
+		requireJSONPathEqual(t, textContent.Text, "canceling", "state")
 	})
 
 	t.Run("Error", func(t *testing.T) {
@@ -653,8 +652,8 @@ func TestRebuildBuild(t *testing.T) {
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"id":"456"`)
-		assert.Contains(textContent.Text, `"state":"scheduled"`)
+		requireJSONPathEqual(t, textContent.Text, "456", "id")
+		requireJSONPathEqual(t, textContent.Text, "scheduled", "state")
 	})
 
 	t.Run("Error", func(t *testing.T) {
@@ -736,9 +735,9 @@ func TestWaitForBuild(t *testing.T) {
 		assert.Less(elapsed, waitForBuildPollInterval)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"finished":true`)
-		assert.Contains(text, `"state":"passed"`)
-		assert.Contains(text, `"id":"123"`)
+		requireJSONPathEqual(t, text, true, "finished")
+		requireJSONPathEqual(t, text, "passed", "state")
+		requireJSONPathEqual(t, text, "123", "build", "id")
 
 		// Jobs stay excluded; list_jobs/get_job own that detail.
 		assert.True(capturedOptions.ExcludeJobs)
@@ -776,8 +775,8 @@ func TestWaitForBuild(t *testing.T) {
 		assert.Equal(3, getCalls)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"finished":true`)
-		assert.Contains(text, `"state":"failed"`)
+		requireJSONPathEqual(t, text, true, "finished")
+		requireJSONPathEqual(t, text, "failed", "state")
 	})
 
 	t.Run("ReturnsUnfinishedWhenWaitWindowCloses", func(t *testing.T) {
@@ -818,8 +817,8 @@ func TestWaitForBuild(t *testing.T) {
 		assert.Zero(annotationCalls)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"finished":false`)
-		assert.Contains(text, `"state":"running"`)
+		requireJSONPathEqual(t, text, false, "finished")
+		requireJSONPathEqual(t, text, "running", "state")
 		assert.Contains(text, `"waited_seconds":`)
 
 		// Interim responses stay lean: a caller polling a long build repeats this
@@ -896,7 +895,7 @@ func TestWaitForBuild(t *testing.T) {
 		assert.Equal(1, annotationCalls)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"id":"annotation-1"`)
+		requireJSONPathEqual(t, text, "annotation-1", "build", "annotations", 0, "id")
 		assert.NotContains(text, "large body")
 	})
 }
@@ -981,8 +980,8 @@ func TestWaitForBuildReportsBuildElapsed(t *testing.T) {
 	// The caller can tell a 9-minute build from a 9-second one without a
 	// separate get_build, and without counting its own retries.
 	text := getTextResult(t, result).Text
-	assert.Contains(text, `"build_elapsed_seconds":540,`)
-	assert.Contains(text, `"finished":false`)
+	requireJSONPathEqual(t, text, 540, "build_elapsed_seconds")
+	requireJSONPathEqual(t, text, false, "finished")
 
 	// Still lean.
 	assert.Less(len(text), 120)
@@ -1024,8 +1023,8 @@ func TestWaitForBuildPollErrorHandling(t *testing.T) {
 		// caller retries exactly as it would after a window timeout.
 		assert.False(result.IsError)
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"finished":false`)
-		assert.Contains(text, `"state":"running"`)
+		requireJSONPathEqual(t, text, false, "finished")
+		requireJSONPathEqual(t, text, "running", "state")
 	})
 
 	t.Run("UnauthorizedPropagatesRatherThanLookingLikeProgress", func(t *testing.T) {

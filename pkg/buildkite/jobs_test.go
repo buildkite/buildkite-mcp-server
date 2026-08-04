@@ -125,8 +125,9 @@ func TestUnblockJob(t *testing.T) {
 		result, _, err := handler(ctx, req, args)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"id":"job-123"`)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"state":"unblocked"`)
+		text := result.Content[0].(*mcp.TextContent).Text
+		requireJSONPathEqual(t, text, "job-123", "id")
+		requireJSONPathEqual(t, text, "unblocked", "state")
 	})
 
 	// Test with fields
@@ -229,8 +230,9 @@ func TestRetryJob(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"id":"job-789"`)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"state":"scheduled"`)
+		text := result.Content[0].(*mcp.TextContent).Text
+		requireJSONPathEqual(t, text, "job-789", "id")
+		requireJSONPathEqual(t, text, "scheduled", "state")
 	})
 
 	t.Run("Error", func(t *testing.T) {
@@ -291,8 +293,9 @@ func TestGetJobEnvironmentVariables(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"BUILDKITE_BRANCH":"main"`)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"CI":"true"`)
+		text := result.Content[0].(*mcp.TextContent).Text
+		requireJSONPathEqual(t, text, "main", "env", "BUILDKITE_BRANCH")
+		requireJSONPathEqual(t, text, "true", "env", "CI")
 	})
 
 	t.Run("Error", func(t *testing.T) {
@@ -358,11 +361,10 @@ func TestListJobs(t *testing.T) {
 		require.NoError(t, err)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(t, text, `"items":[`)
-		assert.Contains(t, text, `"name":"test"`)
-		assert.Contains(t, text, `"command":"go test ./..."`)
-		assert.Contains(t, text, `"id":"job-1"`)
-		assert.Contains(t, text, `"next":"https://api.buildkite.com`)
+		requireJSONPathEqual(t, text, "test", "items", 0, "name")
+		requireJSONPathEqual(t, text, "go test ./...", "items", 0, "command")
+		requireJSONPathEqual(t, text, "job-1", "items", 0, "id")
+		requireJSONPathEqual(t, text, "https://api.buildkite.com/v2/...?after=cursor2", "links", "next")
 
 		require.NotNil(t, captured)
 		assert.Equal(t, []string{"passed", "failed"}, captured.State)
@@ -673,7 +675,7 @@ func TestGetJob(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.True(t, called)
-		assert.Contains(t, getTextResult(t, result).Text, `"id":"job-456"`)
+		requireJSONPathEqual(t, getTextResult(t, result).Text, "job-456", "id")
 	})
 
 	t.Run("RedactsUnusedJobFields", func(t *testing.T) {
@@ -791,7 +793,7 @@ func TestGetJob(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.True(t, called)
-		assert.Contains(t, getTextResult(t, result).Text, `"state":"running"`)
+		requireJSONPathEqual(t, getTextResult(t, result).Text, "running", "state")
 	})
 
 	t.Run("PartialBuildScopeIsRejected", func(t *testing.T) {

@@ -106,10 +106,10 @@ func TestListArtifactsForBuild(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"id":"abc123"`)
-	assert.Contains(textContent.Text, `"job_id":"job-789"`)
-	assert.Contains(textContent.Text, `"filename":"test-artifact.txt"`)
-	assert.Contains(textContent.Text, `"state":"finished"`)
+	requireJSONPathEqual(t, textContent.Text, "abc123", "items", 0, "id")
+	requireJSONPathEqual(t, textContent.Text, "job-789", "items", 0, "job_id")
+	requireJSONPathEqual(t, textContent.Text, "test-artifact.txt", "items", 0, "filename")
+	requireJSONPathEqual(t, textContent.Text, "finished", "items", 0, "state")
 	// download_url and url are intentionally stripped from list results to keep
 	// them small; agents fetch via get_artifact using id and job_id instead.
 	assert.NotContains(textContent.Text, `"download_url"`)
@@ -156,10 +156,10 @@ func TestListArtifactsForJob(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"id":"abc123"`)
-	assert.Contains(textContent.Text, `"job_id":"job-789"`)
-	assert.Contains(textContent.Text, `"filename":"test-artifact.txt"`)
-	assert.Contains(textContent.Text, `"state":"finished"`)
+	requireJSONPathEqual(t, textContent.Text, "abc123", "items", 0, "id")
+	requireJSONPathEqual(t, textContent.Text, "job-789", "items", 0, "job_id")
+	requireJSONPathEqual(t, textContent.Text, "test-artifact.txt", "items", 0, "filename")
+	requireJSONPathEqual(t, textContent.Text, "finished", "items", 0, "state")
 	// download_url and url are intentionally stripped from list results to keep
 	// them small; agents fetch via get_artifact using id and job_id instead.
 	assert.NotContains(textContent.Text, `"download_url"`)

@@ -293,8 +293,8 @@ func TestSearchLogsHandler_TerseFormat(t *testing.T) {
 	text := result.Content[0].(*mcp.TextContent).Text
 
 	// The documented fields must be present under their terse names.
-	assert.Contains(text, `"rn":1`)
-	assert.Contains(text, `"c":"test failed: assertion error"`)
+	requireJSONPathEqual(t, text, 1, "results", 0, "match", "rn")
+	requireJSONPathEqual(t, text, "test failed: assertion error", "results", 0, "match", "c")
 
 	// The library's raw field names, and its extra undocumented fields,
 	// must not leak through.
