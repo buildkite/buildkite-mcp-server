@@ -23,6 +23,8 @@ const (
 	maxFailureSummaryAnnotations         = 100
 	failureSummaryAnnotationPageSize     = 100
 	failureSummaryAnnotationScanPages    = 5
+	failureSummaryPromisePageSize        = 100
+	failureSummaryPromiseScanPages       = 5
 	defaultFailureSummaryTestRuns        = 5
 	maxFailureSummaryTestRuns            = 20
 	defaultFailureSummaryTestsPerRun     = 20
@@ -104,10 +106,13 @@ type FailureSummaryTestRun struct {
 	Error            string                          `json:"error,omitempty"`
 }
 
-// FailureSummaryJobCensus reports the complete per-state job counts for the
-// build so a caller can verify the jobs list covers every problem job without
-// a follow-up list_jobs call. It serializes flat, e.g.
-// {"total":4,"passed":2,"failed":1,"broken":1,"truncated":false}.
+// FailureSummaryJobCensus counts every job in the build by state, as of the
+// build snapshot the summary was assembled from. The summary's jobs array is
+// selected from the same snapshot, so the two always agree: when Truncated is
+// false the jobs array lists every problem job the census counted, and no
+// follow-up list_jobs call is needed to confirm nothing else failed. Truncated
+// is true only when the jobs array was cut off by max_jobs. It serializes
+// flat, e.g. {"total":4,"passed":2,"failed":1,"broken":1,"truncated":false}.
 type FailureSummaryJobCensus struct {
 	Total     int
 	States    map[string]int
@@ -237,6 +242,43 @@ func isDownstreamFailureSummaryJob(job buildkite.Job) bool {
 
 func shouldReadFailureLog(job buildkite.Job) bool {
 	return isCanceledFailureSummaryJob(job) || (job.State != "expired" && isPrimaryFailureSummaryJob(job))
+}
+
+// verifyPromisedFailures returns which of the candidate jobs (running jobs
+// that promised a non-zero exit status in the build snapshot) the jobs
+// endpoint's failed filter reports for the build. The filter includes running
+// jobs only when their promise is a hard failure — the server judges promises
+// against soft-fail rules and org feature flags, which job payloads do not
+// expose, so the judgment cannot be replicated locally. The boolean result
+// reports whether the scan hit the page cap before the listing was exhausted.
+func verifyPromisedFailures(ctx context.Context, client JobsClient, args GetBuildFailureSummaryArgs, candidates map[string]bool) (map[string]bool, bool, error) {
+	includeRetriedJobs := false
+	options := &buildkite.JobsListOptions{
+		State:              []string{"failed"},
+		IncludeRetriedJobs: &includeRetriedJobs,
+		PerPage:            failureSummaryPromisePageSize,
+	}
+
+	verified := make(map[string]bool, len(candidates))
+	for pagesScanned := 0; pagesScanned < failureSummaryPromiseScanPages; pagesScanned++ {
+		jobsList, _, err := client.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
+		if err != nil {
+			return verified, false, err
+		}
+		for _, job := range jobsList.Items {
+			if candidates[job.ID] {
+				verified[job.ID] = true
+			}
+		}
+		if len(verified) == len(candidates) || jobsList.Links.Next == "" {
+			return verified, false, nil
+		}
+		options, err = jobsList.Links.Next.ToOptions()
+		if err != nil {
+			return verified, true, fmt.Errorf("parse next jobs page link: %w", err)
+		}
+	}
+	return verified, true, nil
 }
 
 func failureSummaryJob(job buildkite.Job) FailureSummaryJob {
@@ -779,7 +821,7 @@ func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) e
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build_failure_summary",
-			Description: "Diagnose a Buildkite build failure in one call. Returns build state, terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, a job_census counting every job in the build by state (when its truncated field is false, no follow-up list_jobs call is needed to confirm nothing else failed), and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
+			Description: "Diagnose a Buildkite build failure in one call. Returns build state, terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, a job_census counting every job in the build by state (when its truncated field is false, the jobs array lists every problem job in the census, so no follow-up list_jobs call is needed to confirm nothing else failed), and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. The summary is a point-in-time snapshot: while the build state is not terminal, job states, the census, and diagnostics can still change. Start with this tool before calling individual job, log, annotation, or test tools.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build Failure Summary",
 				ReadOnlyHint: true,
@@ -828,75 +870,65 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				JobLimit:  maxJobs,
 			}
 
-			includeRetriedJobs := false
-			primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				// The API's failed filter includes running jobs with a hard promised
-				// failure. Querying running separately can include promises covered by
-				// soft-fail or retry rules that do not put the build into failing.
-				State:              []string{"failed", "timed_out", "expired"},
-				IncludeRetriedJobs: &includeRetriedJobs,
-				PerPage:            maxJobs + 1,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
+			// Problem jobs are selected from the same build snapshot the
+			// census is counted from, so census and jobs always describe one
+			// moment. Terminal problem states are classified locally; running
+			// jobs promising a non-zero exit status are only candidates —
+			// whether a promise is a hard failure (not covered by soft-fail
+			// rules) is judged server-side, so candidates are verified against
+			// the jobs endpoint's failed filter before being reported.
+			promisedCandidates := make(map[string]bool)
+			for _, job := range build.Jobs {
+				if job.State == "running" && isPrimaryFailureSummaryJob(job) {
+					promisedCandidates[job.ID] = true
+				}
+			}
+
+			hardPromised := map[string]bool{}
+			if len(promisedCandidates) > 0 && deps.JobsClient != nil {
+				var scanTruncated bool
+				hardPromised, scanTruncated, err = verifyPromisedFailures(ctx, deps.JobsClient, args, promisedCandidates)
+				if err != nil && isBuildkiteUnauthorized(err) {
+					return nil, nil, ErrUnauthorized
+				}
+				if unverified := len(promisedCandidates) - len(hardPromised); unverified > 0 && (err != nil || scanTruncated) {
+					reason := "the scan of the build's failed jobs was cut short"
+					if err != nil {
+						reason = err.Error()
+					}
+					result.Warnings = append(result.Warnings, fmt.Sprintf(
+						"%d running job(s) promising a non-zero exit status could not be verified as hard failures and are not listed as problem jobs: %s", unverified, reason))
+				}
 			}
 
 			sourceJobs := make([]buildkite.Job, 0, maxJobs)
-			jobsTruncated := primaryJobsList.Links.Next != ""
-			for _, job := range primaryJobsList.Items {
-				if !isPrimaryFailureSummaryJob(job) {
-					continue
-				}
+			jobsTruncated := false
+			appendSourceJob := func(job buildkite.Job) {
 				if len(sourceJobs) < maxJobs {
 					sourceJobs = append(sourceJobs, job)
 				} else {
 					jobsTruncated = true
 				}
 			}
-
-			remainingJobs := maxJobs - len(sourceJobs)
-			if remainingJobs > 0 || !jobsTruncated {
-				canceledJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-					State:              []string{"canceled"},
-					IncludeRetriedJobs: &includeRetriedJobs,
-					PerPage:            remainingJobs + 1,
-				})
-				if listErr != nil {
-					return handleBuildkiteError(listErr)
+			for _, job := range build.Jobs {
+				if job.State == "running" {
+					if hardPromised[job.ID] {
+						appendSourceJob(job)
+					}
+					continue
 				}
-				jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
-				for _, job := range canceledJobsList.Items {
-					if !isCanceledFailureSummaryJob(job) {
-						continue
-					}
-					if len(sourceJobs) < maxJobs {
-						sourceJobs = append(sourceJobs, job)
-					} else {
-						jobsTruncated = true
-					}
+				if isPrimaryFailureSummaryJob(job) {
+					appendSourceJob(job)
 				}
 			}
-
-			remainingJobs = maxJobs - len(sourceJobs)
-			if remainingJobs > 0 || !jobsTruncated {
-				downstreamJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-					State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
-					IncludeRetriedJobs: &includeRetriedJobs,
-					PerPage:            remainingJobs + 1,
-				})
-				if listErr != nil {
-					return handleBuildkiteError(listErr)
+			for _, job := range build.Jobs {
+				if isCanceledFailureSummaryJob(job) {
+					appendSourceJob(job)
 				}
-				jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
-				for _, job := range downstreamJobsList.Items {
-					if !isDownstreamFailureSummaryJob(job) {
-						continue
-					}
-					if len(sourceJobs) < maxJobs {
-						sourceJobs = append(sourceJobs, job)
-					} else {
-						jobsTruncated = true
-					}
+			}
+			for _, job := range build.Jobs {
+				if isDownstreamFailureSummaryJob(job) {
+					appendSourceJob(job)
 				}
 			}
 			result.Jobs = make([]FailureSummaryJob, len(sourceJobs))
@@ -904,9 +936,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				result.Jobs[i] = failureSummaryJob(job)
 			}
 			result.JobsTruncated = jobsTruncated
-			// A build payload without jobs cannot vouch for census
-			// completeness when the job lists found problem jobs.
-			result.JobCensus.Truncated = jobsTruncated || (result.JobCensus.Total == 0 && len(result.Jobs) > 0)
+			result.JobCensus.Truncated = jobsTruncated
 
 			if defaultTrue(args.IncludeLogs) && deps.BuildkiteLogsClient != nil {
 				if err := loadFailureLogs(ctx, deps.BuildkiteLogsClient, args, sourceJobs, result.Jobs, logTail); err != nil {
