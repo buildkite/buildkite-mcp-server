@@ -37,9 +37,11 @@
 #                 (that is a follow-up); a non-'source' value currently logs a
 #                 notice and runs the 'source' binary.
 #   compare_base  Optional. What to compare this run AGAINST. A Buildkite build
-#                 (number / URL / 'build:<n>') or a local path
-#                 ('local:./runs/<id>/<id>-<datetime>'). Defaults to the last
-#                 successful build on `main` for this entry id.
+#                 (number / URL / 'build:<n>') or a local path: a run prefix
+#                 ('local:./runs/<id>/<id>-<datetime>' — that exact run) or a
+#                 directory ('local:./runs/<id>' — its first run). Relative
+#                 paths resolve against the evals/ dir, not the cwd. Defaults to
+#                 the last successful build on `main` for this entry id.
 #   compare_target Optional. The run being evaluated. Defaults to THIS run (its
 #                 runs/ bundle, plus this Buildkite build's artifacts when a
 #                 build was produced). Same source forms as compare_base.

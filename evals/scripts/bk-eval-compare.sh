@@ -8,9 +8,14 @@
 #
 # A "comparison source" is either:
 #   * a Buildkite build   — its uploaded run bundle (runs/<id>/*) is downloaded
-#   * a local path        — a ./runs/<id>/ dir or a <id>-<datetime> file prefix
-# Each resolves to a bundle directory holding <run>.eval-final.md, <run>.metrics.json,
-# <run>.klaren.md (and .tools.txt / .transcript.jsonl).
+#   * a local path        — a runs/<id>/ dir (its first run is picked) or a
+#                           runs/<id>/<id>-<datetime> run prefix (that exact
+#                           run). Relative paths resolve against the harness
+#                           (evals/) root, NOT the cwd — babystand.sh runs this
+#                           from inside the per-invocation eval-repo clone,
+#                           while bundles live under <harness>/runs/.
+# Each resolves to a bundle dir or run prefix holding <run>.eval-final.md,
+# <run>.metrics.json, <run>.klaren.md (and .tools.txt / .transcript.jsonl).
 #
 # ENV (set by babystand.sh):
 #   ENTRY_ID        (required) matrix entry id; namespaces artifacts + annotation
@@ -30,6 +35,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 ORG="${BUILDKITE_ORGANIZATION_SLUG:-}"
 PIPELINE="${BUILDKITE_PIPELINE_SLUG:-}"
@@ -44,8 +50,33 @@ CUR_BUILD_NUM="${BUILDKITE_BUILD_NUMBER:-}"
 api="https://api.buildkite.com/v2/organizations/$ORG/pipelines/$PIPELINE/builds"
 
 # ---------------------------------------------------------------------------
-# pick DIR SUFFIX  -> first file in DIR matching *.SUFFIX (e.g. metrics.json)
-pick() { ls "$1"/*."$2" 2>/dev/null | head -n1; }
+# pick SRC SUFFIX  -> the bundle file for SUFFIX (e.g. metrics.json). SRC is
+# either a bundle directory (first *.SUFFIX file in it) or a run prefix like
+# .../runs/<id>/<id>-<datetime> (that exact run's file, never a sibling run's).
+pick() {
+    if [[ -d "$1" ]]; then
+        ls "$1"/*."$2" 2>/dev/null | head -n1
+    elif [[ -f "$1.$2" ]]; then
+        echo "$1.$2"
+    fi
+}
+
+# resolve_local PATH -> a bundle dir or run prefix for a local source spec, or
+# fail if neither exists. Relative paths resolve against the harness (evals/)
+# root: babystand.sh invokes this script from inside the per-invocation
+# eval-repo clone, while bundles live under <harness>/runs/. A path that is not
+# a directory is treated as a run prefix and must own at least one bundle file.
+resolve_local() {
+    local p="$1"
+    [[ "$p" == /* ]] || p="$ROOT_DIR/${p#./}"
+    if [[ -d "$p" ]]; then
+        echo "$p"
+    elif ls "$p".* >/dev/null 2>&1; then
+        echo "$p"
+    else
+        return 1
+    fi
+}
 
 # build_id_from_number N -> the build UUID (needed for artifact download)
 build_id_from_number() {
@@ -64,25 +95,23 @@ download_build_bundle() {
     echo "$d/runs/$eid"
 }
 
-# resolve_dir SPEC ENTRY_ID -> a bundle directory for an explicit source spec.
-# Returns non-zero for empty/default sentinels so the caller applies its default.
-resolve_dir() {
-    local spec="$1" eid="$2" p ref id
+# resolve_src SPEC ENTRY_ID -> a bundle dir or run prefix for an explicit
+# source spec (both forms are understood by pick above). Returns non-zero for
+# empty/default sentinels and unresolvable specs so the caller can react.
+resolve_src() {
+    local spec="$1" eid="$2" ref id
     case "$spec" in
         ''|last-successful-main) return 1 ;;
-        local:*) p="${spec#local:}"
-                 if [[ -d "$p" ]]; then echo "$p"; else echo "$(dirname "$p")"; fi ;;
+        local:*) resolve_local "${spec#local:}" ;;
         build:*) ref="${spec#build:}"
                  if [[ "$ref" =~ ^[0-9]+$ ]]; then id="$(build_id_from_number "$ref")"; else id="$ref"; fi
                  [[ -n "$id" ]] && download_build_bundle "$id" "$eid" ;;
         http*://*) ref="${spec##*/}"; id="$(build_id_from_number "$ref")"
                    [[ -n "$id" ]] && download_build_bundle "$id" "$eid" ;;
-        /*|./*|../*) if [[ -d "$spec" ]]; then echo "$spec"; else echo "$(dirname "$spec")"; fi ;;
+        /*|./*|../*) resolve_local "$spec" ;;
         *) if [[ "$spec" =~ ^[0-9]+$ ]]; then
                id="$(build_id_from_number "$spec")"; [[ -n "$id" ]] && download_build_bundle "$id" "$eid"
-           elif [[ -e "$spec" ]]; then
-               if [[ -d "$spec" ]]; then echo "$spec"; else echo "$(dirname "$spec")"; fi
-           else return 1; fi ;;
+           else resolve_local "$spec"; fi ;;
     esac
 }
 
@@ -211,8 +240,8 @@ main() {
     # --- Resolve TARGET ------------------------------------------------------
     local TGT_EVAL TGT_METRICS TGT_KLAREN TGT_LABEL
     if [[ -n "${COMPARE_TARGET:-}" ]]; then
-        local td; td="$(resolve_dir "$COMPARE_TARGET" "$ENTRY_ID")"
-        if [[ -z "$td" || ! -d "$td" ]]; then
+        local td; td="$(resolve_src "$COMPARE_TARGET" "$ENTRY_ID")"
+        if [[ -z "$td" ]]; then
             annotate_note "$ctx" "$title" "_Could not resolve compare_target \`$COMPARE_TARGET\` for \`$ENTRY_ID\`._"; return 0
         fi
         TGT_EVAL="$(pick "$td" eval-final.md)"; TGT_METRICS="$(pick "$td" metrics.json)"; TGT_KLAREN="$(pick "$td" klaren.md)"
@@ -225,9 +254,9 @@ main() {
     # --- Resolve BASE --------------------------------------------------------
     local BASE_EVAL="" BASE_METRICS="" BASE_KLAREN="" BASE_LABEL="" bd=""
     if [[ -n "${COMPARE_BASE:-}" ]]; then
-        bd="$(resolve_dir "$COMPARE_BASE" "$ENTRY_ID")"
+        bd="$(resolve_src "$COMPARE_BASE" "$ENTRY_ID")"
         BASE_LABEL="$COMPARE_BASE"
-        if [[ -z "$bd" || ! -d "$bd" ]]; then
+        if [[ -z "$bd" ]]; then
             annotate_note "$ctx" "$title" "_Could not resolve compare_base \`$COMPARE_BASE\` for \`$ENTRY_ID\`._"; return 0
         fi
     else

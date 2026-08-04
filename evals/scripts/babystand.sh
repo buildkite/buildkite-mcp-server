@@ -1,6 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
+# Bash 5.2+ enables patsub_replacement by default: an unquoted '&' in a
+# ${var//pat/repl} replacement expands to the matched pattern, which would
+# corrupt scenario values like '?a=1&b=2' in render_prompt (and eat
+# backslashes). Quoting the replacement instead is not portable — bash 3.2
+# (macOS /bin/bash) keeps such quotes literally — so disable the option
+# (guarded: it doesn't exist before 5.2).
+shopt -u patsub_replacement 2>/dev/null || true
+
 # Resolve the harness directory so sibling scripts (and the harness copies of
 # evals.yaml / prompts) keep resolving after we cd into a separate git checkout
 # (the subject under test) below.
@@ -125,6 +133,8 @@ render_prompt() {
     # line per key; $0 preserves values that themselves contain '='.
     while IFS='=' read -r key val; do
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        # $val is safe unquoted: patsub_replacement is disabled at the top of
+        # this script (quoting it here is not portable to bash 3.2).
         content="${content//\{\{.$key\}\}/$val}"
     done < <(awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { last[$1] = $0 } END { for (k in last) print last[k] }' "$vars")
     printf '%s' "$content"
@@ -157,6 +167,11 @@ annotate_codeblock() {
 # SESSION_ID / TRANSCRIPT / EVAL_RESULT_FILE variables (bash dynamic scoping: the
 # caller declares them `local` before calling). $ENTRY_ID is also read from the
 # caller's scope to namespace the parser annotations.
+# Returns non-zero when the agent pipeline fails. The pipeline must be checked
+# explicitly: errexit is dead in here (run_entry is invoked on the left of `||`,
+# which disables errexit throughout the call tree), and a function's return
+# status is otherwise just its LAST command's — a dead agent would fall through
+# the pointer extraction and read as success.
 run_claude() {
     local prompt_file="$1" model="$2" log="$3"
     local args=(
@@ -177,15 +192,19 @@ run_claude() {
         # prompt, and the parser). The prompt is already rendered, so pass it as a
         # plain prompt file with no KEY=VALUE substitution args. Output streams to
         # the build log; the CLAUDE_* pointers land in $log for recovery below.
-        ANNOTATION_CONTEXT_PREFIX="eval-$ENTRY_ID" \
-            "$SCRIPT_DIR/claude.sh" "$prompt_file" "${args[@]}" | tee "$log"
+        if ! ANNOTATION_CONTEXT_PREFIX="eval-$ENTRY_ID" \
+            "$SCRIPT_DIR/claude.sh" "$prompt_file" "${args[@]}" | tee "$log"; then
+            return 1
+        fi
         SESSION_ID=$(sed -n 's/^CLAUDE_SESSION_ID=//p' "$log" | tail -n1)
         TRANSCRIPT=$(sed -n 's/^CLAUDE_TRANSCRIPT=//p' "$log" | tail -n1)
         EVAL_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$log" | tail -n1)
     else
         # Local execution: run claude directly against the harness mcp.json (cwd
         # is the eval-repo clone, so a relative path would not resolve).
-        claude -p "$(cat "$prompt_file")" --mcp-config "$ROOT_DIR/mcp.json" "${args[@]}" | tee "$log"
+        if ! claude -p "$(cat "$prompt_file")" --mcp-config "$ROOT_DIR/mcp.json" "${args[@]}" | tee "$log"; then
+            return 1
+        fi
         SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_id' "$log" | head -n1)
         TRANSCRIPT="$HOME/.claude/projects/$(pwd | sed -e 's/[\/.]/-/g')/$SESSION_ID.jsonl"
         EVAL_RESULT_FILE="$(mktemp)"
@@ -193,8 +212,12 @@ run_claude() {
     fi
 }
 
-# run_entry <entry_json> -- execute one matrix entry end to end. Best-effort: a
-# failure in one entry logs and returns without aborting the rest of the matrix.
+# run_entry <entry_json> -- execute one matrix entry end to end. A failure in
+# one entry must not abort the rest of the matrix, so the driver invokes this on
+# the left of `||` — which also disables errexit throughout this function, so
+# any failure that should fail the entry needs an explicit check + return here
+# (a mis-configured entry is a skip: warn + return 0; a failed agent run is a
+# failure: return non-zero, counted by the driver).
 run_entry() {
     local entry="$1"
     local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV
@@ -294,7 +317,10 @@ run_entry() {
     local LOG="/tmp/babystand-$RUN_KEY.log"
     local SESSION_ID="" TRANSCRIPT="" EVAL_RESULT_FILE=""   # set by run_claude (dynamic scope)
     local EVAL_START; EVAL_START=$(date +%s)
-    BUILDKITE_API_TOKEN="$ENTRY_TOKEN" run_claude "$RENDERED" "$MODEL" "$LOG"
+    if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" run_claude "$RENDERED" "$MODEL" "$LOG"; then
+        echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
+        return 1
+    fi
     local EVAL_ELAPSED; EVAL_ELAPSED=$(fmt_elapsed $(( $(date +%s) - EVAL_START )))
     echo "*** [$ENTRY_ID] EVAL ELAPSED: $EVAL_ELAPSED  SESSION_ID: $SESSION_ID"
     echo "*** [$ENTRY_ID] TRANSCRIPT: $TRANSCRIPT"
@@ -420,9 +446,23 @@ if [[ -n "${BAD_IDS// }" ]]; then
     echo "  ids may contain only letters, digits, dot, underscore and hyphen (they appear in paths and annotation names)." >&2
     exit 1
 fi
+# "." and ".." satisfy the charset above but are path components: runs/.. is
+# the harness root, so a bundle would land outside the gitignored runs/ tree.
+DOT_IDS="$(printf '%s\n' "$ALL_IDS" | grep -Fx -e . -e .. | tr '\n' ' ' || true)"
+if [[ -n "${DOT_IDS// }" ]]; then
+    echo "babystand: matrix entry id(s) '.' and '..' are not allowed (runs/<id> must stay inside runs/)." >&2
+    exit 1
+fi
 
+FAILED_ENTRIES=0
 for i in $(seq 0 $((ENTRY_COUNT - 1))); do
     entry="$(jq -c ".[$i]" <<<"$MATRIX_JSON")"
-    # Never let one entry abort the rest of the matrix.
-    run_entry "$entry" || echo "WARNING: entry index $i failed" >&2
+    # Never let one entry abort the rest of the matrix — but count failures so
+    # the build still goes red at the end.
+    run_entry "$entry" || { FAILED_ENTRIES=$((FAILED_ENTRIES + 1)); echo "WARNING: entry index $i failed" >&2; }
 done
+
+if [[ "$FAILED_ENTRIES" -gt 0 ]]; then
+    echo "babystand: $FAILED_ENTRIES of $ENTRY_COUNT matrix entries failed" >&2
+    exit 1
+fi
