@@ -39,7 +39,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 			require.Equal(t, "org", org)
 			require.Equal(t, "pipeline", pipeline)
 			require.Equal(t, "42", number)
-			require.True(t, options.ExcludeJobs)
+			require.False(t, options.ExcludeJobs)
 			require.True(t, options.ExcludePipeline)
 			require.True(t, options.IncludeTestEngine)
 			return buildkite.Build{
@@ -49,6 +49,13 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 				Branch:  "main",
 				Commit:  "abc123",
 				Message: "Fix tests",
+				Jobs: []buildkite.Job{
+					{ID: "job-passed", State: "passed"},
+					{ID: "job-failed", State: "failed"},
+					{ID: "job-promised", State: "running"},
+					{ID: "job-running", State: "running"},
+					{ID: "job-broken", State: "broken"},
+				},
 				TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{{
 					ID:    "run-1",
 					Suite: buildkite.TestEngineSuite{Slug: "suite-1"},
@@ -174,6 +181,23 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	require.Equal(t, 42, summary.Build.Number)
 	require.Len(t, summary.Jobs, 3)
 	require.False(t, summary.JobsTruncated)
+	require.Equal(t, FailureSummaryJobCensus{
+		Total:  5,
+		States: map[string]int{"passed": 1, "failed": 1, "running": 2, "broken": 1},
+	}, summary.JobCensus)
+
+	var rawSummary struct {
+		JobCensus map[string]any `json:"job_census"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(text), &rawSummary))
+	require.Equal(t, map[string]any{
+		"total":     float64(5),
+		"passed":    float64(1),
+		"failed":    float64(1),
+		"running":   float64(2),
+		"broken":    float64(1),
+		"truncated": false,
+	}, rawSummary.JobCensus)
 
 	require.Equal(t, "job-failed", summary.Jobs[0].ID)
 	require.Equal(t, int64(3), summary.Jobs[0].LogTotalRows)
@@ -262,18 +286,21 @@ func TestGetBuildFailureSummaryPrioritizesFailuresAndCanceledJobsBeforeDownstrea
 	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
 	require.Equal(t, []string{"failed", "promised", "canceled"}, []string{summary.Jobs[0].ID, summary.Jobs[1].ID, summary.Jobs[2].ID})
 	require.True(t, summary.JobsTruncated)
+	// The build payload carried no jobs, so the census cannot vouch for
+	// completeness even though problem jobs were found.
+	require.Equal(t, FailureSummaryJobCensus{Truncated: true}, summary.JobCensus)
 }
 
 func TestGetBuildFailureSummaryEnforcesServerJobLimit(t *testing.T) {
-	buildsClient := &MockBuildsClient{
-		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{}, nil
-		},
-	}
-
 	jobs := make([]buildkite.Job, 6)
 	for i := range jobs {
 		jobs[i] = buildkite.Job{ID: fmt.Sprintf("job-%d", i+1), State: "failed"}
+	}
+
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{Number: 1, State: "failed", Jobs: jobs}, &buildkite.Response{}, nil
+		},
 	}
 	jobListCalls := 0
 	jobsClient := &MockJobsClient{
@@ -316,6 +343,11 @@ func TestGetBuildFailureSummaryEnforcesServerJobLimit(t *testing.T) {
 	require.Equal(t, 5, summary.JobLimit)
 	require.Len(t, summary.Jobs, 5)
 	require.True(t, summary.JobsTruncated)
+	require.Equal(t, FailureSummaryJobCensus{
+		Total:     6,
+		States:    map[string]int{"failed": 6},
+		Truncated: true,
+	}, summary.JobCensus)
 	require.Equal(t, 1, jobListCalls)
 	logCallsMu.Lock()
 	require.Equal(t, 5, logCalls)

@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"unicode/utf8"
@@ -103,9 +104,60 @@ type FailureSummaryTestRun struct {
 	Error            string                          `json:"error,omitempty"`
 }
 
+// FailureSummaryJobCensus reports the complete per-state job counts for the
+// build so a caller can verify the jobs list covers every problem job without
+// a follow-up list_jobs call. It serializes flat, e.g.
+// {"total":4,"passed":2,"failed":1,"broken":1,"truncated":false}.
+type FailureSummaryJobCensus struct {
+	Total     int
+	States    map[string]int
+	Truncated bool
+}
+
+func (c FailureSummaryJobCensus) MarshalJSON() ([]byte, error) {
+	census := make(map[string]any, len(c.States)+2)
+	for state, count := range c.States {
+		census[state] = count
+	}
+	census["total"] = c.Total
+	census["truncated"] = c.Truncated
+	return json.Marshal(census)
+}
+
+func (c *FailureSummaryJobCensus) UnmarshalJSON(data []byte) error {
+	var census map[string]json.RawMessage
+	if err := json.Unmarshal(data, &census); err != nil {
+		return err
+	}
+	c.States = nil
+	for key, value := range census {
+		switch key {
+		case "total":
+			if err := json.Unmarshal(value, &c.Total); err != nil {
+				return err
+			}
+		case "truncated":
+			if err := json.Unmarshal(value, &c.Truncated); err != nil {
+				return err
+			}
+		default:
+			var count int
+			if err := json.Unmarshal(value, &count); err != nil {
+				return err
+			}
+			if c.States == nil {
+				c.States = make(map[string]int)
+			}
+			c.States[key] = count
+		}
+	}
+	return nil
+}
+
 type BuildFailureSummary struct {
 	Build                BuildFailureSummaryBuild   `json:"build"`
 	Jobs                 []FailureSummaryJob        `json:"jobs"`
+	JobCensus            FailureSummaryJobCensus    `json:"job_census"`
 	JobLimit             int                        `json:"job_limit"`
 	JobsTruncated        bool                       `json:"jobs_truncated,omitempty"`
 	Annotations          []FailureSummaryAnnotation `json:"annotations,omitempty"`
@@ -146,6 +198,17 @@ func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
 		StartedAt:    build.StartedAt,
 		FinishedAt:   build.FinishedAt,
 	}
+}
+
+func failureSummaryJobCensus(jobs []buildkite.Job) FailureSummaryJobCensus {
+	census := FailureSummaryJobCensus{Total: len(jobs)}
+	if len(jobs) > 0 {
+		census.States = make(map[string]int)
+	}
+	for _, job := range jobs {
+		census.States[job.State]++
+	}
+	return census
 }
 
 func isPrimaryFailureSummaryJob(job buildkite.Job) bool {
@@ -716,7 +779,7 @@ func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) e
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build_failure_summary",
-			Description: "Diagnose a Buildkite build failure in one call. Returns build state, terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
+			Description: "Diagnose a Buildkite build failure in one call. Returns build state, terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, a job_census counting every job in the build by state (when its truncated field is false, no follow-up list_jobs call is needed to confirm nothing else failed), and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build Failure Summary",
 				ReadOnlyHint: true,
@@ -746,9 +809,11 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
 			)
 
+			// Jobs are included (not ExcludeJobs) so the summary can report a
+			// complete per-state job census alongside the bounded problem-job
+			// list below.
 			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
 				BuildsListOptions: buildkite.BuildsListOptions{
-					ExcludeJobs:     true,
 					ExcludePipeline: true,
 				},
 				IncludeTestEngine: true,
@@ -757,7 +822,11 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				return handleBuildkiteError(err)
 			}
 
-			result := BuildFailureSummary{Build: failureSummaryBuild(build), JobLimit: maxJobs}
+			result := BuildFailureSummary{
+				Build:     failureSummaryBuild(build),
+				JobCensus: failureSummaryJobCensus(build.Jobs),
+				JobLimit:  maxJobs,
+			}
 
 			includeRetriedJobs := false
 			primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
@@ -835,6 +904,9 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				result.Jobs[i] = failureSummaryJob(job)
 			}
 			result.JobsTruncated = jobsTruncated
+			// A build payload without jobs cannot vouch for census
+			// completeness when the job lists found problem jobs.
+			result.JobCensus.Truncated = jobsTruncated || (result.JobCensus.Total == 0 && len(result.Jobs) > 0)
 
 			if defaultTrue(args.IncludeLogs) && deps.BuildkiteLogsClient != nil {
 				if err := loadFailureLogs(ctx, deps.BuildkiteLogsClient, args, sourceJobs, result.Jobs, logTail); err != nil {
