@@ -216,8 +216,8 @@ run_claude() {
 # one entry must not abort the rest of the matrix, so the driver invokes this on
 # the left of `||` — which also disables errexit throughout this function, so
 # any failure that should fail the entry needs an explicit check + return here
-# (a mis-configured entry is a skip: warn + return 0; a failed agent run is a
-# failure: return non-zero, counted by the driver).
+# (a mis-configured entry is a skip: warn + return 0; a failed scenario setup
+# or agent run is a failure: return non-zero, counted by the driver).
 run_entry() {
     local entry="$1"
     local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV
@@ -277,8 +277,10 @@ run_entry() {
         if ! env ENTRY_ID="$ENTRY_ID" DATETIME="$DATETIME" ORG_SLUG="$ORG_SLUG" \
                  PIPELINE_SLUG="$PIPELINE_SLUG" SCENARIO_VARS_FILE="$SCENARIO_VARS_FILE" \
                  bash -c "$SETUP"; then
-            echo "WARNING: scenario setup failed for '$ENTRY_ID'; skipping entry." >&2
-            return 0
+            # A failure, not a skip: setup does real work (fetch/checkout/push),
+            # so a transient or auth failure must fail the entry, not green it.
+            echo "ERROR: [$ENTRY_ID] scenario setup failed; entry not run." >&2
+            return 1
         fi
     fi
 
