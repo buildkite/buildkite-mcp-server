@@ -1,0 +1,106 @@
+# Eval matrix — babystand.sh executes each entry, in order.
+#
+# Per entry:
+#   id            Stable key. Namespaces run artifacts (runs/<id>/) and per-entry
+#                 Buildkite annotations, and is the key used to match this entry
+#                 against the same entry in a previous build for comparison.
+#                 Keep it stable across builds; keep it unique within this file.
+#   agent         Which LLM agent runs the prompt. Only 'claude' is implemented;
+#                 other values are skipped with a loud warning (codex/opencode
+#                 land in a later stage).
+#   model         Passed to the agent as --model.
+#   prompt        Name of a template under prompts/<prompt>.md. Rendered with the
+#                 substitution vars below (Go-style {{.KEY}} placeholders).
+#   scenario:
+#     setup       Optional bash run BEFORE the prompt to establish state (e.g.
+#                 create a branch, push it). It runs inside babystand.sh's clone
+#                 of the EVAL repo (EVAL_REPO_SLUG), under `set -euo pipefail`
+#                 (any failing command fails the setup — and the entry), with
+#                 ENTRY_ID, DATETIME, ORG_SLUG, PIPELINE_SLUG exported into its
+#                 environment. To pass values on to the prompt, append KEY=VALUE
+#                 lines to the file at $SCENARIO_VARS_FILE.
+#     vars        Static KEY=VALUE map substituted into the prompt template.
+#   token_env     Optional. NAME of an env var holding the Buildkite API token
+#                 for the org this entry's scenario lives in — scenarios can
+#                 point anywhere (e.g. an arbitrary BUILD_URL), and API tokens
+#                 are single-org. Convention:
+#                 MCP_EVAL_FRAMEWORK_<ORG>_ORG_BUILDKITE_API_TOKEN, matching the
+#                 secret names in .buildkite/pipeline.evals.yml (secret-mapped
+#                 env names must not start with BUILDKITE/BK). babystand.sh
+#                 hands the value to the agent's MCP server as
+#                 BUILDKITE_API_TOKEN for this entry's run only; entries whose
+#                 named var is unset are skipped loudly. Default: the ambient
+#                 BUILDKITE_API_TOKEN.
+#   mcp_version   MCP server version this run's agent talks to: a release tag, a
+#                 branch, a commit SHA, or 'source' (the in-image binary built
+#                 from the code under review). NOTE: overrides other than 'source'
+#                 are parsed/validated now but not yet wired into the image build
+#                 (that is a follow-up); a non-'source' value currently logs a
+#                 notice and runs the 'source' binary.
+#   compare_base  Optional. What to compare this run AGAINST. A Buildkite build
+#                 (number / URL / 'build:<n>') or a local path: a run prefix
+#                 ('local:./runs/<id>/<id>-<datetime>' — that exact run) or a
+#                 directory ('local:./runs/<id>' — its first run). Relative
+#                 paths resolve against the evals/ dir, not the cwd. Defaults to
+#                 the last successful build on `main` for this entry id.
+#   compare_target Optional. The run being evaluated. Defaults to THIS run (its
+#                 runs/ bundle, plus this Buildkite build's artifacts when a
+#                 build was produced). Same source forms as compare_base.
+#
+# Always-available substitution vars (in addition to scenario vars): ENTRY_ID,
+# DATETIME, ORG_SLUG, PIPELINE_SLUG, WAIT_STATUS, DEBUG_STRING.
+
+matrix:
+  # The original babystand scenario: drive a red CI branch to green.
+  - id: red-to-green-complete
+    agent: claude
+    model: claude-opus-4-8
+    prompt: red-to-green-complete
+    scenario:
+      setup: |
+        # Establish the red CI signal: branch from the deliberately-broken base
+        # and push it (the branch push triggers its own Quality Checks build,
+        # which is what the agent then fixes). The branch is pushed to the EVAL
+        # repo (EVAL_REPO_SLUG — this setup runs inside babystand.sh's clone of
+        # it), so its builds run on the EVAL org's pipeline; scenario branches
+        # never exist in the repo hosting this eval, so the eval pipeline cannot
+        # recurse (see the CROSS-REPO note in .buildkite/pipeline.evals.yml).
+        SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
+        git fetch
+        git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
+        git push -u origin HEAD
+        # Hand the generated branch name to the prompt template.
+        echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
+    mcp_version: source
+    # compare_base defaults to the last successful `main` build for this id.
+    # compare_target defaults to this run.
+
+  # Diagnosis-only variant: point at ANY existing red build — including one on a
+  # pipeline we don't own and must not mutate — and produce a written diagnosis.
+  # No setup (no branch, no push); BUILD_URL is the only parameter, so it is
+  # compared purely via its runs/ bundle.
+  # WARN: This is a difficult scenario for MCP to resolve, and it takes a while
+  #       to run. Uncomment if you want to test MCP against it.
+  #- id: red-to-green-comment-only
+  #  agent: claude
+  #  model: claude-opus-4-8
+  #  prompt: red-to-green-comment-only
+  #  scenario:
+  #    vars:
+  #      BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+  #  # The build above lives in the `buildkite` org, not the default eval org.
+  #  token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+  #  mcp_version: source
+
+  # A no-build scenario: analyze an existing build and propose speedups. Produces
+  # only a written proposal — no git push, no new Buildkite build — so it is
+  # compared purely via its runs/ bundle.
+  # NOTE: Tweak and uncomment to run this
+  # - id: analyze-build-speed
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   prompt: analyze-build
+  #   scenario:
+  #     vars:
+  #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
+  #   mcp_version: source

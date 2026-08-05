@@ -47,6 +47,11 @@ steps:
             - BUILDKITE_AGENT_ACCESS_TOKEN
             - BUILDKITE_API_TOKEN
             - EVAL_COMPARE_BUILDKITE_API_TOKEN
+            # Per-entry tokens: evals.yaml entries may name one of these via
+            # token_env when their scenario lives in a different org (see
+            # evals/evals.yaml). Add one line here (and a secrets mapping
+            # below) per additional org.
+            - MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
             - BUILDKITE_BUILD_URL
             - BUILDKITE_ORGANIZATION_SLUG
             - BUILDKITE_PIPELINE_SLUG
@@ -75,3 +80,7 @@ steps:
       GITHUB_TOKEN: MCP_EVAL_FRAMEWORK_EXTERNAL_REPO_GITHUB_TOKEN
       BUILDKITE_API_TOKEN: MCP_EVAL_FRAMEWORK_EXTERNAL_ORG_BUILDKITE_API_TOKEN
       EVAL_COMPARE_BUILDKITE_API_TOKEN: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+      # Per-entry token_env vars keep the secret's own name (the
+      # MCP_EVAL_FRAMEWORK_<ORG>_ORG_BUILDKITE_API_TOKEN convention), so the
+      # mapping is 1:1.
+      MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
