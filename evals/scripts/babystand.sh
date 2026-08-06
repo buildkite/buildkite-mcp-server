@@ -27,6 +27,11 @@ command -v yq >/dev/null || { echo "babystand: yq is required to parse $EVALS_CO
 # would resolve to a different file or none at all.
 EVALS_CONFIG="$(cd "$(dirname "$EVALS_CONFIG")" && pwd)/$(basename "$EVALS_CONFIG")"
 
+# Both are required (no default), like LOCAL_BYPASS_PERMISSION below; fail with
+# a clear message instead of set -u's bare "unbound variable".
+: "${LOCAL_CI:?must be set to true or false — see evals/README.md}"
+: "${DEBUG_PERMISSIONS:?must be set to true or false — see evals/README.md}"
+
 if [[ "${LOCAL_CI}" == "true" ]]; then
   WAIT_STATUS_STRING="(perform local CI)"
 else
@@ -166,6 +171,19 @@ annotate_codeblock() {
         || echo "WARNING: failed to annotate '$context'" >&2
 }
 
+# run_agent <agent> <rendered_prompt_file> <model> <log_file> -- dispatch to
+# the per-agent runner. Every runner shares one contract: stream the run to the
+# build log (via tee) and set the caller's SESSION_ID / TRANSCRIPT /
+# EVAL_RESULT_FILE variables (bash dynamic scoping: the caller declares them
+# `local` before calling). Unknown agents were already skipped in run_entry.
+run_agent() {
+    local agent="$1"; shift
+    case "$agent" in
+        claude) run_claude "$@" ;;
+        cursor) run_cursor "$@" ;;
+    esac
+}
+
 # run_claude <rendered_prompt_file> <model> <log_file>  -- runs the agent,
 # streaming its output to the build log (via tee), and sets the caller's
 # SESSION_ID / TRANSCRIPT / EVAL_RESULT_FILE variables (bash dynamic scoping: the
@@ -216,18 +234,94 @@ run_claude() {
     fi
 }
 
-# run_entry <entry_json> -- execute one matrix entry end to end. A failure in
-# one entry must not abort the rest of the matrix, so the driver invokes this on
-# the left of `||` — which also disables errexit throughout this function, so
-# any failure that should fail the entry needs an explicit check + return here
-# (a mis-configured entry is a skip: warn + return 0; a failed scenario setup
-# or agent run is a failure: return non-zero, counted by the driver).
+# run_cursor <rendered_prompt_file> <model> <log_file> -- the Cursor CLI
+# (cursor-agent) analogue of run_claude, same contract. Cursor-specific
+# differences (details in scripts/cursor.sh):
+#   - auth is CURSOR_API_KEY (no Buildkite Hosted Models path); entries are
+#     skipped in run_entry when it is unset
+#   - no --mcp-config flag: a .cursor/mcp.json is generated in the working
+#     copy (cwd), referencing the entry token as ${env:BUILDKITE_API_TOKEN}
+#     (no secret on disk; cursor resolves it at server spawn)
+#   - no --append-system-prompt: prompts/system.md is prepended to the prompt
+#   - no on-disk transcript: the raw stream-json capture IS the transcript,
+#     and it carries no token usage (metrics are partial for cursor runs)
+#   - permission posture is --force only; the restricted local allowlist
+#     (cursor's .cursor/cli.json permissions) is NOT wired up, so restricted
+#     local cursor entries are skipped in run_entry
+# Like run_claude, returns non-zero when the agent pipeline fails, and the
+# pipeline must be checked explicitly: errexit is dead in here (run_entry is
+# invoked on the left of `||`), so an unguarded failure would fall through the
+# pointer extraction and read as success.
+run_cursor() {
+    local prompt_file="$1" model="$2" log="$3"
+    local args=( --output-format stream-json --model "$model" )
+    if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+        # Sandboxed CI execution via cursor.sh (owns the generated
+        # .cursor/mcp.json, the prepended system prompt, and the parser).
+        if ! ANNOTATION_CONTEXT_PREFIX="eval-$ENTRY_ID" \
+            "$SCRIPT_DIR/cursor.sh" "$prompt_file" "${args[@]}" | tee "$log"; then
+            return 1
+        fi
+        SESSION_ID=$(sed -n 's/^CURSOR_SESSION_ID=//p' "$log" | tail -n1)
+        TRANSCRIPT=$(sed -n 's/^CURSOR_TRANSCRIPT=//p' "$log" | tail -n1)
+        EVAL_RESULT_FILE=$(sed -n 's/^CURSOR_RESULT_FILE=//p' "$log" | tail -n1)
+    else
+        # Local execution (LOCAL_BYPASS_PERMISSION=true only; run_entry skips
+        # otherwise). Generate the project MCP config in the clone (cwd) from
+        # the harness mcp.json, making the server command absolute (cwd is the
+        # clone, but don't depend on cursor's relative-path resolution). No
+        # secret is materialized: the token is referenced as
+        # ${env:BUILDKITE_API_TOKEN} (Cursor's documented mcp.json
+        # interpolation syntax), resolved at server-spawn time from this
+        # process's environment — run_entry exports the entry token on the
+        # run_agent call.
+        command -v cursor-agent >/dev/null || {
+            echo "ERROR: cursor-agent not found on PATH (install: curl -fsS https://cursor.com/install | bash)" >&2
+            return 1
+        }
+        mkdir -p .cursor
+        jq --arg cwd "$PWD" \
+            '.mcpServers |= with_entries(
+               .value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}"
+               | .value.command |= (if startswith("./") then $cwd + ltrimstr(".") else . end))' \
+            "$ROOT_DIR/mcp.json" > .cursor/mcp.json
+        # Diff hygiene, not a security control (the file holds no secret):
+        # keep the generated config off the scenario branch the agent commits
+        # and pushes to (see cursor.sh for the full rationale). The clone is
+        # always a git repo here.
+        local git_dir; git_dir="$(git rev-parse --git-dir)"
+        mkdir -p "$git_dir/info"
+        echo ".cursor/" >> "$git_dir/info/exclude"
+        if ! cursor-agent -p "$(cat "$ROOT_DIR/prompts/system.md")
+
+$(cat "$prompt_file")" --force --approve-mcps "${args[@]}" | tee "$log"; then
+            return 1
+        fi
+        SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_id' "$log" | head -n1)
+        # cursor-agent's stdout is pure stream-json locally, so the log IS the
+        # transcript.
+        TRANSCRIPT="$log"
+        EVAL_RESULT_FILE="$(mktemp)"
+        jq -r 'select(.type == "result") | .result // empty' "$log" > "$EVAL_RESULT_FILE" 2>/dev/null || true
+    fi
+}
+
+# run_entry <entry_json> -- execute one matrix entry end to end. Best-effort: a
+# failure in one entry logs and returns without aborting the rest of the matrix.
 run_entry() {
     local entry="$1"
     local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
     AGENT=$(jq -r '.agent // "claude"'        <<<"$entry")
-    MODEL=$(jq -r '.model // "claude-opus-4-8"' <<<"$entry")
+    MODEL=$(jq -r '.model // ""'              <<<"$entry")
+    # Model ids are per-agent namespaces (cursor rejects claude-* ids; see
+    # `cursor-agent --list-models`), so the default is agent-aware.
+    if [[ -z "$MODEL" ]]; then
+        case "$AGENT" in
+            cursor) MODEL="composer-1" ;;
+            *)      MODEL="claude-opus-4-8" ;;
+        esac
+    fi
     PROMPT_NAME=$(jq -r '.prompt'             <<<"$entry")
     MCP_VERSION=$(jq -r '.mcp_version // "source"' <<<"$entry")
     SETUP=$(jq -r '.scenario.setup // ""'     <<<"$entry")
@@ -237,10 +331,25 @@ run_entry() {
 
     echo "+++ :robot_face: Eval entry: $ENTRY_ID"
 
-    if [[ "$AGENT" != "claude" ]]; then
-        echo "WARNING: entry '$ENTRY_ID' uses agent '$AGENT' which is not implemented yet; skipping." >&2
-        return 0
-    fi
+    case "$AGENT" in
+        claude) ;;
+        cursor)
+            # Cursor preflight: skip (loudly, like token_env below) rather than
+            # fail mid-run — the failure modes are all environmental.
+            if [[ -z "${CURSOR_API_KEY:-}" ]]; then
+                echo "WARNING: entry '$ENTRY_ID' uses agent 'cursor' but CURSOR_API_KEY is unset (see .buildkite/pipeline.evals.yml); skipping." >&2
+                return 0
+            fi
+            if [[ "${RUN_IN_CI:-false}" != "true" && "$LOCAL_BYPASS_PERMISSION" != "true" ]]; then
+                echo "WARNING: entry '$ENTRY_ID': local cursor runs require LOCAL_BYPASS_PERMISSION=true (cursor-agent's restricted allowlist — .cursor/cli.json permissions — is not wired up); skipping." >&2
+                return 0
+            fi
+            ;;
+        *)
+            echo "WARNING: entry '$ENTRY_ID' uses agent '$AGENT' which is not implemented yet; skipping." >&2
+            return 0
+            ;;
+    esac
     if [[ -n "$MCP_VERSION" && "$MCP_VERSION" != "source" ]]; then
         echo "NOTICE: entry '$ENTRY_ID' requests mcp_version '$MCP_VERSION', which is not yet wired into the image build (follow-up); running the in-image 'source' binary." >&2
     fi
@@ -313,7 +422,6 @@ run_entry() {
     fi
     local RENDERED; RENDERED="$(mktemp)"
     render_prompt "$TEMPLATE" "$VARS_FILE" > "$RENDERED"
-    # Any {{.KEY}} the vars didn't supply survives verbatim into the prompt —
     # the agent would silently receive a literal placeholder. Surface it.
     local UNRESOLVED
     UNRESOLVED="$(grep -oE '\{\{\.[A-Za-z_][A-Za-z0-9_]*\}\}' "$RENDERED" | sort -u | tr '\n' ' ' || true)"
@@ -325,9 +433,9 @@ run_entry() {
 
     # --- Run the agent ------------------------------------------------------
     local LOG="/tmp/babystand-$RUN_KEY.log"
-    local SESSION_ID="" TRANSCRIPT="" EVAL_RESULT_FILE=""   # set by run_claude (dynamic scope)
+    local SESSION_ID="" TRANSCRIPT="" EVAL_RESULT_FILE=""   # set by the runner (dynamic scope)
     local EVAL_START; EVAL_START=$(date +%s)
-    if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" run_claude "$RENDERED" "$MODEL" "$LOG"; then
+    if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
     fi
@@ -338,12 +446,19 @@ run_entry() {
     # --- Audit: tools + metrics --------------------------------------------
     local AUDIT_TOOLS_FILE AUDIT_METRICS_FILE
     AUDIT_TOOLS_FILE="$(mktemp)"; AUDIT_METRICS_FILE="$(mktemp)"
+    # --agent switches the transcript dialect: cursor's stream-json records
+    # tool calls as standalone tool_call events, not Claude-style tool_use
+    # content blocks, and emits no token usage (metrics come back partial).
     echo "--- :hammer_and_wrench: [$ENTRY_ID] tool calls"
-    "$SCRIPT_DIR/bk-tool-audit-v2.sh" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE" || true
+    "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE" || true
     echo "--- :bar_chart: [$ENTRY_ID] session metrics"
-    "$SCRIPT_DIR/bk-tool-audit-v2.sh" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE" || true
+    "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE" || true
 
     # --- Klaren review (best-effort) ---------------------------------------
+    # Klaren always runs on claude regardless of the entry's agent: it is the
+    # judge, not the subject under test, and holding the reviewer fixed keeps
+    # reviews comparable across agents. It only reads the transcript file, so
+    # cursor's stream-json capture works as input too.
     # Use the harness copy of the prompt, not the checked-out subject-under-test
     # copy.
     echo "--- :female-detective: [$ENTRY_ID] klaren review"
