@@ -96,7 +96,7 @@ matrix:
   # comparisons should lean on tool calls, duration, and the klaren review.
   - id: red-to-green-complete-cursor
     agent: cursor
-    model: composer-2.5
+    model: claude-opus-5
     prompt: red-to-green-complete
     scenario:
       setup: |
@@ -105,6 +105,7 @@ matrix:
         git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
         git push -u origin HEAD
         echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
+    compare_base: build:94
     mcp_version: source
 
   # Diagnosis-only variant: point at ANY existing red build — including one on a
