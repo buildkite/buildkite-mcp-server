@@ -236,6 +236,7 @@ func TestListTestsArgsSchema(t *testing.T) {
 	require.Contains(t, s.Properties["min_timestamp"].Description, "RFC3339")
 	require.Contains(t, s.Properties["max_timestamp"].Description, "RFC3339")
 	require.Contains(t, s.Properties["period"].Description, "Cannot be combined")
+	require.Contains(t, s.Properties["period"].Description, "cannot exceed the organization's maximum")
 	require.Contains(t, s.Properties["state"].Description, "enabled")
 	require.Contains(t, s.Properties["sort_by"].Description, "reliability")
 	require.Contains(t, s.Properties["order"].Description, "asc")

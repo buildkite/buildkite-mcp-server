@@ -44,7 +44,6 @@ func TestListTests(t *testing.T) {
 			require.Equal(t, "org", org)
 			require.Equal(t, "suite1", slug)
 			require.Equal(t, buildkite.ListOptions{Page: 2, PerPage: 50}, opt.ListOptions)
-			require.Equal(t, "7days", opt.Period)
 			require.Equal(t, minTimestamp, opt.MinTimestamp)
 			require.Equal(t, maxTimestamp, opt.MaxTimestamp)
 			require.Equal(t, "flaky,!slow", opt.Labels)
@@ -108,7 +107,6 @@ func TestListTests(t *testing.T) {
 		TestSuiteSlug: "suite1",
 		Page:          2,
 		PerPage:       50,
-		Period:        "7days",
 		MinTimestamp:  minTimestamp,
 		MaxTimestamp:  maxTimestamp,
 		Labels:        "flaky,!slow",
@@ -152,6 +150,9 @@ func TestListTestsUsesDefaultPagination(t *testing.T) {
 	client := &MockTestsClient{
 		ListFunc: func(ctx context.Context, org, slug string, opt *buildkite.TestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
 			require.Equal(t, buildkite.ListOptions{Page: 1, PerPage: 100}, opt.ListOptions)
+			require.Equal(t, "7days", opt.Period)
+			require.True(t, opt.MinTimestamp.IsZero())
+			require.True(t, opt.MaxTimestamp.IsZero())
 			return []buildkite.TestWithMetrics{}, &buildkite.Response{Response: &http.Response{Header: http.Header{}}}, nil
 		},
 	}
@@ -161,6 +162,7 @@ func TestListTestsUsesDefaultPagination(t *testing.T) {
 	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListTestsArgs{
 		OrgSlug:       "org",
 		TestSuiteSlug: "suite1",
+		Period:        "7days",
 	})
 	require.NoError(t, err)
 	require.False(t, result.IsError)
@@ -187,6 +189,7 @@ func TestListTestsReturnsAPIError(t *testing.T) {
 		OrgSlug:       "org",
 		TestSuiteSlug: "suite1",
 		Period:        "7days",
+		MinTimestamp:  time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
