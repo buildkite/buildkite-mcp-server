@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"time"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/go-buildkite/v5"
@@ -11,12 +12,99 @@ import (
 
 type TestsClient interface {
 	Get(ctx context.Context, org, slug, testID string) (buildkite.Test, *buildkite.Response, error)
+	List(ctx context.Context, org, slug string, opt *buildkite.TestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error)
+}
+
+type ListTestsArgs struct {
+	OrgSlug       string    `json:"org_slug"`
+	TestSuiteSlug string    `json:"test_suite_slug"`
+	Page          int       `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage       int       `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
+	Period        string    `json:"period,omitempty" jsonschema:"Relative aggregation window, such as '7days' or '28days'. Available periods depend on the organization's maximum Test Engine window. Cannot be combined with min_timestamp or max_timestamp."`
+	MinTimestamp  time.Time `json:"min_timestamp,omitempty" jsonschema:"Start of the aggregation window in RFC3339 format. When omitted, defaults to the organization's default Test Engine period before the current time."`
+	MaxTimestamp  time.Time `json:"max_timestamp,omitempty" jsonschema:"End of the aggregation window in RFC3339 format. Defaults to the current time when omitted."`
+	Labels        string    `json:"labels,omitempty" jsonschema:"Filter by comma-separated test labels. Prefix a label with '!' to exclude it, for example 'flaky,!slow'."`
+	Branch        string    `json:"branch,omitempty" jsonschema:"Filter executions included in the metrics by branch. Prefix with '!' to exclude an exact branch or suffix with '*' to match by prefix, for example '!main' or 'feature*'. Use at most one operator."`
+	Owners        string    `json:"owners,omitempty" jsonschema:"Filter by comma-separated test owner slugs. Prefix an owner with '!' to exclude it, for example 'payments,!platform'."`
+	State         string    `json:"state,omitempty" jsonschema:"Filter by test state: 'enabled', 'muted', or 'skipped'."`
+	Tags          string    `json:"tags,omitempty" jsonschema:"Filter by comma-separated execution tags in key:value form. Values support '!' for exclusion and '*' for prefix matching. Result values additionally support '~' for any matching execution and '^' for every execution matching, for example 'framework:!rspec,scm.branch:feature*,result:^passed'."`
+	SortBy        string    `json:"sort_by,omitempty" jsonschema:"Metric used to sort results: 'duration_avg', 'duration_sum', 'duration_min', 'duration_max', or 'reliability'. Defaults to 'duration_avg'. Metrics cover only executions in the selected window."`
+	Order         string    `json:"order,omitempty" jsonschema:"Sort direction: 'asc' or 'desc'. Defaults to 'desc'."`
 }
 
 type GetTestArgs struct {
 	OrgSlug       string `json:"org_slug"`
 	TestSuiteSlug string `json:"test_suite_slug"`
 	TestID        string `json:"test_id"`
+}
+
+func ListTests() (mcp.Tool, mcp.ToolHandlerFor[ListTestsArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "list_tests",
+			Description: "List tests in a Buildkite Test Engine suite with execution metrics aggregated over a selected time window. Supports filtering, metric sorting, and pagination.",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "List Tests",
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args ListTestsArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.ListTests")
+			defer span.End()
+
+			paginationParams := paginationFromArgs(args.Page, args.PerPage)
+			options := &buildkite.TestsListOptions{
+				ListOptions:  paginationParams,
+				Period:       args.Period,
+				MinTimestamp: args.MinTimestamp,
+				MaxTimestamp: args.MaxTimestamp,
+				Labels:       args.Labels,
+				Branch:       args.Branch,
+				Owners:       args.Owners,
+				State:        args.State,
+				Tags:         args.Tags,
+				SortBy:       args.SortBy,
+				Order:        args.Order,
+			}
+
+			attributes := []attribute.KeyValue{
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("test_suite_slug", args.TestSuiteSlug),
+				attribute.Int("page", paginationParams.Page),
+				attribute.Int("per_page", paginationParams.PerPage),
+				attribute.String("period", args.Period),
+				attribute.String("labels", args.Labels),
+				attribute.String("branch", args.Branch),
+				attribute.String("owners", args.Owners),
+				attribute.String("state", args.State),
+				attribute.String("tags", args.Tags),
+				attribute.String("sort_by", args.SortBy),
+				attribute.String("order", args.Order),
+			}
+			if !args.MinTimestamp.IsZero() {
+				attributes = append(attributes, attribute.String("min_timestamp", args.MinTimestamp.Format(time.RFC3339)))
+			}
+			if !args.MaxTimestamp.IsZero() {
+				attributes = append(attributes, attribute.String("max_timestamp", args.MaxTimestamp.Format(time.RFC3339)))
+			}
+			span.SetAttributes(attributes...)
+
+			deps := DepsFromContext(ctx)
+			tests, resp, err := deps.TestsClient.List(ctx, args.OrgSlug, args.TestSuiteSlug, options)
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			result := PaginatedResult[buildkite.TestWithMetrics]{
+				Items: tests,
+				Headers: map[string]string{
+					"Link": resp.Header.Get("Link"),
+				},
+			}
+
+			span.SetAttributes(attribute.Int("item_count", len(tests)))
+
+			return mcpTextResult(span, &result)
+		}, []string{"read_suites"}
 }
 
 func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {

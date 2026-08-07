@@ -666,4 +666,27 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Len(investigations.Tools, 1)
 	assert.Equal("get_build_failure_summary", investigations.Tools[0].Tool.Name)
 	assert.Equal([]string{"read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
+
+	tests, exists := registry.Get(ToolsetTests)
+	assert.True(exists)
+	var listTests *ToolDefinition
+	for i := range tests.Tools {
+		if tests.Tools[i].Tool.Name == "list_tests" {
+			listTests = &tests.Tools[i]
+			break
+		}
+	}
+	assert.NotNil(listTests)
+	assert.True(listTests.IsReadOnly())
+	assert.Equal([]string{"read_suites"}, listTests.RequiredScopes)
+
+	readOnlyTests := registry.GetEnabledTools([]string{ToolsetTests}, true)
+	retainedInReadOnlyMode := false
+	for _, tool := range readOnlyTests {
+		if tool.Tool.Name == "list_tests" {
+			retainedInReadOnlyMode = true
+			break
+		}
+	}
+	assert.True(retainedInReadOnlyMode)
 }

@@ -218,6 +218,29 @@ func TestGetTestArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"org_slug", "test_id", "test_suite_slug"}, req)
 }
 
+func TestListTestsArgsSchema(t *testing.T) {
+	s := schemaFor[ListTestsArgs](t)
+	require.Equal(t, []string{"org_slug", "test_suite_slug"}, sortedRequired[ListTestsArgs](t))
+
+	optional := []string{
+		"page", "per_page", "period", "min_timestamp", "max_timestamp", "labels",
+		"branch", "owners", "state", "tags", "sort_by", "order",
+	}
+	for _, property := range optional {
+		require.Contains(t, s.Properties, property)
+		require.NotContains(t, s.Required, property, "%s should be optional", property)
+	}
+
+	require.Equal(t, "string", s.Properties["min_timestamp"].Type)
+	require.Equal(t, "string", s.Properties["max_timestamp"].Type)
+	require.Contains(t, s.Properties["min_timestamp"].Description, "RFC3339")
+	require.Contains(t, s.Properties["max_timestamp"].Description, "RFC3339")
+	require.Contains(t, s.Properties["period"].Description, "Cannot be combined")
+	require.Contains(t, s.Properties["state"].Description, "enabled")
+	require.Contains(t, s.Properties["sort_by"].Description, "reliability")
+	require.Contains(t, s.Properties["order"].Description, "asc")
+}
+
 func TestListTestRunsArgsSchema(t *testing.T) {
 	s := schemaFor[ListTestRunsArgs](t)
 	req := slices.Clone(s.Required)
