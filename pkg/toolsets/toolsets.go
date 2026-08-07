@@ -337,6 +337,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.GetPipeline),
 				newToolDef(buildkite.ListPipelines),
+				newToolDef(buildkite.ValidatePipeline),
 				newToolDef(buildkite.CreatePipeline),
 				newToolDef(buildkite.UpdatePipeline),
 				newToolDef(buildkite.ListPipelineSchedules),
