@@ -27,11 +27,12 @@ steps:
     - name: ":go: test"
       artifact_paths:
         - cover-tree.svg
+        - coverage.out
         - junit.xml
       commands:
-        - go run gotest.tools/gotestsum@latest --junitfile junit.xml --format testname -- -coverprofile=cover.out ./...
-        - go run github.com/nikolaydubina/go-cover-treemap@latest -coverprofile cover.out > cover-tree.svg
-        - echo '<details><summary>Coverage tree map</summary><img src="artifact://cover-tree.svg" alt="Test coverage tree map" width="70%"></details>' | buildkite-agent annotate --style "info"
+        - go run gotest.tools/gotestsum@latest --junitfile junit.xml --format testname -- -coverprofile=coverage.out ./...
+        - go run github.com/nikolaydubina/go-cover-treemap@latest -coverprofile coverage.out > cover-tree.svg
+        - echo "<details><summary>Coverage tree map ($(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}'))</summary><img src=\"artifact://cover-tree.svg\" alt=\"Test coverage tree map\" width=\"70%\"></details>" | buildkite-agent annotate --style "info"
       env:
         GOCACHE: /gocache
         GOMODCACHE: /gomodcache
