@@ -119,10 +119,15 @@ resolve_src() {
 metrics_table() {
     jq -rn --slurpfile b "$1" --slurpfile c "$2" --arg bl "$3" --arg cl "$4" '
         ($b[0] // {}) as $B | ($c[0] // {}) as $C |
-        def num(x): (x // 0);
         def rnd(x): ((x*100|round)/100);
         def sign(x): (rnd(x)) as $y | (if $y > 0 then "+\($y)" elif $y < 0 then "\($y)" else "0" end);
-        def r(lbl; bv; cv): "| \(lbl) | \(num(bv)) | \(num(cv)) | \(sign(num(cv)-num(bv))) |";
+        # null means "not reported" (cursor runs deliberately emit tokens/cost
+        # as null — cursor-agent provides no usage data): render N/A and skip
+        # the delta rather than coercing to 0, which would read as a free,
+        # zero-token run with a misleading delta.
+        def cell(x): if x == null then "N/A" else x end;
+        def delta(bv; cv): if bv == null or cv == null then "N/A" else sign(cv - bv) end;
+        def r(lbl; bv; cv): "| \(lbl) | \(cell(bv)) | \(cell(cv)) | \(delta(bv; cv)) |";
         [
           "| Metric | Base (\($bl)) | Target (\($cl)) | Δ |",
           "|---|---:|---:|---:|",
