@@ -133,3 +133,25 @@ matrix:
   #     vars:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source
+
+  # Find the slowest tests when the Test Engine suite is supplied directly.
+  - id: slowest-tests-from-suite
+    agent: claude
+    model: claude-opus-4-8
+    prompt: find-slowest-tests
+    scenario:
+      vars:
+        STARTING_POINT: "Buildkite Test Engine suite 'buildkite-rspec' in organization 'buildkite'"
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
+
+  # Discover the Test Engine suites from a build before finding slow tests.
+  - id: slowest-tests-from-build
+    agent: claude
+    model: claude-opus-4-8
+    prompt: find-slowest-tests
+    scenario:
+      vars:
+        STARTING_POINT: "Buildkite build https://buildkite.com/buildkite/buildkite/builds/204234"
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
