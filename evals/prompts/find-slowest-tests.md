@@ -1,5 +1,7 @@
 /goal Starting from {{.STARTING_POINT}}, find the 10 slowest tests associated with it over the last 7 days.
 
+Treat identifiers explicitly supplied in the starting point as authoritative. Discover only identifiers that the starting point does not provide.
+
 Define slowest by average execution duration and rank the results from slowest to fastest. If the starting point is associated with multiple test suites, combine their results into one overall top 10.
 
 For each result, report its rank, test name, test suite, average duration, maximum duration, and execution count when available. Use only verified values and do not invent missing identifiers.
