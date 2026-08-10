@@ -253,6 +253,19 @@ func TestListTestRunsArgsSchema(t *testing.T) {
 	}
 }
 
+func TestListTestSuitesArgsSchema(t *testing.T) {
+	s := schemaFor[ListTestSuitesArgs](t)
+	require.Equal(t, []string{"org_slug"}, sortedRequired[ListTestSuitesArgs](t))
+
+	for _, opt := range []string{"page", "per_page"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestGetTestSuiteArgsSchema(t *testing.T) {
+	require.Equal(t, []string{"org_slug", "test_suite_slug"}, sortedRequired[GetTestSuiteArgs](t))
+}
+
 func TestGetTestRunArgsSchema(t *testing.T) {
 	req := sortedRequired[GetTestRunArgs](t)
 	require.Equal(t, []string{"org_slug", "run_id", "test_suite_slug"}, req)

@@ -669,24 +669,23 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 
 	tests, exists := registry.Get(ToolsetTests)
 	assert.True(exists)
-	var listTests *ToolDefinition
+	testTools := make(map[string]*ToolDefinition)
 	for i := range tests.Tools {
-		if tests.Tools[i].Tool.Name == "list_tests" {
-			listTests = &tests.Tools[i]
-			break
-		}
+		testTools[tests.Tools[i].Tool.Name] = &tests.Tools[i]
 	}
-	assert.NotNil(listTests)
-	assert.True(listTests.IsReadOnly())
-	assert.Equal([]string{"read_suites"}, listTests.RequiredScopes)
+	for _, name := range []string{"list_test_suites", "get_test_suite", "list_tests"} {
+		tool := testTools[name]
+		assert.NotNil(tool)
+		assert.True(tool.IsReadOnly())
+		assert.Equal([]string{"read_suites"}, tool.RequiredScopes)
+	}
 
 	readOnlyTests := registry.GetEnabledTools([]string{ToolsetTests}, true)
-	retainedInReadOnlyMode := false
+	readOnlyToolNames := make(map[string]bool)
 	for _, tool := range readOnlyTests {
-		if tool.Tool.Name == "list_tests" {
-			retainedInReadOnlyMode = true
-			break
-		}
+		readOnlyToolNames[tool.Tool.Name] = true
 	}
-	assert.True(retainedInReadOnlyMode)
+	for _, name := range []string{"list_test_suites", "get_test_suite", "list_tests"} {
+		assert.True(readOnlyToolNames[name])
+	}
 }

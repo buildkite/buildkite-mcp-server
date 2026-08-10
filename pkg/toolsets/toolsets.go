@@ -376,6 +376,8 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Name:        "Test Engine",
 			Description: "Tools for managing test runs and test results",
 			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListTestSuites),
+				newToolDef(buildkite.GetTestSuite),
 				newToolDef(buildkite.ListTests),
 				newToolDef(buildkite.ListTestRuns),
 				newToolDef(buildkite.GetTestRun),
