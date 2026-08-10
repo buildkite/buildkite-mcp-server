@@ -13,7 +13,9 @@ type OrganizationsClient interface {
 	List(ctx context.Context, options *buildkite.OrganizationListOptions) ([]buildkite.Organization, *buildkite.Response, error)
 }
 
-type UserTokenOrganizationArgs struct{}
+type UserTokenOrganizationArgs struct {
+	ToolInput
+}
 
 func UserTokenOrganization() (mcp.Tool, mcp.ToolHandlerFor[UserTokenOrganizationArgs, any], []string) {
 	return mcp.Tool{

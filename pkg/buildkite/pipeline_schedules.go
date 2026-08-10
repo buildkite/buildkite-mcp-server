@@ -17,6 +17,7 @@ type PipelineSchedulesClient interface {
 }
 
 type ListPipelineSchedulesArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
@@ -68,6 +69,7 @@ func ListPipelineSchedules() (mcp.Tool, mcp.ToolHandlerFor[ListPipelineSchedules
 }
 
 type GetPipelineScheduleArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	ScheduleID   string `json:"schedule_id"`
@@ -102,6 +104,7 @@ func GetPipelineSchedule() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineScheduleArgs
 }
 
 type CreatePipelineScheduleArgs struct {
+	ToolInput
 	OrgSlug      string            `json:"org_slug"`
 	PipelineSlug string            `json:"pipeline_slug"`
 	Cronline     string            `json:"cronline" jsonschema:"Schedule interval as a crontab expression (e.g. '0 0 * * *') or predefined value (e.g. '@daily', '@hourly', '@weekly', '@monthly', '@yearly')"`
@@ -152,6 +155,7 @@ func CreatePipelineSchedule() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineSchedu
 }
 
 type UpdatePipelineScheduleArgs struct {
+	ToolInput
 	OrgSlug      string            `json:"org_slug"`
 	PipelineSlug string            `json:"pipeline_slug"`
 	ScheduleID   string            `json:"schedule_id"`

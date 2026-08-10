@@ -94,6 +94,7 @@ type BuildDetail struct {
 
 // ListBuildsArgs struct with enhanced filtering
 type ListBuildsArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Filter builds by pipeline. When omitted, lists builds across all pipelines in the organization"`
 	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
@@ -106,6 +107,7 @@ type ListBuildsArgs struct {
 
 // GetBuildArgs struct
 type GetBuildArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -113,6 +115,7 @@ type GetBuildArgs struct {
 
 // GetBuildTestEngineRunsArgs struct
 type GetBuildTestEngineRunsArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -371,6 +374,7 @@ func listAnnotationSummaries(ctx context.Context, orgSlug, pipelineSlug, buildNu
 }
 
 type WaitForBuildArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -566,6 +570,7 @@ type Entry struct {
 }
 
 type CreateBuildArgs struct {
+	ToolInput
 	OrgSlug             string  `json:"org_slug"`
 	PipelineSlug        string  `json:"pipeline_slug"`
 	Commit              string  `json:"commit" jsonschema:"The commit SHA to build"`
@@ -615,6 +620,7 @@ func CreateBuild() (mcp.Tool, mcp.ToolHandlerFor[CreateBuildArgs, any], []string
 }
 
 type CancelBuildArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -650,6 +656,7 @@ func CancelBuild() (mcp.Tool, mcp.ToolHandlerFor[CancelBuildArgs, any], []string
 }
 
 type RebuildBuildArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`

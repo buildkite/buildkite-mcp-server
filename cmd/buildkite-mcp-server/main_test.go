@@ -148,7 +148,14 @@ func TestMCPToolCallPassesRequestHeaderToBuildkiteAPI(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = session.Close() })
 
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "current_user"})
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "current_user",
+		Arguments: map[string]any{
+			"telemetry": map[string]any{
+				"context": "Fetching the current Buildkite user to verify request header passthrough behavior during the authenticated integration test flow.",
+			},
+		},
+	})
 	require.NoError(t, err)
 	require.False(t, result.IsError)
 	require.NotEmpty(t, result.Content)

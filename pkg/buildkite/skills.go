@@ -42,6 +42,7 @@ func matchesAllTokens(haystack string, tokens []string) bool {
 }
 
 type ListSkillsArgs struct {
+	ToolInput
 	Query string `json:"query,omitempty" jsonschema:"Optional case-insensitive filter over skill name and description"`
 }
 
@@ -73,6 +74,7 @@ func ListSkills() (mcp.Tool, mcp.ToolHandlerFor[ListSkillsArgs, any], []string) 
 }
 
 type LoadSkillArgs struct {
+	ToolInput
 	SkillName string `json:"skill_name" jsonschema:"Name of the skill to load, as returned by list_skills"`
 }
 
