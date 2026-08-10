@@ -19,6 +19,7 @@ type ClusterQueuesClient interface {
 }
 
 type ListClusterQueuesArgs struct {
+	ToolInput
 	OrgSlug   string `json:"org_slug"`
 	ClusterID string `json:"cluster_id"`
 	Page      int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
@@ -26,12 +27,14 @@ type ListClusterQueuesArgs struct {
 }
 
 type GetClusterQueueArgs struct {
+	ToolInput
 	OrgSlug   string `json:"org_slug"`
 	ClusterID string `json:"cluster_id"`
 	QueueID   string `json:"queue_id"`
 }
 
 type CreateClusterQueueArgs struct {
+	ToolInput
 	OrgSlug     string `json:"org_slug"`
 	ClusterID   string `json:"cluster_id"`
 	Key         string `json:"key"`
@@ -39,6 +42,7 @@ type CreateClusterQueueArgs struct {
 }
 
 type UpdateClusterQueueArgs struct {
+	ToolInput
 	OrgSlug            string  `json:"org_slug"`
 	ClusterID          string  `json:"cluster_id"`
 	QueueID            string  `json:"queue_id"`
@@ -47,6 +51,7 @@ type UpdateClusterQueueArgs struct {
 }
 
 type PauseClusterQueueDispatchArgs struct {
+	ToolInput
 	OrgSlug   string `json:"org_slug"`
 	ClusterID string `json:"cluster_id"`
 	QueueID   string `json:"queue_id"`
@@ -54,6 +59,7 @@ type PauseClusterQueueDispatchArgs struct {
 }
 
 type ResumeClusterQueueDispatchArgs struct {
+	ToolInput
 	OrgSlug   string `json:"org_slug"`
 	ClusterID string `json:"cluster_id"`
 	QueueID   string `json:"queue_id"`

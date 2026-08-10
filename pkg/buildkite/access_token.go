@@ -12,7 +12,9 @@ type AccessTokenClient interface {
 	Get(ctx context.Context) (buildkite.AccessToken, *buildkite.Response, error)
 }
 
-type AccessTokenArgs struct{}
+type AccessTokenArgs struct {
+	ToolInput
+}
 
 func AccessToken() (mcp.Tool, mcp.ToolHandlerFor[AccessTokenArgs, any], []string) {
 	return mcp.Tool{

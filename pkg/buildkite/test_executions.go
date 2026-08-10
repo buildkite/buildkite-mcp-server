@@ -14,6 +14,7 @@ type TestExecutionsClient interface {
 }
 
 type GetFailedTestExecutionsArgs struct {
+	ToolInput
 	OrgSlug                string `json:"org_slug"`
 	TestSuiteSlug          string `json:"test_suite_slug"`
 	RunID                  string `json:"run_id"`

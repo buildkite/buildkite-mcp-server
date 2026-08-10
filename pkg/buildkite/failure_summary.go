@@ -42,6 +42,7 @@ const (
 // by get_build_failure_summary. Pointer booleans let omitted values default to
 // true while still allowing callers to disable an optional section.
 type GetBuildFailureSummaryArgs struct {
+	ToolInput
 	OrgSlug                string `json:"org_slug"`
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`

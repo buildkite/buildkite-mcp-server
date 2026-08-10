@@ -17,17 +17,20 @@ type ClustersClient interface {
 }
 
 type ListClustersArgs struct {
+	ToolInput
 	OrgSlug string `json:"org_slug"`
 	Page    int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 type GetClusterArgs struct {
+	ToolInput
 	OrgSlug   string `json:"org_slug"`
 	ClusterID string `json:"cluster_id"`
 }
 
 type CreateClusterArgs struct {
+	ToolInput
 	OrgSlug     string `json:"org_slug"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty" jsonschema:"Description of the cluster"`
@@ -36,6 +39,7 @@ type CreateClusterArgs struct {
 }
 
 type UpdateClusterArgs struct {
+	ToolInput
 	OrgSlug        string  `json:"org_slug"`
 	ClusterID      string  `json:"cluster_id"`
 	Name           *string `json:"name,omitempty" jsonschema:"New name for the cluster"`

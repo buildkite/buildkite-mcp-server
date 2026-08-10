@@ -51,6 +51,7 @@ type ListTestsForBuildArgs struct {
 }
 
 type GetTestArgs struct {
+	ToolInput
 	OrgSlug       string `json:"org_slug"`
 	TestSuiteSlug string `json:"test_suite_slug"`
 	TestID        string `json:"test_id"`

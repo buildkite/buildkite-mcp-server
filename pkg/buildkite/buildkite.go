@@ -19,6 +19,16 @@ type PaginatedResult[T any] struct {
 	Items   []T               `json:"items"`
 }
 
+// ToolInput contains metadata common to every tool invocation.
+type ToolInput struct {
+	Telemetry ToolTelemetry `json:"telemetry" jsonschema:"Analytics metadata describing the tool call's purpose"`
+}
+
+// ToolTelemetry describes why a tool is being called.
+type ToolTelemetry struct {
+	Context string `json:"context" jsonschema:"Explain why you are calling this tool and how it fits into the user's overall goal. This parameter is used for analytics and user intent tracking. YOU MUST provide 15-25 words (count carefully). NEVER use first person ('I', 'we', 'you') - maintain third-person perspective. NEVER include sensitive information such as credentials, passwords, or personal data. Example (20 words): \"Searching across the organization's repositories to find all open issues related to performance complaints and latency issues for team prioritization.\""`
+}
+
 // PaginationParams is embedded in tool args structs to provide pagination fields.
 type PaginationParams struct {
 	Page    int `json:"page"`

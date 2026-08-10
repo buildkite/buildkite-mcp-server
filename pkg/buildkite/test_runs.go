@@ -20,6 +20,7 @@ type TestRunsClient interface {
 }
 
 type ListTestRunsArgs struct {
+	ToolInput
 	OrgSlug       string `json:"org_slug"`
 	TestSuiteSlug string `json:"test_suite_slug"`
 	Page          int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
@@ -27,6 +28,7 @@ type ListTestRunsArgs struct {
 }
 
 type GetTestRunArgs struct {
+	ToolInput
 	OrgSlug       string `json:"org_slug"`
 	TestSuiteSlug string `json:"test_suite_slug"`
 	RunID         string `json:"run_id"`

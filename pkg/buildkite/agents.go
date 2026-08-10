@@ -16,6 +16,7 @@ type AgentsClient interface {
 }
 
 type ListAgentsArgs struct {
+	ToolInput
 	OrgSlug     string `json:"org_slug"`
 	Name        string `json:"name,omitempty"`
 	Hostname    string `json:"hostname,omitempty"`
@@ -26,6 +27,7 @@ type ListAgentsArgs struct {
 }
 
 type GetAgentArgs struct {
+	ToolInput
 	OrgSlug     string `json:"org_slug"`
 	AgentID     string `json:"agent_id"`
 	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary', 'detailed', or 'full' (default)"`
