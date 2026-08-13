@@ -25,6 +25,7 @@ type ToolDependencies struct {
 	UserClient              UserClient
 	AccessTokensClient      AccessTokenClient
 	JobsClient              JobsClient
+	StepUploadsClient       StepUploadsClient
 	TestRunsClient          TestRunsClient
 	TestExecutionsClient    TestExecutionsClient
 	TestsClient             TestsClient
