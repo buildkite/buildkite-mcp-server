@@ -83,6 +83,37 @@ matrix:
     mcp_version: source
     # compare_target defaults to this run.
 
+  # Based on the original babystand scenario: drive a red CI branch to green.
+  # This scenario exercises the mcp get information from step upload/dynamic pipelines tool 
+  - id: red-to-green-complete-step-upload-bad-pipeline-yml
+    agent: claude
+    model: claude-opus-4-8
+    prompt: red-to-green-complete
+    scenario:
+      setup: |
+        # See 'red-to-green-complete' above
+        SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
+        git fetch
+        git checkout -b "$SCENARIO_BRANCH" origin/test-step-upload-job-failed
+        cat > .buildkite/steps.yml <<'EOF'
+        common:
+          - &right_deploy
+            docker#v5.13.0:
+              image: alpine:3.20
+
+        steps:
+          - label: ":wave: Hello"
+            command: echo "hello world"
+            plugins:
+              <<: *wrong_deploy
+        EOF
+        # Hand the generated branch name to the prompt template.
+        echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
+        git push -u origin HEAD
+        rm .buildkite/steps.yml
+    mcp_version: source
+    # compare_target defaults to this run.
+
   # The same scenario driven by the Cursor CLI instead of Claude Code — lets a
   # build compare how two different agents fare against the same MCP server.
   # Requires CURSOR_API_KEY (uncomment its env + secrets lines in
