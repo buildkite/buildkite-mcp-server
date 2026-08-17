@@ -166,3 +166,39 @@ matrix:
         STARTING_POINT: "Buildkite pipeline https://buildkite.com/buildkite/buildkite"
     token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
     mcp_version: source
+
+  # Find the flakiest tests carrying the `flaky` label when the Test Engine
+  # suite is supplied directly.
+  - id: flakiest-tests-from-suite
+    agent: claude
+    model: claude-opus-4-8
+    prompt: find-flakiest-tests
+    scenario:
+      vars:
+        STARTING_POINT: "Buildkite Test Engine suite 'buildkite-rspec' in organization 'buildkite'"
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
+
+  # Discover the Test Engine suites from a build before finding tests carrying
+  # the `flaky` label and ranking them by flakiness.
+  - id: flakiest-tests-from-build
+    agent: claude
+    model: claude-opus-4-8
+    prompt: find-flakiest-tests
+    scenario:
+      vars:
+        STARTING_POINT: "Buildkite build https://buildkite.com/buildkite/buildkite/builds/204234"
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
+
+  # Discover the Test Engine suites from a pipeline before finding tests
+  # carrying the `flaky` label and ranking them by flakiness.
+  - id: flakiest-tests-from-pipeline
+    agent: claude
+    model: claude-opus-4-8
+    prompt: find-flakiest-tests
+    scenario:
+      vars:
+        STARTING_POINT: "Buildkite pipeline https://buildkite.com/buildkite/buildkite"
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
