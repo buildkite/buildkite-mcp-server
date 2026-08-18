@@ -44,6 +44,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		TestRunsClient:          globals.Client.TestRuns,
 		TestExecutionsClient:    globals.Client.TestRuns,
 		TestsClient:             globals.Client.Tests,
+		BuildTestsClient:        globals.Client.BuildTests,
 		BuildkiteLogsClient:     globals.BuildkiteLogsClient,
 		FailureSummary:          globals.FailureSummary,
 	}

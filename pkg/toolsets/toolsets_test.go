@@ -674,4 +674,5 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 		toolNames = append(toolNames, tool.Tool.Name)
 	}
 	assert.Contains(toolNames, "list_tests")
+	assert.Contains(toolNames, "list_tests_for_build")
 }

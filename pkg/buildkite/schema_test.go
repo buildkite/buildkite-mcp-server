@@ -242,6 +242,17 @@ func TestListTestsArgsSchema(t *testing.T) {
 	require.Contains(t, s.Properties["order"].Description, "asc")
 }
 
+func TestListTestsForBuildArgsSchema(t *testing.T) {
+	s := schemaFor[ListTestsForBuildArgs](t)
+	require.Equal(t, []string{"build_uuid", "org_slug"}, sortedRequired[ListTestsForBuildArgs](t))
+
+	for _, property := range []string{"page", "per_page", "labels", "branch", "owners", "state", "tags", "sort_by", "order"} {
+		require.Contains(t, s.Properties, property)
+		require.NotContains(t, s.Required, property, "%s should be optional", property)
+	}
+	require.Contains(t, s.Properties["build_uuid"].Description, "not the pipeline build number")
+}
+
 func TestListTestRunsArgsSchema(t *testing.T) {
 	s := schemaFor[ListTestRunsArgs](t)
 	req := slices.Clone(s.Required)
