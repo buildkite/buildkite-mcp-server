@@ -49,6 +49,10 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 				Branch:  "main",
 				Commit:  "abc123",
 				Message: "Fix tests",
+				JobStateCounts: &buildkite.JobStateCounts{
+					Total:  5,
+					States: map[string]int{"passed": 2, "failed": 1, "running": 1, "broken": 1},
+				},
 				TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{{
 					ID:    "run-1",
 					Suite: buildkite.TestEngineSuite{Slug: "suite-1"},
@@ -172,6 +176,9 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	require.Equal(t, len(text), summary.ContentBytes)
 	require.Equal(t, "failing", summary.Build.State)
 	require.Equal(t, 42, summary.Build.Number)
+	require.NotNil(t, summary.Build.JobStateCounts)
+	require.Equal(t, 5, summary.Build.JobStateCounts.Total)
+	require.Equal(t, map[string]int{"passed": 2, "failed": 1, "running": 1, "broken": 1}, summary.Build.JobStateCounts.States)
 	require.Len(t, summary.Jobs, 3)
 	require.False(t, summary.JobsTruncated)
 
@@ -213,6 +220,30 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 		"job-promised": {{ttl: 30 * time.Second}},
 	}, logCalls)
 	logCallsMu.Unlock()
+}
+
+func TestGetBuildFailureSummaryOmitsJobStateCountsWhenAbsent(t *testing.T) {
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{ID: "build-id", Number: 42, State: "failed"}, &buildkite.Response{}, nil
+		},
+	}
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			return buildkite.JobsList{}, &buildkite.Response{}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: buildsClient, JobsClient: jobsClient})
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "42",
+	})
+	require.NoError(t, err)
+	require.False(t, callResult.IsError)
+	require.NotContains(t, getTextResult(t, callResult).Text, "job_state_counts")
 }
 
 func TestGetBuildFailureSummaryPrioritizesFailuresAndCanceledJobsBeforeDownstreamJobs(t *testing.T) {
