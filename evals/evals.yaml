@@ -100,16 +100,14 @@ matrix:
         git fetch
         git checkout -b "$SCENARIO_BRANCH" origin/test-step-upload-job-failed
         cat > .buildkite/steps.yml <<'EOF'
-        common:
-          - &right_deploy
-            docker#v5.13.0:
-              image: alpine:3.20
-
         steps:
-          - label: ":wave: Hello"
-            command: echo "hello world"
-            plugins:
-              <<: *wrong_deploy
+          - label: ":hammer: Step one"
+            key: "duplicate-key-demo"
+            command: &demo_cmd echo "this anchor parses fine on the agent"
+
+          - label: ":hammer: Step two"
+            key: "duplicate-key-demo"
+            command: *demo_cmd
         EOF
         git add .buildkite/steps.yml
         git commit -m "Get Ready For Build"
