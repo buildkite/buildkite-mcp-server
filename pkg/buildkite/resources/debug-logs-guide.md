@@ -13,7 +13,7 @@ This guide explains how to effectively use the Buildkite MCP server's log tools 
 The server provides a composite investigation tool and lower-level log tools:
 
 ### 1. get_build_failure_summary - Start Here
-**Best first step for diagnosing a build failure** — combines build state, failed and broken jobs, promised failures from still-running jobs, bounded log tails, error/warning annotations, and failed Test Engine executions in one call.
+**Best first step for diagnosing a build failure** — combines build state, failed and broken jobs, promised failures from still-running jobs, bounded log tails, error/warning annotations, and failed Test Engine executions in one call. Its `job_census` counts every job in the build by state, as of when the summary was assembled (e.g. `{"total": 4, "passed": 2, "failed": 1, "broken": 1, "truncated": false}`). When `truncated` is `false`, the `jobs` array lists every problem job in the census — no follow-up `list_jobs` call is needed to confirm nothing else failed; when `true`, the array was cut off by `max_jobs`. The summary is a snapshot, not a verdict: while the build `state` is not terminal, jobs counted as `running` or `scheduled` can still fail, so re-check once the build finishes.
 
 The default 50-line tail per failed job is usually enough for an initial diagnosis. Use the lower-level tools only when the summary identifies an area that needs deeper inspection. You can reduce output with `log_tail`, `max_jobs`, `max_annotations`, `max_test_runs`, `max_failed_tests`, and `max_failed_tests_per_run`, or disable optional sections with `include_logs`, `include_annotations`, and `include_failed_tests`. Test Engine work defaults to at most 5 runs and 100 failed executions total.
 
