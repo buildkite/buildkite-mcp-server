@@ -34,6 +34,74 @@ func (m *MockTestsClient) List(ctx context.Context, org, slug string, opt *build
 
 var _ TestsClient = (*MockTestsClient)(nil)
 
+type MockBuildTestsClient struct {
+	ListFunc func(ctx context.Context, org, buildUUID string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error)
+}
+
+func (m *MockBuildTestsClient) List(ctx context.Context, org, buildUUID string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+	return m.ListFunc(ctx, org, buildUUID, opt)
+}
+
+var _ BuildTestsClient = (*MockBuildTestsClient)(nil)
+
+func TestListTestsForBuild(t *testing.T) {
+	client := &MockBuildTestsClient{
+		ListFunc: func(ctx context.Context, org, buildUUID string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+			require.Equal(t, "org", org)
+			require.Equal(t, "019d66fb-e8db-47eb-866c-94b85d42b9a1", buildUUID)
+			require.Equal(t, buildkite.ListOptions{Page: 2, PerPage: 50}, opt.ListOptions)
+			require.Equal(t, "flaky,!slow", opt.Labels)
+			require.Equal(t, "main*", opt.Branch)
+			require.Equal(t, "payments,!platform", opt.Owners)
+			require.Equal(t, "enabled", opt.State)
+			require.Equal(t, "framework:rspec,result:^failed", opt.Tags)
+			require.Equal(t, "reliability", opt.SortBy)
+			require.Equal(t, "asc", opt.Order)
+
+			reliability := 0.97
+			return []buildkite.TestWithMetrics{{
+					Test:            buildkite.Test{ID: "test-123", Name: "Example Test"},
+					Reliability:     &reliability,
+					ExecutionsCount: 100,
+				}}, &buildkite.Response{Response: &http.Response{Header: http.Header{
+					"Link": []string{`<https://api.buildkite.com/v2/analytics/organizations/org/builds/019d66fb-e8db-47eb-866c-94b85d42b9a1/tests?page=3>; rel="next"`},
+				}}}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildTestsClient: client})
+	tool, handler, scopes := ListTestsForBuild()
+
+	require.Equal(t, "list_tests_for_build", tool.Name)
+	require.Equal(t, "List Tests for Build", tool.Annotations.Title)
+	require.True(t, tool.Annotations.ReadOnlyHint)
+	require.Contains(t, tool.Description, "build UUID")
+	require.Equal(t, []string{"read_suites"}, scopes)
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListTestsForBuildArgs{
+		OrgSlug:   "org",
+		BuildUUID: "019d66fb-e8db-47eb-866c-94b85d42b9a1",
+		Page:      2,
+		PerPage:   50,
+		Labels:    "flaky,!slow",
+		Branch:    "main*",
+		Owners:    "payments,!platform",
+		State:     "enabled",
+		Tags:      "framework:rspec,result:^failed",
+		SortBy:    "reliability",
+		Order:     "asc",
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+
+	var response PaginatedResult[buildkite.TestWithMetrics]
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &response))
+	require.Equal(t, `<https://api.buildkite.com/v2/analytics/organizations/org/builds/019d66fb-e8db-47eb-866c-94b85d42b9a1/tests?page=3>; rel="next"`, response.Headers["Link"])
+	require.Len(t, response.Items, 1)
+	require.Equal(t, "test-123", response.Items[0].ID)
+	require.Equal(t, 100, response.Items[0].ExecutionsCount)
+}
+
 func TestListTests(t *testing.T) {
 	minTimestamp := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
 	maxTimestamp := time.Date(2026, time.July, 8, 0, 0, 0, 0, time.UTC)
