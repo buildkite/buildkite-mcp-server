@@ -352,6 +352,8 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.ListBuilds),
 				newToolDef(buildkite.GetBuild),
 				newToolDef(buildkite.GetBuildTestEngineRuns),
+				newToolDef(buildkite.ListStepUploads),
+				newToolDef(buildkite.GetStepUpload),
 				newToolDef(buildkite.WaitForBuild),
 				newToolDef(buildkite.CreateBuild),
 				newToolDef(buildkite.CancelBuild),

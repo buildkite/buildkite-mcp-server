@@ -308,7 +308,7 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build",
-			Description: "Get a single build with lightweight annotation summaries. Annotation bodies and jobs are not included — use list_annotations to read annotations, and list_jobs or get_job for job detail",
+			Description: "Get a single build with lightweight annotation summaries. Annotation bodies and jobs are not included — use list_annotations to read annotations, list_jobs or get_job for job detail, and list_step_uploads to see the dynamic pipeline configuration the build received via `buildkite-agent pipeline upload`",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build",
 				ReadOnlyHint: true,

@@ -33,6 +33,7 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 		UserClient:              globals.Client.User,
 		AccessTokensClient:      globals.Client.AccessTokens,
 		JobsClient:              globals.Client.Jobs,
+		StepUploadsClient:       globals.Client.StepUploads,
 		TestRunsClient:          globals.Client.TestRuns,
 		TestExecutionsClient:    globals.Client.TestRuns,
 		TestsClient:             globals.Client.Tests,
