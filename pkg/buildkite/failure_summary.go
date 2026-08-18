@@ -59,10 +59,14 @@ type GetBuildFailureSummaryArgs struct {
 
 type BuildFailureSummaryBuild struct {
 	BuildSummary
-	Blocked     bool                 `json:"blocked"`
-	ScheduledAt *buildkite.Timestamp `json:"scheduled_at,omitempty"`
-	StartedAt   *buildkite.Timestamp `json:"started_at,omitempty"`
-	FinishedAt  *buildkite.Timestamp `json:"finished_at,omitempty"`
+	Blocked bool `json:"blocked"`
+	// JobStateCounts tallies every job in the build by state, so the jobs
+	// below can be confirmed as the build's only problems without listing
+	// jobs. Omitted when the API does not return it.
+	JobStateCounts *buildkite.JobStateCounts `json:"job_state_counts,omitempty"`
+	ScheduledAt    *buildkite.Timestamp      `json:"scheduled_at,omitempty"`
+	StartedAt      *buildkite.Timestamp      `json:"started_at,omitempty"`
+	FinishedAt     *buildkite.Timestamp      `json:"finished_at,omitempty"`
 }
 
 type FailureSummaryLogEntry struct {
@@ -140,11 +144,12 @@ func boundedFailureSummaryJobs(value, configuredMax int) int {
 
 func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
 	return BuildFailureSummaryBuild{
-		BuildSummary: summarizeBuild(build),
-		Blocked:      build.Blocked,
-		ScheduledAt:  build.ScheduledAt,
-		StartedAt:    build.StartedAt,
-		FinishedAt:   build.FinishedAt,
+		BuildSummary:   summarizeBuild(build),
+		Blocked:        build.Blocked,
+		JobStateCounts: build.JobStateCounts,
+		ScheduledAt:    build.ScheduledAt,
+		StartedAt:      build.StartedAt,
+		FinishedAt:     build.FinishedAt,
 	}
 }
 
@@ -716,7 +721,7 @@ func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) e
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build_failure_summary",
-			Description: "Diagnose a Buildkite build failure in one call. Returns build state, terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
+			Description: "Diagnose a Buildkite build failure in one call. Returns build state, job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build Failure Summary",
 				ReadOnlyHint: true,
