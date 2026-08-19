@@ -117,19 +117,19 @@ matrix:
         git push -u origin HEAD
         sleep 1
 
-        # cat > .buildkite/upload-steps.sh<<'EOF'
-        # #!/usr/bin/env bash
-        # set -euo pipefail
+        cat > .buildkite/upload-steps.sh<<'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
 
-        # echo "--- :pipeline: Uploading steps from https://abc.com/pipeline.yml"
-        # curl -s https://abc.com/pipeline.yml | buildkite-agent pipeline upload
-        # EOF
+        echo "--- :pipeline: Uploading steps from https://abc.com/pipeline.yml"
+        curl -s https://abc.com/pipeline.yml | buildkite-agent pipeline upload
+        EOF
 
         git rm .buildkite/steps.yml
-        # git add .buildkite/upload-steps.sh
+        git add .buildkite/upload-steps.sh
 
         git commit --amend --no-edit --allow-empty
-        git push --force-with-lease
+        # git push --force-with-lease
         git reflog expire --expire=now --all
         git gc --prune=now
     mcp_version: source
