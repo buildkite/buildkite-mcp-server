@@ -90,7 +90,7 @@ matrix:
   - id: red-to-green-complete-step-upload-bad-pipeline-yml
     agent: claude
     model: claude-opus-4-8
-    prompt: red-to-green-complete
+    prompt: red-to-green-complete-no-excavate
     scenario:
       setup: |
         # See 'red-to-green-complete' above
