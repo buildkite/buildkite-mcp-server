@@ -5,19 +5,34 @@
 #                 Buildkite annotations, and is the key used to match this entry
 #                 against the same entry in a previous build for comparison.
 #                 Keep it stable across builds; keep it unique within this file.
-#   agent         Which LLM agent runs the prompt: 'claude' (Claude Code CLI)
-#                 or 'cursor' (Cursor CLI, cursor-agent). Other values are
-#                 skipped with a loud warning (codex/opencode land in a later
-#                 stage). Cursor entries additionally need CURSOR_API_KEY (see
+#   agent         Which LLM agent runs the prompt: 'claude' (Claude Code CLI),
+#                 'cursor' (Cursor CLI, cursor-agent) or 'cursor-cloud' (Cursor
+#                 CLOUD agents — the hosted harness behind the Cursor app's
+#                 Agents window, driven via the Cloud Agents API; see
+#                 scripts/cursor-cloud.sh). Other values are skipped with a
+#                 loud warning (codex/opencode land in a later stage).
+#                 cursor and cursor-cloud entries need CURSOR_API_KEY (see
 #                 .buildkite/pipeline.evals.yml) and are skipped loudly when it
-#                 is unset; their metrics are partial (cursor-agent's
-#                 stream-json emits no token usage, so tokens/cost are null)
-#                 and prompts/system.md is prepended to the prompt rather than
-#                 appended as a system prompt (no cursor-agent equivalent).
+#                 is unset; both prepend prompts/system.md to the prompt rather
+#                 than sending a system prompt (no equivalent channel).
+#                 cursor metrics are partial (no token usage in its
+#                 stream-json: tokens/cost null); cursor-cloud reports real
+#                 token totals (Cloud Agents /usage) but null cost and null
+#                 message counts (its transcript is an SSE delta stream).
+#                 cursor-cloud runs in Cursor's cloud VM, so it needs no local
+#                 permission posture — but DOES need the Cursor GitHub
+#                 integration granted on EVAL_REPO_SLUG (one-time, in the
+#                 Cursor dashboard), and its MCP server is BUILT IN THE VM
+#                 from the commit under review (see mcp_cursor_cloud.json),
+#                 so local uncommitted changes are not what it tests.
 #   model         Passed to the agent as --model. Model ids are per-agent
-#                 namespaces: claude-* ids for claude; Cursor ids (composer-1,
-#                 sonnet-4.5, gpt-5.2, ... — see `cursor-agent --list-models`)
-#                 for cursor. Defaults: claude-opus-4-8 / composer-1.
+#                 namespaces: claude-* ids for claude; Cursor ids (composer-2.5,
+#                 sonnet-4.5, gpt-5.2, ... — see `cursor-agent --list-models`,
+#                 or GET https://api.cursor.com/v1/models for cursor-cloud;
+#                 ids rotate, aliases like `composer` track latest).
+#                 Defaults: claude-opus-4-8 / composer / for cursor-cloud,
+#                 unset (the Cursor account's default model applies — pin one
+#                 here for stable cross-build comparisons).
 #   prompt        Name of a template under prompts/<prompt>.md. Rendered with the
 #                 substitution vars below (Go-style {{.KEY}} placeholders).
 #   scenario:
@@ -61,27 +76,27 @@
 
 matrix:
   # The original babystand scenario: drive a red CI branch to green.
-  - id: red-to-green-complete
-    agent: claude
-    model: claude-opus-4-8
-    prompt: red-to-green-complete
-    scenario:
-      setup: |
-        # Establish the red CI signal: branch from the deliberately-broken base
-        # and push it (the branch push triggers its own Quality Checks build,
-        # which is what the agent then fixes). The branch is pushed to the EVAL
-        # repo (EVAL_REPO_SLUG — this setup runs inside babystand.sh's clone of
-        # it), so its builds run on the EVAL org's pipeline; scenario branches
-        # never exist in the repo hosting this eval, so the eval pipeline cannot
-        # recurse (see the CROSS-REPO note in .buildkite/pipeline.evals.yml).
-        SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
-        git fetch
-        git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
-        git push -u origin HEAD
-        # Hand the generated branch name to the prompt template.
-        echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
-    mcp_version: source
-    # compare_target defaults to this run.
+  #- id: red-to-green-complete
+  #  agent: claude
+  #  model: claude-opus-4-8
+  #  prompt: red-to-green-complete
+  #  scenario:
+  #    setup: |
+  #      # Establish the red CI signal: branch from the deliberately-broken base
+  #      # and push it (the branch push triggers its own Quality Checks build,
+  #      # which is what the agent then fixes). The branch is pushed to the EVAL
+  #      # repo (EVAL_REPO_SLUG — this setup runs inside babystand.sh's clone of
+  #      # it), so its builds run on the EVAL org's pipeline; scenario branches
+  #      # never exist in the repo hosting this eval, so the eval pipeline cannot
+  #      # recurse (see the CROSS-REPO note in .buildkite/pipeline.evals.yml).
+  #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
+  #      git fetch
+  #      git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
+  #      git push -u origin HEAD
+  #      # Hand the generated branch name to the prompt template.
+  #      echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
+  #  mcp_version: source
+  #  # compare_target defaults to this run.
 
   # The same scenario driven by the Cursor CLI instead of Claude Code — lets a
   # build compare how two different agents fare against the same MCP server.
@@ -102,6 +117,28 @@ matrix:
   #      echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
   #  compare_base: build:94
   #  mcp_version: source
+
+  # The same scenario on a Cursor CLOUD agent — the hosted harness behind the
+  # Cursor app's Agents window (what Origin users run), always at Cursor's
+  # latest release. The setup still pushes the scenario branch from here; the
+  # cloud VM then clones the eval repo at that branch (startingRef) and works
+  # there. Requires CURSOR_API_KEY and the Cursor GitHub integration granted
+  # on the eval repo; skipped loudly while the key is unset. The MCP server is
+  # built inside the VM from the commit under review (mcp_cursor_cloud.json),
+  # preserving mcp_version: source. Metrics include real token totals (unlike
+  # the cursor CLI) but null cost/message counts.
+  - id: red-to-green-complete-cursor-cloud
+    agent: cursor-cloud
+    model: composer-2.5
+    prompt: red-to-green-complete
+    scenario:
+      setup: |
+        SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
+        git fetch
+        git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
+        git push -u origin HEAD
+        echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
+    mcp_version: source
 
   # Diagnosis-only variant: point at ANY existing red build — including one on a
   # pipeline we don't own and must not mutate — and produce a written diagnosis.

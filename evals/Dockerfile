@@ -61,6 +61,7 @@ COPY evals/prompts /workspace/prompts
 COPY evals/package*.json /workspace/
 COPY evals/tsconfig.json /workspace/
 COPY evals/mcp_in_ci.json /workspace/
+COPY evals/mcp_cursor_cloud.json /workspace/
 COPY evals/evals.yaml /workspace/
 
 # Run the build.

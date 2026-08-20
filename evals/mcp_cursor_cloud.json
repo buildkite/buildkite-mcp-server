@@ -1,0 +1,34 @@
+{
+    "_comment": [
+        "mcpServers sent inline in the Cursor Cloud Agents launch request (see",
+        "scripts/cursor-cloud.sh). Unlike mcp.json/mcp_in_ci.json (client config",
+        "files on disk), this is the API's own shape: an ARRAY of server defs",
+        "with a 'type' discriminator. ${...} placeholders are substituted by",
+        "cursor-cloud.sh at launch time — nothing expands them in the VM, so a",
+        "missed substitution fails the clone/auth loudly instead of leaking.",
+        "The stdio command self-clones the MCP server source at an exact SHA",
+        "and builds it inside Cursor's VM: this keeps 'the server under test is",
+        "THIS source revision' true in the cloud (mcp_version: source), without",
+        "depending on how Cursor lays out repo checkouts on disk. Requirements",
+        "it places on the VM: git+go toolchains and GitHub egress. The build",
+        "runs at MCP-handshake time (cold: ~1-2 min); if Cursor's handshake",
+        "timeout proves too tight, move the clone+build into a",
+        ".cursor/environment.json install step on the scenario base branch and",
+        "leave only the exec here. Everything before exec is fenced to stderr:",
+        "stdout belongs to the MCP stdio protocol."
+    ],
+    "mcpServers": [
+        {
+            "name": "buildkite",
+            "type": "stdio",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "if [ ! -x /tmp/bk-mcp-src/buildkite-mcp-server ]; then rm -rf /tmp/bk-mcp-src && git clone --quiet https://github.com/${MCP_SRC_REPO}.git /tmp/bk-mcp-src && git -C /tmp/bk-mcp-src checkout --quiet ${MCP_SRC_SHA} && (cd /tmp/bk-mcp-src && go build -o buildkite-mcp-server ./cmd/buildkite-mcp-server); fi 1>&2 && exec /tmp/bk-mcp-src/buildkite-mcp-server stdio --read-only"
+            ],
+            "env": {
+                "BUILDKITE_API_TOKEN": "${BUILDKITE_API_TOKEN}"
+            }
+        }
+    ]
+}
