@@ -15,11 +15,20 @@
         "timeout proves too tight, move the clone+build into a",
         ".cursor/environment.json install step on the scenario base branch and",
         "leave only the exec here. Everything before exec is fenced to stderr:",
-        "stdout belongs to the MCP stdio protocol."
+        "stdout belongs to the MCP stdio protocol.",
+        "The name must NOT be 'buildkite'/'Buildkite': the Cursor org has the",
+        "public Buildkite plugin installed (can't be removed per-run — the API",
+        "has no plugin exclusion field, and other people use it), whose hosted",
+        "'Buildkite' MCP server sits unauthenticated (needsAuth) in the VM.",
+        "First live run (2026-08-20, agent bc-cce6aa50): the colliding name",
+        "left the agent seeing only the plugin's needsAuth server, so it made",
+        "zero MCP calls. A distinct name sidesteps the 'server names must be",
+        "unique' collision and lets audits tell the two apart; cursor-cloud.sh",
+        "also steers the agent off the plugin server in the prompt preamble."
     ],
     "mcpServers": [
         {
-            "name": "buildkite",
+            "name": "buildkite-mcp-server",
             "type": "stdio",
             "command": "bash",
             "args": [

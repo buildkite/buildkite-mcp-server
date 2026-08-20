@@ -105,7 +105,18 @@ MCP_SERVERS="$(jq -c \
 # --- Compose the prompt -------------------------------------------------------
 # system.md is prepended (no system-prompt channel; same fidelity caveat as
 # cursor.sh — it lands in the user turn).
+# The Buildkite-plugin preamble is cursor-cloud-only environment hygiene, not
+# task guidance: the org's Cursor Buildkite plugin plants a hosted 'Buildkite'
+# MCP server that is unauthenticated (needsAuth) in cloud VMs and cannot be
+# excluded per-run (no API field; the plugin is shared org-wide). Without the
+# preamble the agent probes it, concludes "Buildkite MCP requires auth", and
+# writes off MCP entirely (observed on the first live run). Telling it which
+# server works corrects that contamination; whether it then PREFERS the MCP
+# tools over raw curl remains unprompted — that choice is part of what the
+# eval measures.
 PROMPT_TEXT="$(cat "$ROOT_DIR/prompts/system.md")
+
+Environment note: the MCP server named 'Buildkite' (from a Cursor plugin) and the 'buildkite-cli' plugin skill are NOT authenticated in this environment and will not work — ignore them. The MCP server named 'buildkite-mcp-server' is configured and authenticated.
 
 $(cat "$PROMPT_FILE")"
 

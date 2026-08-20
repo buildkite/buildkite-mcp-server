@@ -356,7 +356,7 @@ run_entry() {
     # cross-build comparisons.
     if [[ -z "$MODEL" ]]; then
         case "$AGENT" in
-            cursor)       MODEL="composer-1" ;;
+            cursor)       MODEL="composer" ;;
             cursor-cloud) ;;
             *)            MODEL="claude-opus-4-8" ;;
         esac
