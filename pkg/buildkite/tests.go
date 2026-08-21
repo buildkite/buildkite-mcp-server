@@ -20,6 +20,7 @@ type BuildTestsClient interface {
 }
 
 type ListTestsArgs struct {
+	ToolInput
 	OrgSlug       string    `json:"org_slug"`
 	TestSuiteSlug string    `json:"test_suite_slug"`
 	Page          int       `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
@@ -37,6 +38,7 @@ type ListTestsArgs struct {
 }
 
 type ListTestsForBuildArgs struct {
+	ToolInput
 	OrgSlug   string `json:"org_slug"`
 	BuildUUID string `json:"build_uuid" jsonschema:"Buildkite build UUID. This is the build ID, not the pipeline build number."`
 	Page      int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
