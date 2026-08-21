@@ -2,6 +2,7 @@ package trace
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -14,6 +15,10 @@ import (
 func NewMiddleware() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if telemetryContext := toolTelemetryContext(req); telemetryContext != "" {
+				ctx = context.WithValue(ctx, telemetryContextKey{}, telemetryContext)
+			}
+
 			ctx, span := Start(ctx, fmt.Sprintf("mcp.%s", method))
 			defer span.End()
 
@@ -74,6 +79,24 @@ func NewMiddleware() mcp.Middleware {
 			return res, err
 		}
 	}
+}
+
+func toolTelemetryContext(req mcp.Request) string {
+	params, ok := req.GetParams().(*mcp.CallToolParamsRaw)
+	if !ok || params == nil || len(params.Arguments) == 0 {
+		return ""
+	}
+
+	var args struct {
+		Telemetry struct {
+			Context string `json:"context"`
+		} `json:"telemetry"`
+	}
+	if err := json.Unmarshal(params.Arguments, &args); err != nil {
+		return ""
+	}
+
+	return args.Telemetry.Context
 }
 
 // clientInfoRequest matches the SDK's typed ServerRequest.ClientInfo
