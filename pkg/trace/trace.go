@@ -7,6 +7,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -21,6 +22,10 @@ import (
 // tracerName is the instrumentation library name, fixed for this package.
 const tracerName = "buildkite-mcp-server"
 
+const telemetryContextAttribute = "telemetry.context"
+
+type telemetryContextKey struct{}
+
 func NewProvider(ctx context.Context, exporter, name, version string) (*sdktrace.TracerProvider, error) {
 	exp, err := newExporter(ctx, exporter)
 	if err != nil {
@@ -34,6 +39,7 @@ func NewProvider(ctx context.Context, exporter, name, version string) (*sdktrace
 
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
+		sdktrace.WithSpanProcessor(telemetryContextSpanProcessor{}),
 		sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(tp)
@@ -48,8 +54,29 @@ func NewProvider(ctx context.Context, exporter, name, version string) (*sdktrace
 	return tp, nil
 }
 
+// telemetryContextSpanProcessor adds tool intent to spans created by other
+// instrumentation, including outbound HTTP client spans.
+type telemetryContextSpanProcessor struct{}
+
+func (telemetryContextSpanProcessor) OnStart(ctx context.Context, span sdktrace.ReadWriteSpan) {
+	if telemetryContext, ok := ctx.Value(telemetryContextKey{}).(string); ok && telemetryContext != "" {
+		span.SetAttributes(attribute.String(telemetryContextAttribute, telemetryContext))
+	}
+}
+
+func (telemetryContextSpanProcessor) OnEnd(sdktrace.ReadOnlySpan) {}
+
+func (telemetryContextSpanProcessor) Shutdown(context.Context) error { return nil }
+
+func (telemetryContextSpanProcessor) ForceFlush(context.Context) error { return nil }
+
 func Start(ctx context.Context, name string) (context.Context, trace.Span) {
-	return otel.GetTracerProvider().Tracer(tracerName).Start(ctx, name)
+	var options []trace.SpanStartOption
+	if telemetryContext, ok := ctx.Value(telemetryContextKey{}).(string); ok && telemetryContext != "" {
+		options = append(options, trace.WithAttributes(attribute.String(telemetryContextAttribute, telemetryContext)))
+	}
+
+	return otel.GetTracerProvider().Tracer(tracerName).Start(ctx, name, options...)
 }
 
 func NewError(span trace.Span, msg string, args ...any) error {

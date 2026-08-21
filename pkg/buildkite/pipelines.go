@@ -18,6 +18,7 @@ type PipelinesClient interface {
 }
 
 type ListPipelinesArgs struct {
+	ToolInput
 	OrgSlug     string `json:"org_slug"`
 	Name        string `json:"name,omitempty" jsonschema:"Filter pipelines by name"`
 	Repository  string `json:"repository,omitempty" jsonschema:"Filter pipelines by repository URL"`
@@ -103,6 +104,7 @@ func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []st
 }
 
 type GetPipelineArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary', 'detailed', or 'full' (default)"`
@@ -238,6 +240,7 @@ func createPaginatedResult[T any](pipelines []buildkite.Pipeline, converter func
 }
 
 type CreatePipelineArgs struct {
+	ToolInput
 	OrgSlug                   string   `json:"org_slug"`
 	Name                      string   `json:"name"`
 	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
@@ -317,6 +320,7 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 }
 
 type UpdatePipelineArgs struct {
+	ToolInput
 	OrgSlug                   string   `json:"org_slug"`
 	PipelineSlug              string   `json:"pipeline_slug"`
 	Name                      *string  `json:"name,omitempty"`

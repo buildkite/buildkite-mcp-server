@@ -1,8 +1,10 @@
 package toolsets
 
 import (
+	"context"
 	"testing"
 
+	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -675,4 +677,55 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	}
 	assert.Contains(toolNames, "list_tests")
 	assert.Contains(toolNames, "list_tests_for_build")
+}
+
+func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
+	const contextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	for _, toolset := range CreateBuiltinToolsets() {
+		for _, tool := range toolset.Tools {
+			tool.Register(server)
+		}
+	}
+
+	ctx := context.Background()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = serverSession.Close() })
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	result, err := clientSession.ListTools(ctx, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Tools)
+
+	for _, tool := range result.Tools {
+		inputSchema, ok := tool.InputSchema.(map[string]any)
+		require.True(t, ok, "%s input schema has type %T", tool.Name, tool.InputSchema)
+
+		required, ok := inputSchema["required"].([]any)
+		require.True(t, ok, "%s input schema has no required fields", tool.Name)
+		require.Contains(t, required, "telemetry", "%s must require telemetry", tool.Name)
+
+		properties, ok := inputSchema["properties"].(map[string]any)
+		require.True(t, ok, "%s input schema has no properties", tool.Name)
+		telemetry, ok := properties["telemetry"].(map[string]any)
+		require.True(t, ok, "%s has no telemetry property", tool.Name)
+
+		telemetryRequired, ok := telemetry["required"].([]any)
+		require.True(t, ok, "%s telemetry schema has no required fields", tool.Name)
+		require.Contains(t, telemetryRequired, "context", "%s must require telemetry.context", tool.Name)
+
+		telemetryProperties, ok := telemetry["properties"].(map[string]any)
+		require.True(t, ok, "%s telemetry schema has no properties", tool.Name)
+		contextProperty, ok := telemetryProperties["context"].(map[string]any)
+		require.True(t, ok, "%s has no telemetry.context property", tool.Name)
+		require.Equal(t, contextDescription, contextProperty["description"], "%s has the wrong telemetry.context description", tool.Name)
+		require.InDelta(t, float64(trace.TelemetryContextMaxLength), contextProperty["maxLength"], 0, "%s has the wrong telemetry.context maxLength", tool.Name)
+	}
 }

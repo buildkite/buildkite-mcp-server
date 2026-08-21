@@ -233,6 +233,7 @@ func toArtifactListItems(artifacts []buildkite.Artifact) []artifactListItem {
 }
 
 type ListArtifactsForBuildArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -241,6 +242,7 @@ type ListArtifactsForBuildArgs struct {
 }
 
 type ListArtifactsForJobArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -250,6 +252,7 @@ type ListArtifactsForJobArgs struct {
 }
 
 type GetArtifactArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`

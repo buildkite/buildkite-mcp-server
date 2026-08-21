@@ -25,6 +25,7 @@ type AnnotationsClient interface {
 }
 
 type ListAnnotationsArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -35,6 +36,7 @@ type ListAnnotationsArgs struct {
 }
 
 type CreateAnnotationArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`

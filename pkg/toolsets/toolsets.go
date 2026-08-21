@@ -5,6 +5,8 @@ import (
 	"slices"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
+	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -294,6 +296,21 @@ func ValidateToolsets(names []string) error {
 // The generic parameters In and Out match the typed handler signature.
 func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, Out], []string)) ToolDefinition {
 	tool, handler, scopes := toolFunc()
+	inputSchema, err := jsonschema.For[In](nil)
+	if err != nil {
+		panic(fmt.Sprintf("generate input schema for tool %q: %v", tool.Name, err))
+	}
+	telemetrySchema, ok := inputSchema.Properties["telemetry"]
+	if !ok {
+		panic(fmt.Sprintf("tool %q input schema is missing telemetry", tool.Name))
+	}
+	contextSchema, ok := telemetrySchema.Properties["context"]
+	if !ok {
+		panic(fmt.Sprintf("tool %q input schema is missing telemetry.context", tool.Name))
+	}
+	contextSchema.MaxLength = jsonschema.Ptr(trace.TelemetryContextMaxLength)
+	tool.InputSchema = inputSchema
+
 	return ToolDefinition{
 		Tool: tool,
 		Register: func(s *mcp.Server) {

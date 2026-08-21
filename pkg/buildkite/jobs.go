@@ -30,6 +30,7 @@ func redactUnusedJobFields(job *buildkite.Job) {
 
 // ListJobsArgs struct for typed parameters
 type ListJobsArgs struct {
+	ToolInput
 	OrgSlug            string `json:"org_slug"`
 	PipelineSlug       string `json:"pipeline_slug"`
 	BuildNumber        string `json:"build_number"`
@@ -220,6 +221,7 @@ func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 
 // GetJobArgs struct for typed parameters
 type GetJobArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	JobID        string `json:"job_id"`
 	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Pipeline slug. Provide together with 'build_number' for a build-scoped lookup. Omit both to look up the job by organization and job ID alone"`
@@ -286,6 +288,7 @@ type GetJobLogsArgs struct {
 
 // UnblockJobArgs struct for typed parameters
 type UnblockJobArgs struct {
+	ToolInput
 	OrgSlug      string            `json:"org_slug"`
 	PipelineSlug string            `json:"pipeline_slug"`
 	BuildNumber  string            `json:"build_number"`
@@ -332,6 +335,7 @@ func UnblockJob() (mcp.Tool, mcp.ToolHandlerFor[UnblockJobArgs, any], []string) 
 
 // RetryJobArgs struct for typed parameters
 type RetryJobArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -370,6 +374,7 @@ func RetryJob() (mcp.Tool, mcp.ToolHandlerFor[RetryJobArgs, any], []string) {
 
 // GetJobEnvironmentVariablesArgs struct for typed parameters
 type GetJobEnvironmentVariablesArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
