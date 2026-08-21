@@ -17,6 +17,7 @@ type StepUploadsClient interface {
 }
 
 type ListStepUploadsArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
@@ -27,6 +28,7 @@ type ListStepUploadsArgs struct {
 }
 
 type GetStepUploadArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
