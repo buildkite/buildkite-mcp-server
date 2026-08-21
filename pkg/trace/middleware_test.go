@@ -126,6 +126,54 @@ func TestNewMiddlewareAddsTelemetryContextToAllToolTraceSpans(t *testing.T) {
 	assert.Equal(telemetryContext, spanAttrs(t, tp, sr, "http.request")[telemetryContextAttribute])
 }
 
+func TestNewMiddlewareTelemetryContextByteLimit(t *testing.T) {
+	tests := []struct {
+		name    string
+		context string
+		want    bool
+	}{
+		{name: "512 ASCII bytes", context: strings.Repeat("a", telemetryContextMaxBytes), want: true},
+		{name: "513 ASCII bytes", context: strings.Repeat("a", telemetryContextMaxBytes+1), want: false},
+		{name: "512 multibyte bytes", context: strings.Repeat("é", telemetryContextMaxBytes/2), want: true},
+		{name: "514 multibyte bytes", context: strings.Repeat("é", telemetryContextMaxBytes/2+1), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert := require.New(t)
+			ctx := context.Background()
+
+			server, sr := setupMiddlewareServer(t)
+			t1, t2 := mcp.NewInMemoryTransports()
+			_, err := server.Connect(ctx, t1, nil)
+			assert.NoError(err)
+
+			client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+			session, err := client.Connect(ctx, t2, nil)
+			assert.NoError(err)
+			defer session.Close()
+
+			_, err = session.CallTool(ctx, &mcp.CallToolParams{
+				Name: "ping",
+				Arguments: map[string]any{
+					"telemetry": map[string]any{"context": tt.context},
+				},
+			})
+			assert.NoError(err)
+
+			tp := otel.GetTracerProvider().(*sdktrace.TracerProvider)
+			for _, spanName := range []string{"mcp.tools/call", "buildkite.Ping", "http.request"} {
+				attrs := spanAttrs(t, tp, sr, spanName)
+				if tt.want {
+					assert.Equal(tt.context, attrs[telemetryContextAttribute])
+				} else {
+					assert.NotContains(attrs, telemetryContextAttribute)
+				}
+			}
+		})
+	}
+}
+
 // captureLogs redirects the global zerolog logger to a buffer for the
 // duration of the test and returns it.
 func captureLogs(t *testing.T) *bytes.Buffer {

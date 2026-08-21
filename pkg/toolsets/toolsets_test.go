@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -725,5 +726,6 @@ func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
 		contextProperty, ok := telemetryProperties["context"].(map[string]any)
 		require.True(t, ok, "%s has no telemetry.context property", tool.Name)
 		require.Equal(t, contextDescription, contextProperty["description"], "%s has the wrong telemetry.context description", tool.Name)
+		require.Equal(t, float64(buildkite.TelemetryContextMaxLength), contextProperty["maxLength"], "%s has the wrong telemetry.context maxLength", tool.Name)
 	}
 }

@@ -12,6 +12,9 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
+// Keep user-controlled trace attributes within a predictable storage bound.
+const telemetryContextMaxBytes = 512
+
 func NewMiddleware() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
@@ -93,6 +96,10 @@ func toolTelemetryContext(req mcp.Request) string {
 		} `json:"telemetry"`
 	}
 	if err := json.Unmarshal(params.Arguments, &args); err != nil {
+		return ""
+	}
+
+	if len(args.Telemetry.Context) > telemetryContextMaxBytes {
 		return ""
 	}
 
