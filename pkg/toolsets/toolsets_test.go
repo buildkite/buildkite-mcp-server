@@ -726,6 +726,6 @@ func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
 		contextProperty, ok := telemetryProperties["context"].(map[string]any)
 		require.True(t, ok, "%s has no telemetry.context property", tool.Name)
 		require.Equal(t, contextDescription, contextProperty["description"], "%s has the wrong telemetry.context description", tool.Name)
-		require.Equal(t, float64(trace.TelemetryContextMaxLength), contextProperty["maxLength"], "%s has the wrong telemetry.context maxLength", tool.Name)
+		require.InDelta(t, float64(trace.TelemetryContextMaxLength), contextProperty["maxLength"], 0, "%s has the wrong telemetry.context maxLength", tool.Name)
 	}
 }
