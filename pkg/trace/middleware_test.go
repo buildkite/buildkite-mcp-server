@@ -126,16 +126,16 @@ func TestNewMiddlewareAddsTelemetryContextToAllToolTraceSpans(t *testing.T) {
 	assert.Equal(telemetryContext, spanAttrs(t, tp, sr, "http.request")[telemetryContextAttribute])
 }
 
-func TestNewMiddlewareTelemetryContextByteLimit(t *testing.T) {
+func TestNewMiddlewareTelemetryContextLengthLimit(t *testing.T) {
 	tests := []struct {
 		name    string
 		context string
 		want    bool
 	}{
-		{name: "512 ASCII bytes", context: strings.Repeat("a", telemetryContextMaxBytes), want: true},
-		{name: "513 ASCII bytes", context: strings.Repeat("a", telemetryContextMaxBytes+1), want: false},
-		{name: "512 multibyte bytes", context: strings.Repeat("é", telemetryContextMaxBytes/2), want: true},
-		{name: "514 multibyte bytes", context: strings.Repeat("é", telemetryContextMaxBytes/2+1), want: false},
+		{name: "256 ASCII code points", context: strings.Repeat("a", TelemetryContextMaxLength), want: true},
+		{name: "257 ASCII code points", context: strings.Repeat("a", TelemetryContextMaxLength+1), want: false},
+		{name: "256 multibyte code points", context: strings.Repeat("é", TelemetryContextMaxLength), want: true},
+		{name: "257 multibyte code points", context: strings.Repeat("é", TelemetryContextMaxLength+1), want: false},
 	}
 
 	for _, tt := range tests {

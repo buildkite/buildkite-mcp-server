@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
+	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -307,7 +308,7 @@ func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, O
 	if !ok {
 		panic(fmt.Sprintf("tool %q input schema is missing telemetry.context", tool.Name))
 	}
-	contextSchema.MaxLength = jsonschema.Ptr(buildkite.TelemetryContextMaxLength)
+	contextSchema.MaxLength = jsonschema.Ptr(trace.TelemetryContextMaxLength)
 	tool.InputSchema = inputSchema
 
 	return ToolDefinition{

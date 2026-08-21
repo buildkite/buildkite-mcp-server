@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
@@ -12,8 +13,9 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
-// Keep user-controlled trace attributes within a predictable storage bound.
-const telemetryContextMaxBytes = 512
+// TelemetryContextMaxLength is the maximum number of Unicode code points
+// accepted in telemetry context values.
+const TelemetryContextMaxLength = 256
 
 func NewMiddleware() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
@@ -99,7 +101,7 @@ func toolTelemetryContext(req mcp.Request) string {
 		return ""
 	}
 
-	if len(args.Telemetry.Context) > telemetryContextMaxBytes {
+	if utf8.RuneCountInString(args.Telemetry.Context) > TelemetryContextMaxLength {
 		return ""
 	}
 

@@ -24,10 +24,6 @@ type ToolInput struct {
 	Telemetry ToolTelemetry `json:"telemetry" jsonschema:"Analytics metadata describing the tool call's purpose"`
 }
 
-// TelemetryContextMaxLength is the maximum number of Unicode code points
-// accepted by the tool input schema.
-const TelemetryContextMaxLength = 512
-
 // ToolTelemetry describes why a tool is being called.
 type ToolTelemetry struct {
 	Context string `json:"context" jsonschema:"Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."`
