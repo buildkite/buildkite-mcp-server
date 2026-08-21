@@ -52,12 +52,17 @@ steps:
             # evals/evals.yaml). Add one line here (and a secrets mapping
             # below) per additional org.
             - MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
-            # Cursor CLI auth, for evals.yaml entries with `agent: cursor`.
-            # cursor-agent talks to Cursor's backend, so the Buildkite Hosted
+            # Cursor auth, for evals.yaml entries with `agent: cursor` (CLI)
+            # or `agent: cursor-cloud` (Cloud Agents API — same dashboard
+            # key). Both talk to Cursor's backend, so the Buildkite Hosted
             # Models Anthropic proxy (BUILDKITE_AGENT_ENDPOINT above) cannot
-            # front it.
+            # front them.
             - CURSOR_API_KEY
             - BUILDKITE_BUILD_URL
+            # Pin the MCP server source cursor-cloud.sh builds in Cursor's VM
+            # to the commit under review (mcp_version: source). Interpolated
+            # at pipeline-upload time, when BUILDKITE_COMMIT is this commit.
+            - MCP_SRC_SHA=${BUILDKITE_COMMIT}
             - BUILDKITE_ORGANIZATION_SLUG
             - BUILDKITE_PIPELINE_SLUG
             - BUILDKITE_MCP_SERVER_VERSION

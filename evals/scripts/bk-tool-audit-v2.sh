@@ -21,10 +21,15 @@
 #   --results    Also show each call's tool_result (matched by tool_use_id)
 #   --project P  Use project dir for path P instead of the current directory
 #   --agent A    Transcript dialect: 'claude' (default; Claude Code session
-#                jsonl / stream-json — tool calls are tool_use content blocks)
-#                or 'cursor' (cursor-agent stream-json capture — tool calls are
+#                jsonl / stream-json — tool calls are tool_use content blocks),
+#                'cursor' (cursor-agent stream-json capture — tool calls are
 #                standalone tool_call started/completed events, and NO token
-#                usage is emitted, so `metrics` reports tokens/cost as null).
+#                usage is emitted, so `metrics` reports tokens/cost as null),
+#                or 'cursor-cloud' (cursor-cloud.sh's SSE capture — each line
+#                is {type, data}; tool calls are tool_call events keyed by
+#                data.callId, and an appended `usage` record carries token
+#                totals from the Cloud Agents API, so `metrics` reports real
+#                tokens — but cost stays null: Cursor pricing is not modeled).
 #
 # Pricing for `metrics` (USD per million tokens) is overridable via env vars;
 # defaults are Claude Opus 4.8 rates:
@@ -53,19 +58,21 @@ while [[ "${1:-}" == -* ]]; do
     --names)   NAMES_ONLY=1; shift ;;
     --results) WITH_RESULTS=1; shift ;;
     --project) PROJECT_PATH="${2:?--project needs a path}"; shift 2 ;;
-    --agent)   AGENT="${2:?--agent needs claude or cursor}"; shift 2 ;;
-    -h|--help) sed -n '2,39p' "$0"; exit 0 ;;
+    --agent)   AGENT="${2:?--agent needs claude, cursor or cursor-cloud}"; shift 2 ;;
+    -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
-case "$AGENT" in claude|cursor) ;; *) echo "unsupported --agent: $AGENT" >&2; exit 2 ;; esac
+case "$AGENT" in claude|cursor|cursor-cloud) ;; *) echo "unsupported --agent: $AGENT" >&2; exit 2 ;; esac
 
 # Default tool filter (without --all): claude MCP tool names carry the
 # mcp__<server>__ prefix; cursor's tool_call event keys are per-tool camelCase
 # names (readToolCall, mcpToolCall, ...) with no comparable server prefix, so
-# no default narrowing is possible there — everything is included.
+# no default narrowing is possible there — everything is included. cursor-cloud
+# tool names come straight from the Cloud Agents API stream, whose MCP-tool
+# naming is unverified against a live run, so it gets no narrowing either.
 if [[ -z "$TOOL_FILTER" ]]; then
-  if [[ "$AGENT" == "cursor" ]]; then TOOL_FILTER='true'
+  if [[ "$AGENT" == "cursor" || "$AGENT" == "cursor-cloud" ]]; then TOOL_FILTER='true'
   else TOOL_FILTER='startswith("mcp__buildkite-mcp-server__")'; fi
 fi
 
@@ -103,9 +110,35 @@ CURSOR_TOOL_NAME_JQ='
       elif (($a.function? | type) == "object") and ($a.function.name != null) then
         $a.function.name
       else $t.key end;'
+# cursor-cloud: cursor-cloud.sh captures the Cloud Agents SSE stream as
+# {"type": "<event>", "data": {...}} lines. A tool call appears at least twice
+# (a started/running event with args, a completed event repeating them with the
+# result), all sharing data.callId — and the stream may additionally REPLAY
+# events if the SSE connection dropped and reconnected mid-run. So calls are
+# deduped by callId, keeping the FIRST occurrence to preserve stream order
+# (group_by would sort by id and scramble the timeline). Tool names pass
+# through as the API sends them; how it spells MCP tools is unverified against
+# a live run (first-live-run check — normalize here if they need aligning with
+# claude's mcp__<server>__<tool> form).
+CURSOR_CLOUD_CALLS_JQ='
+  def cloud_tool_events: [.[] | select(type=="object" and .type=="tool_call" and (.data|type=="object")) | .data];
+  def dedupe_calls:
+    reduce .[] as $e ({seen: {}, out: []};
+        (($e.callId // "") | tostring) as $id
+        | if $id != "" and .seen[$id] then .
+          else .seen[$id] = true | .out += [$e] end)
+    | .out;'
 extract() {
   local f="$1"
-  if [[ "$AGENT" == "cursor" ]]; then
+  if [[ "$AGENT" == "cursor-cloud" ]]; then
+    jq -c -n --argjson names "$NAMES_ONLY" "$CURSOR_CLOUD_CALLS_JQ"'
+      [inputs] | cloud_tool_events | dedupe_calls | .[]
+      | (.name // "unknown") as $name
+      | select($name | '"$TOOL_FILTER"')
+      | if $names == 1 then {tool: $name}
+        else {id: (.callId // null), tool: $name, input: (.args // {})} end
+    ' "$f"
+  elif [[ "$AGENT" == "cursor" ]]; then
     jq -c --argjson names "$NAMES_ONLY" "$CURSOR_TOOL_NAME_JQ"'
       select(.type=="tool_call" and .subtype=="started" and (.tool_call|type=="object"))
       | (.tool_call | to_entries[0]) as $t
@@ -139,9 +172,20 @@ print_session() {
   if [[ "$WITH_RESULTS" == 1 ]]; then
     # Map call id -> truncated result text (claude: tool_use_id on tool_result
     # blocks; cursor: call_id on tool_call completed events, result under the
-    # tool key's .result — .success on success, the whole object otherwise).
+    # tool key's .result — .success on success, the whole object otherwise;
+    # cursor-cloud: data.callId on completed tool_call events, result at
+    # data.result — same .success-on-success convention).
     local map
-    if [[ "$AGENT" == "cursor" ]]; then
+    if [[ "$AGENT" == "cursor-cloud" ]]; then
+      map="$(jq -cn '
+        [ inputs
+          | select(type=="object" and .type=="tool_call" and (.data|type=="object"))
+          | .data
+          | select((.status // "") == "completed" and ((.callId // "") | tostring) != "")
+          | {((.callId | tostring)): ((.result.success // .result // "(no result)")
+               | tostring | gsub("\n";" ") | .[0:300])} ]
+        | add // {}' "$f")"
+    elif [[ "$AGENT" == "cursor" ]]; then
       map="$(jq -cn '
         [ inputs
           | select(.type=="tool_call" and .subtype=="completed" and .call_id and (.tool_call|type=="object"))
@@ -175,6 +219,39 @@ metrics() {
   local snap; snap="$(mktemp -t bk-audit.XXXXXX)"
   trap 'rm -f "$snap"' RETURN
   cp "$f" "$snap"
+
+  # cursor-cloud: the SSE capture's assistant events are TEXT DELTAS with no
+  # message boundaries, so user/assistant counts would be meaningless and stay
+  # null. What IS available beats the cursor CLI: real token totals from the
+  # appended `usage` record (Cloud Agents API /usage), duration from the
+  # terminal result event, and the model from the agent_meta record ("default"
+  # when the entry pinned none — the launch omitted the field and Cursor's
+  # account default applied). est_cost_usd stays null: the BK_PRICE_* table is
+  # Anthropic pricing and does not model Cursor's.
+  if [[ "$AGENT" == "cursor-cloud" ]]; then
+    echo "# session: $f" >&2
+    jq -nr "$CURSOR_CLOUD_CALLS_JQ"'
+      [inputs | select(type=="object")] as $all
+      | ($all | cloud_tool_events | dedupe_calls) as $tools
+      | ($all | map(select(.type=="result")) | last | .data // {}) as $res
+      | ($all | map(select(.type=="usage")) | last | .data.totalUsage // null) as $u
+      | ($all | map(select(.type=="agent_meta")) | first | .data // {}) as $meta
+      | {
+          user_messages: null,
+          assistant_responses: null,
+          duration_min: (if ($res.durationMs // null) != null then ($res.durationMs/60000|floor) else null end),
+          models: {(($meta.model // "unknown") | tostring): 1},
+          tokens: (if $u != null then
+                     {input: ($u.inputTokens // 0), output: ($u.outputTokens // 0),
+                      cache_write: ($u.cacheWriteTokens // 0), cache_read: ($u.cacheReadTokens // 0)}
+                   else null end),
+          tool_calls_total: ($tools | length),
+          tool_calls_by_name: ($tools | group_by(.name // "unknown") | map("\(length) \(.[0].name // "unknown")") | sort | reverse),
+          est_cost_usd: null
+        }
+    ' "$snap"
+    return
+  fi
 
   # cursor-agent's stream-json emits no token usage and no per-event
   # timestamps, so the cursor dialect reports what IS available — message and
