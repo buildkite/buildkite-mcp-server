@@ -337,9 +337,12 @@ func TestListAgentsArgsSchema(t *testing.T) {
 	slices.Sort(req)
 	require.Equal(t, []string{"org_slug"}, req)
 
-	for _, opt := range []string{"name", "hostname", "version", "page", "per_page", "detail_level"} {
+	for _, opt := range []string{"name", "hostname", "version", "cluster_queue_id", "page", "per_page", "detail_level"} {
+		require.Contains(t, s.Properties, opt)
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+
+	require.Equal(t, "Filter agents by cluster queue ID (UUID)", s.Properties["cluster_queue_id"].Description)
 }
 
 func TestGetAgentArgsSchema(t *testing.T) {
