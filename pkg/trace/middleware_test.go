@@ -25,13 +25,20 @@ func setupMiddlewareServer(t *testing.T) (*mcp.Server, *tracetest.SpanRecorder) 
 	ctx := context.Background()
 
 	sr := tracetest.NewSpanRecorder()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSpanProcessor(sr),
+		sdktrace.WithSpanProcessor(telemetryContextSpanProcessor{}),
+	)
 	otel.SetTracerProvider(tp)
 	t.Cleanup(func() { _ = tp.Shutdown(ctx) })
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "v0.0.1"}, nil)
 	server.AddReceivingMiddleware(NewMiddleware())
-	mcp.AddTool(server, &mcp.Tool{Name: "ping"}, func(_ context.Context, _ *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(server, &mcp.Tool{Name: "ping"}, func(ctx context.Context, _ *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, any, error) {
+		_, span := Start(ctx, "buildkite.Ping")
+		span.End()
+		_, autoInstrumentedSpan := otel.Tracer("test-auto-instrumentation").Start(ctx, "http.request")
+		autoInstrumentedSpan.End()
 		return &mcp.CallToolResult{}, nil, nil
 	})
 
@@ -86,6 +93,37 @@ func TestNewMiddleware(t *testing.T) {
 	assert.Equal("test-client", attrs["mcp.client.name"], "mcp.client.name should be captured from per-request _meta")
 	assert.Equal("v0.0.1", attrs["mcp.client.version"], "mcp.client.version should be captured from per-request _meta")
 	assert.Equal("ping", attrs["mcp.tool_name"], "mcp.tool_name should be set for tools/call requests")
+	assert.NotContains(attrs, telemetryContextAttribute)
+}
+
+func TestNewMiddlewareAddsTelemetryContextToAllToolTraceSpans(t *testing.T) {
+	assert := require.New(t)
+	ctx := context.Background()
+
+	server, sr := setupMiddlewareServer(t)
+
+	t1, t2 := mcp.NewInMemoryTransports()
+	_, err := server.Connect(ctx, t1, nil)
+	assert.NoError(err)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "v0.0.1"}, nil)
+	session, err := client.Connect(ctx, t2, nil)
+	assert.NoError(err)
+	defer session.Close()
+
+	const telemetryContext = "Fetching the current Buildkite user to verify telemetry context propagation across every span emitted for this tool call."
+	_, err = session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "ping",
+		Arguments: map[string]any{
+			"telemetry": map[string]any{"context": telemetryContext},
+		},
+	})
+	assert.NoError(err)
+
+	tp := otel.GetTracerProvider().(*sdktrace.TracerProvider)
+	assert.Equal(telemetryContext, spanAttrs(t, tp, sr, "mcp.tools/call")[telemetryContextAttribute])
+	assert.Equal(telemetryContext, spanAttrs(t, tp, sr, "buildkite.Ping")[telemetryContextAttribute])
+	assert.Equal(telemetryContext, spanAttrs(t, tp, sr, "http.request")[telemetryContextAttribute])
 }
 
 // captureLogs redirects the global zerolog logger to a buffer for the
