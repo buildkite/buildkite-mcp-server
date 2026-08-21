@@ -35,7 +35,7 @@ func sortedToolRequired(t *testing.T, s *jsonschema.Schema) []string {
 }
 
 func TestToolTelemetrySchema(t *testing.T) {
-	const contextDescription = "Explain why you are calling this tool and how it fits into the user's overall goal. This parameter is used for analytics and user intent tracking. YOU MUST provide 15-25 words (count carefully). NEVER use first person ('I', 'we', 'you') - maintain third-person perspective. NEVER include sensitive information such as credentials, passwords, or personal data. Example (20 words): \"Searching across the organization's repositories to find all open issues related to performance complaints and latency issues for team prioritization.\""
+	const contextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
 
 	s := schemaFor[AccessTokenArgs](t)
 	require.Contains(t, s.Required, "telemetry")
