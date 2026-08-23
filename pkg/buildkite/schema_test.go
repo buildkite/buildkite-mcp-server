@@ -20,16 +20,35 @@ func schemaFor[T any](t *testing.T) *jsonschema.Schema {
 
 func sortedRequired[T any](t *testing.T) []string {
 	t.Helper()
-	s := schemaFor[T](t)
+	return sortedToolRequired(t, schemaFor[T](t))
+}
+
+// sortedToolRequired returns the tool-specific required fields after verifying
+// and removing the telemetry field common to every tool input.
+func sortedToolRequired(t *testing.T, s *jsonschema.Schema) []string {
+	t.Helper()
+	require.Contains(t, s.Required, "telemetry")
 	req := slices.Clone(s.Required)
+	req = slices.DeleteFunc(req, func(field string) bool { return field == "telemetry" })
 	slices.Sort(req)
 	return req
 }
 
+func TestToolTelemetrySchema(t *testing.T) {
+	const contextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
+
+	s := schemaFor[AccessTokenArgs](t)
+	require.Contains(t, s.Required, "telemetry")
+
+	telemetry := s.Properties["telemetry"]
+	require.NotNil(t, telemetry)
+	require.Contains(t, telemetry.Required, "context")
+	require.Equal(t, contextDescription, telemetry.Properties["context"].Description)
+}
+
 func TestListBuildsArgsSchema(t *testing.T) {
 	s := schemaFor[ListBuildsArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 
 	// Required fields: org_slug only (pipeline_slug is optional for org-wide queries)
 	require.Equal(t, []string{"org_slug"}, req)
@@ -90,8 +109,7 @@ func TestUpdatePipelineArgsSchema(t *testing.T) {
 
 func TestListPipelineSchedulesArgsSchema(t *testing.T) {
 	s := schemaFor[ListPipelineSchedulesArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"page", "per_page"} {
@@ -106,8 +124,7 @@ func TestGetPipelineScheduleArgsSchema(t *testing.T) {
 
 func TestCreatePipelineScheduleArgsSchema(t *testing.T) {
 	s := schemaFor[CreatePipelineScheduleArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"cronline", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"label", "message", "commit", "branch", "env", "enabled"} {
@@ -117,8 +134,7 @@ func TestCreatePipelineScheduleArgsSchema(t *testing.T) {
 
 func TestUpdatePipelineScheduleArgsSchema(t *testing.T) {
 	s := schemaFor[UpdatePipelineScheduleArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"org_slug", "pipeline_slug", "schedule_id"}, req)
 
 	for _, opt := range []string{"cronline", "label", "message", "commit", "branch", "env", "enabled"} {
@@ -133,8 +149,7 @@ func TestCreateBuildArgsSchema(t *testing.T) {
 
 func TestListAnnotationsArgsSchema(t *testing.T) {
 	s := schemaFor[ListAnnotationsArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"page", "per_page"} {
@@ -144,8 +159,7 @@ func TestListAnnotationsArgsSchema(t *testing.T) {
 
 func TestGetFailedTestExecutionsArgsSchema(t *testing.T) {
 	s := schemaFor[GetFailedTestExecutionsArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"org_slug", "run_id", "test_suite_slug"}, req)
 
 	for _, opt := range []string{"include_failure_expanded", "page", "per_page"} {
@@ -155,8 +169,7 @@ func TestGetFailedTestExecutionsArgsSchema(t *testing.T) {
 
 func TestReadLogsParamsSchema(t *testing.T) {
 	s := schemaFor[ReadLogsParams](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"cache_ttl", "force_refresh", "seek", "limit"} {
@@ -166,8 +179,7 @@ func TestReadLogsParamsSchema(t *testing.T) {
 
 func TestSearchLogsParamsSchema(t *testing.T) {
 	s := schemaFor[SearchLogsParams](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pattern", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"cache_ttl", "force_refresh", "context", "before_context", "after_context", "case_sensitive", "invert_match", "reverse", "seek_start", "limit"} {
@@ -177,8 +189,7 @@ func TestSearchLogsParamsSchema(t *testing.T) {
 
 func TestTailLogsParamsSchema(t *testing.T) {
 	s := schemaFor[TailLogsParams](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"cache_ttl", "force_refresh", "tail"} {
@@ -188,8 +199,7 @@ func TestTailLogsParamsSchema(t *testing.T) {
 
 func TestListArtifactsForBuildArgsSchema(t *testing.T) {
 	s := schemaFor[ListArtifactsForBuildArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"page", "per_page"} {
@@ -199,8 +209,7 @@ func TestListArtifactsForBuildArgsSchema(t *testing.T) {
 
 func TestListArtifactsForJobArgsSchema(t *testing.T) {
 	s := schemaFor[ListArtifactsForJobArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"page", "per_page"} {
@@ -255,8 +264,7 @@ func TestListTestsForBuildArgsSchema(t *testing.T) {
 
 func TestListTestRunsArgsSchema(t *testing.T) {
 	s := schemaFor[ListTestRunsArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"org_slug", "test_suite_slug"}, req)
 
 	for _, opt := range []string{"page", "per_page"} {
@@ -271,8 +279,7 @@ func TestGetTestRunArgsSchema(t *testing.T) {
 
 func TestListPipelinesArgsSchema(t *testing.T) {
 	s := schemaFor[ListPipelinesArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"org_slug"}, req)
 
 	for _, opt := range []string{"name", "repository", "page", "per_page", "detail_level"} {
@@ -295,8 +302,7 @@ func TestListJobsArgsSchemaFilters(t *testing.T) {
 
 func TestUnblockJobArgsSchema(t *testing.T) {
 	s := schemaFor[UnblockJobArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"build_number", "job_id", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"fields"} {
@@ -306,8 +312,7 @@ func TestUnblockJobArgsSchema(t *testing.T) {
 
 func TestListJobsArgsSchemaOptionalFields(t *testing.T) {
 	s := schemaFor[ListJobsArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 
 	for _, opt := range []string{"state", "detail_level", "include_retried_jobs", "per_page", "after", "before", "include_agent"} {
@@ -317,8 +322,7 @@ func TestListJobsArgsSchemaOptionalFields(t *testing.T) {
 
 func TestListClustersArgsSchema(t *testing.T) {
 	s := schemaFor[ListClustersArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"org_slug"}, req)
 
 	for _, opt := range []string{"page", "per_page"} {
@@ -333,8 +337,7 @@ func TestGetClusterArgsSchema(t *testing.T) {
 
 func TestListAgentsArgsSchema(t *testing.T) {
 	s := schemaFor[ListAgentsArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"org_slug"}, req)
 
 	for _, opt := range []string{"name", "hostname", "version", "cluster_queue_id", "page", "per_page", "detail_level"} {
@@ -347,16 +350,14 @@ func TestListAgentsArgsSchema(t *testing.T) {
 
 func TestGetAgentArgsSchema(t *testing.T) {
 	s := schemaFor[GetAgentArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"agent_id", "org_slug"}, req)
 	require.NotContains(t, s.Required, "detail_level")
 }
 
 func TestListClusterQueuesArgsSchema(t *testing.T) {
 	s := schemaFor[ListClusterQueuesArgs](t)
-	req := slices.Clone(s.Required)
-	slices.Sort(req)
+	req := sortedToolRequired(t, s)
 	require.Equal(t, []string{"cluster_id", "org_slug"}, req)
 
 	for _, opt := range []string{"page", "per_page"} {
@@ -376,7 +377,7 @@ func TestGetBuildTestEngineRunsArgsSchema(t *testing.T) {
 
 func TestListSkillsArgsSchema(t *testing.T) {
 	s := schemaFor[ListSkillsArgs](t)
-	require.Empty(t, s.Required)
+	require.Empty(t, sortedToolRequired(t, s))
 	require.Contains(t, s.Properties, "query")
 }
 

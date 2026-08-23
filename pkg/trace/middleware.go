@@ -2,7 +2,9 @@ package trace
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog"
@@ -11,9 +13,17 @@ import (
 	"go.opentelemetry.io/otel/codes"
 )
 
+// TelemetryContextMaxLength is the maximum number of Unicode code points
+// accepted in telemetry context values.
+const TelemetryContextMaxLength = 256
+
 func NewMiddleware() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			if telemetryContext := toolTelemetryContext(req); telemetryContext != "" {
+				ctx = context.WithValue(ctx, telemetryContextKey{}, telemetryContext)
+			}
+
 			ctx, span := Start(ctx, fmt.Sprintf("mcp.%s", method))
 			defer span.End()
 
@@ -74,6 +84,28 @@ func NewMiddleware() mcp.Middleware {
 			return res, err
 		}
 	}
+}
+
+func toolTelemetryContext(req mcp.Request) string {
+	params, ok := req.GetParams().(*mcp.CallToolParamsRaw)
+	if !ok || params == nil || len(params.Arguments) == 0 {
+		return ""
+	}
+
+	var args struct {
+		Telemetry struct {
+			Context string `json:"context"`
+		} `json:"telemetry"`
+	}
+	if err := json.Unmarshal(params.Arguments, &args); err != nil {
+		return ""
+	}
+
+	if utf8.RuneCountInString(args.Telemetry.Context) > TelemetryContextMaxLength {
+		return ""
+	}
+
+	return args.Telemetry.Context
 }
 
 // clientInfoRequest matches the SDK's typed ServerRequest.ClientInfo

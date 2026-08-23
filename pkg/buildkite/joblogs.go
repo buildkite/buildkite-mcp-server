@@ -24,6 +24,7 @@ var _ BuildkiteLogsClient = (*buildkitelogs.Client)(nil)
 
 // Common parameter structures for log tools
 type JobLogsBaseParams struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
