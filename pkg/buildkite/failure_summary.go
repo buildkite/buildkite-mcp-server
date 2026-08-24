@@ -244,7 +244,7 @@ func loadFailureAnnotations(ctx context.Context, client AnnotationsClient, args 
 	results := make([]FailureSummaryAnnotation, 0, limit)
 	page := 1
 
-	for pagesScanned := 0; pagesScanned < failureSummaryAnnotationScanPages; pagesScanned++ {
+	for pagesScanned := range failureSummaryAnnotationScanPages {
 		annotations, response, err := client.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
 			ListOptions: buildkite.ListOptions{Page: page, PerPage: failureSummaryAnnotationPageSize},
 			Scope:       "all",

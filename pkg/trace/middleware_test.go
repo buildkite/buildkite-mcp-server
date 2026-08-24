@@ -189,7 +189,7 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 func logLines(t *testing.T, buf *bytes.Buffer, method string) []map[string]any {
 	t.Helper()
 	var lines []map[string]any
-	for _, raw := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for raw := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		if raw == "" {
 			continue
 		}
