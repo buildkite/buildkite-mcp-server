@@ -1,0 +1,11 @@
+# https://lefthook.dev/configuration/
+#
+pre-commit:
+  parallel: true
+  jobs:
+    - name: lint
+      run: golangci-lint run
+    - name: go mod tidy
+      run: go mod tidy -diff
+    - name: go fix
+      run: go fix -diff ./...

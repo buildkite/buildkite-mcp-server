@@ -26,8 +26,8 @@ type ListTestsArgs struct {
 	Page          int       `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage       int       `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 	Period        string    `json:"period,omitempty" jsonschema:"Relative aggregation window, such as '7days' or '28days'. Whether selected by period or timestamps, the aggregation window cannot exceed the organization's maximum Test Engine window. Cannot be combined with min_timestamp or max_timestamp."`
-	MinTimestamp  time.Time `json:"min_timestamp,omitempty" jsonschema:"Start of the aggregation window in RFC3339 format. When omitted, defaults to the organization's default Test Engine period before the current time."`
-	MaxTimestamp  time.Time `json:"max_timestamp,omitempty" jsonschema:"End of the aggregation window in RFC3339 format. Defaults to the current time when omitted."`
+	MinTimestamp  time.Time `json:"min_timestamp,omitzero" jsonschema:"Start of the aggregation window in RFC3339 format. When omitted, defaults to the organization's default Test Engine period before the current time."`
+	MaxTimestamp  time.Time `json:"max_timestamp,omitzero" jsonschema:"End of the aggregation window in RFC3339 format. Defaults to the current time when omitted."`
 	Labels        string    `json:"labels,omitempty" jsonschema:"Filter by comma-separated test labels. Prefix a label with '!' to exclude it, for example 'flaky,!slow'."`
 	Branch        string    `json:"branch,omitempty" jsonschema:"Filter executions included in the metrics by branch. Prefix with '!' to exclude an exact branch or suffix with '*' to match by prefix, for example '!main' or 'feature*'. Use at most one operator."`
 	Owners        string    `json:"owners,omitempty" jsonschema:"Filter by comma-separated test owner slugs. Prefix an owner with '!' to exclude it, for example 'payments,!platform'."`

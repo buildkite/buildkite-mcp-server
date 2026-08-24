@@ -76,7 +76,7 @@ func withoutToolsets(enabled, disabled []string) []string {
 // ParseToolsetsHeader parses a comma-separated list of toolset names from a header value.
 func ParseToolsetsHeader(header string) []string {
 	var result []string
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		trimmed := strings.TrimSpace(part)
 		if trimmed != "" {
 			result = append(result, trimmed)
