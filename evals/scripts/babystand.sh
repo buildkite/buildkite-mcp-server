@@ -332,7 +332,16 @@ run_cursor_cloud() {
         ref="$(awk -F= '$1 == "SCENARIO_BRANCH" { v = substr($0, index($0, "=") + 1) } END { print v }' "$VARS_FILE")"
     fi
     [[ -n "$ref" ]] && args+=(--starting-ref "$ref")
-    if ! "$SCRIPT_DIR/cursor-cloud.sh" "$prompt_file" "${args[@]}" | tee "$log"; then
+    # Per-entry agent retention: kill_agent_on_complete (run_entry's local,
+    # via dynamic scoping; validated there, default true) maps onto
+    # cursor-cloud.sh's CURSOR_CLOUD_KEEP_AGENT for THIS invocation only.
+    # false = keep the agent (and the entry token in its env) for dashboard
+    # postmortems. An ambient CURSOR_CLOUD_KEEP_AGENT=1 still keeps it too —
+    # the entry field only ever adds retention, never forces deletion over it.
+    local runner_env=()
+    [[ "${KILL_AGENT_ON_COMPLETE:-true}" == "false" ]] && runner_env=(CURSOR_CLOUD_KEEP_AGENT=1)
+    if ! env ${runner_env[@]+"${runner_env[@]}"} \
+        "$SCRIPT_DIR/cursor-cloud.sh" "$prompt_file" "${args[@]}" | tee "$log"; then
         return 1
     fi
     SESSION_ID=$(sed -n 's/^CURSOR_CLOUD_SESSION_ID=//p' "$log" | tail -n1)
@@ -344,7 +353,7 @@ run_cursor_cloud() {
 # failure in one entry logs and returns without aborting the rest of the matrix.
 run_entry() {
     local entry="$1"
-    local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV
+    local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
     AGENT=$(jq -r '.agent // "claude"'        <<<"$entry")
     MODEL=$(jq -r '.model // ""'              <<<"$entry")
@@ -367,6 +376,9 @@ run_entry() {
     COMPARE_BASE=$(jq -r '.compare_base // ""'   <<<"$entry")
     COMPARE_TARGET=$(jq -r '.compare_target // ""' <<<"$entry")
     TOKEN_ENV=$(jq -r '.token_env // ""'      <<<"$entry")
+    # jq's `//` treats false as absent, so an explicit `false` must be read
+    # with has() rather than defaulted over.
+    KILL_AGENT_ON_COMPLETE=$(jq -r 'if has("kill_agent_on_complete") then (.kill_agent_on_complete | tostring) else "true" end' <<<"$entry")
 
     echo "+++ :robot_face: Eval entry: $ENTRY_ID"
 
@@ -392,6 +404,10 @@ run_entry() {
             # the read-only entry token (see cursor-cloud.sh).
             if [[ -z "${CURSOR_API_KEY:-}" ]]; then
                 echo "WARNING: entry '$ENTRY_ID' uses agent 'cursor-cloud' but CURSOR_API_KEY is unset (see .buildkite/pipeline.evals.yml); skipping." >&2
+                return 0
+            fi
+            if [[ "$KILL_AGENT_ON_COMPLETE" != "true" && "$KILL_AGENT_ON_COMPLETE" != "false" ]]; then
+                echo "WARNING: entry '$ENTRY_ID' has invalid kill_agent_on_complete '$KILL_AGENT_ON_COMPLETE' (want true or false); skipping." >&2
                 return 0
             fi
             ;;
