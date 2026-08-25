@@ -138,7 +138,7 @@ matrix:
   # the cursor CLI) but null cost/message counts.
   - id: red-to-green-complete-cursor-cloud
     agent: cursor-cloud
-    model: composer-2.5
+    model: claude-opus-4-8-thinking-300k-high
     prompt: red-to-green-complete
     scenario:
       setup: |
