@@ -15,6 +15,7 @@
 #   launch  POST /v1/agents        prompt + repo@scenario-branch + inline MCP
 #   watch   GET  .../runs/{id}/stream   SSE: assistant/tool_call/result events
 #   collect GET  /v1/agents/{id}/usage  token usage (the cursor CLI never had this)
+#   cleanup DELETE /v1/agents/{id}      the one-shot agent (and its env) deleted
 #
 # The SSE capture (converted to one JSON object per line) IS the transcript —
 # there is no client-side session file. bk-tool-audit-v2.sh reads it with
@@ -184,11 +185,21 @@ fi
 echo "cursor-cloud: agent $AGENT_ID run $RUN_ID"
 
 # On any exit before a terminal status, cancel the run so an aborted eval does
-# not leave a cloud agent burning through the repo unattended. Best-effort.
+# not leave a cloud agent burning through the repo unattended. Then delete the
+# one-shot agent regardless of outcome: agents are durable and their envVars
+# (the entry's BUILDKITE_API_TOKEN) persist until the agent is deleted, so
+# leaving it would hand the token to anyone who can resume the agent and
+# accumulate one agent per eval. Everything the harness needs (transcript,
+# result, usage) is already collected before exit. CURSOR_CLOUD_KEEP_AGENT=1
+# skips the delete for postmortems in the Cursor dashboard — remember the
+# token custody trade-off. All best-effort.
 FINISHED=""
 cleanup() {
     if [[ -z "$FINISHED" ]]; then
         api_curl -X POST "$API/v1/agents/$AGENT_ID/runs/$RUN_ID/cancel" >/dev/null 2>&1 || true
+    fi
+    if [[ "${CURSOR_CLOUD_KEEP_AGENT:-}" != "1" ]]; then
+        api_curl -X DELETE "$API/v1/agents/$AGENT_ID" >/dev/null 2>&1 || true
     fi
 }
 trap cleanup EXIT
@@ -205,9 +216,11 @@ jq -c --arg model "${MODEL:-default}" \
 # SSE frames -> one JSON object per line: {"type": "<event>", "data": <data>}.
 # Multi-line data: fields are concatenated per the SSE spec; comment lines
 # (":heartbeat") and CR line-endings are handled. Event names are sanitized
-# because they are interpolated into JSON syntax verbatim.
+# because they are interpolated into JSON syntax verbatim. `id:` fields are
+# written to $1 (latest wins, per the SSE last-event-id rules) so the stream
+# loop can resume with a Last-Event-ID header instead of replaying history.
 sse_to_jsonl() {
-    awk '
+    awk -v IDFILE="$1" '
     { sub(/\r$/, "") }
     function emit() {
         if (d != "") { printf "{\"type\":\"%s\",\"data\":%s}\n", ev, d; fflush() }
@@ -215,6 +228,9 @@ sse_to_jsonl() {
     }
     /^event: ?/ { ev = $0; sub(/^event: ?/, "", ev); gsub(/[^A-Za-z0-9_-]/, "", ev); next }
     /^data: ?/  { line = $0; sub(/^data: ?/, "", line); d = d line; next }
+    /^id: ?/    { lid = $0; sub(/^id: ?/, "", lid)
+                  if (lid != "") { print lid > IDFILE; close(IDFILE) }
+                  next }
     /^:/        { next }
     /^$/        { emit(); next }
     END         { emit() }'
@@ -236,30 +252,60 @@ render_progress() {
 
 # Stream until the run reaches a terminal status. The SSE connection can drop
 # mid-run (these runs span CI waits), so stream attempts alternate with status
-# polls. NOTE (first-live-run check): if reconnects REPLAY events from the
-# start rather than resuming, the capture holds duplicates — tool audits
-# dedupe by callId so counts stay right, but assistant text may repeat.
+# polls. Reconnects resume from the last seen SSE id via Last-Event-ID; if the
+# server ignores it and replays from the start anyway (first-live-run check),
+# tool audits still dedupe by callId, but assistant text may repeat.
 echo "--- :cursor: Streaming run (timeout: ${TIMEOUT_MINS}m)"
 DEADLINE=$(( $(date +%s) + TIMEOUT_MINS * 60 ))
-STATUS=""
+STATUS="" POLL_RESP=""
+LAST_EVENT_ID_FILE="$(mktemp)"
 while :; do
-    api_curl -N --max-time $(( TIMEOUT_MINS * 60 )) \
-        "$API/v1/agents/$AGENT_ID/runs/$RUN_ID/stream" 2>/dev/null \
-        | sse_to_jsonl | tee -a "$RAW_LOG" | render_progress || true
-    echo
-
-    STATUS="$(api_curl "$API/v1/agents/$AGENT_ID/runs/$RUN_ID" 2>/dev/null \
-        | jq -r '.status // .run.status // empty' || true)"
-    case "$STATUS" in
-        FINISHED|ERROR|EXPIRED|CANCELLED|CANCELED) break ;;
-    esac
-    if (( $(date +%s) >= DEADLINE )); then
+    # Each attempt gets the REMAINING wall-clock budget, not a fresh full
+    # timeout — a reconnect near the deadline must not extend the advertised
+    # cap by another TIMEOUT_MINS.
+    REMAINING=$(( DEADLINE - $(date +%s) ))
+    if (( REMAINING <= 0 )); then
         echo "cursor-cloud: run exceeded ${TIMEOUT_MINS}m (status: ${STATUS:-unknown}); cancelling" >&2
         break
     fi
+
+    RESUME_ARGS=()
+    LAST_EVENT_ID="$(cat "$LAST_EVENT_ID_FILE" 2>/dev/null || true)"
+    [[ -n "$LAST_EVENT_ID" ]] && RESUME_ARGS=(-H "Last-Event-ID: $LAST_EVENT_ID")
+
+    api_curl -N --max-time "$REMAINING" ${RESUME_ARGS[@]+"${RESUME_ARGS[@]}"} \
+        "$API/v1/agents/$AGENT_ID/runs/$RUN_ID/stream" 2>/dev/null \
+        | sse_to_jsonl "$LAST_EVENT_ID_FILE" | tee -a "$RAW_LOG" | render_progress || true
+    echo
+
+    # Keep the WHOLE poll response, not just .status: if the stream died
+    # before the terminal result event arrived, this poll is the only copy of
+    # the run's result text and durationMs (synthesized below).
+    POLL_RESP="$(api_curl "$API/v1/agents/$AGENT_ID/runs/$RUN_ID" 2>/dev/null || true)"
+    STATUS="$(jq -r '.status // .run.status // empty' <<<"$POLL_RESP" 2>/dev/null || true)"
+    case "$STATUS" in
+        FINISHED|ERROR|EXPIRED|CANCELLED|CANCELED) break ;;
+    esac
     echo "cursor-cloud: stream ended, run still ${STATUS:-unknown}; reconnecting in 15s" >&2
     sleep 15
 done
+
+# If the run reached a terminal status but the stream never delivered a
+# `result` event (dropped connection, poll already terminal), synthesize one
+# from the poll response so RESULT_FILE and the audit's duration/result
+# metrics still populate. Marked source: status_poll so audits can tell.
+case "$STATUS" in
+    FINISHED|ERROR|EXPIRED|CANCELLED|CANCELED)
+        if [[ -n "$POLL_RESP" ]] && ! grep -q '^{"type":"result"' "$RAW_LOG"; then
+            jq -c '{type: "result", data: {
+                    status: (.status // .run.status // "unknown"),
+                    text: ((.result // .run.result // .summary // "") | tostring),
+                    durationMs: (.durationMs // .run.durationMs // null),
+                    source: "status_poll"}}' <<<"$POLL_RESP" >> "$RAW_LOG" 2>/dev/null \
+                || echo "WARNING: cursor-cloud: could not synthesize result record from status poll" >&2
+        fi
+        ;;
+esac
 
 # --- Collect ------------------------------------------------------------------
 # Token usage: the one metric the cursor CLI could never provide. Appended as a

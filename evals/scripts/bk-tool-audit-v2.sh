@@ -116,10 +116,13 @@ CURSOR_TOOL_NAME_JQ='
 # result), all sharing data.callId — and the stream may additionally REPLAY
 # events if the SSE connection dropped and reconnected mid-run. So calls are
 # deduped by callId, keeping the FIRST occurrence to preserve stream order
-# (group_by would sort by id and scramble the timeline). Tool names pass
-# through as the API sends them; how it spells MCP tools is unverified against
-# a live run (first-live-run check — normalize here if they need aligning with
-# claude's mcp__<server>__<tool> form).
+# (group_by would sort by id and scramble the timeline). Tool names: the docs
+# describe tool_call.name as the PUBLIC wrapper name — "mcp" for every MCP
+# invocation — which would collapse all MCP calls into one bucket and break
+# per-tool comparisons. When the name is such a wrapper, derive the identity
+# from the args (same field candidates the cursor CLI dialect uses for its
+# mcpToolCall shape) into claude-style mcp__<server>__<tool>; non-wrapper
+# names pass through as sent. The exact args shape is a first-live-run check.
 CURSOR_CLOUD_CALLS_JQ='
   def cloud_tool_events: [.[] | select(type=="object" and .type=="tool_call" and (.data|type=="object")) | .data];
   def dedupe_calls:
@@ -127,16 +130,26 @@ CURSOR_CLOUD_CALLS_JQ='
         (($e.callId // "") | tostring) as $id
         | if $id != "" and .seen[$id] then .
           else .seen[$id] = true | .out += [$e] end)
-    | .out;'
+    | .out;
+  def cloud_tool_name($d):
+    ($d.args // {}) as $a
+    | (($d.name // "unknown") | tostring) as $n
+    | if ($n == "mcp" or $n == "mcpToolCall" or $n == "mcp_tool_call")
+         and (($a.toolName // $a.name // null) != null)
+      then "mcp__\($a.serverIdentifier // $a.providerIdentifier // $a.server // "mcp")__\($a.toolName // $a.name)"
+      else $n end;'
 extract() {
   local f="$1"
   if [[ "$AGENT" == "cursor-cloud" ]]; then
     jq -c -n --argjson names "$NAMES_ONLY" "$CURSOR_CLOUD_CALLS_JQ"'
       [inputs] | cloud_tool_events | dedupe_calls | .[]
-      | (.name // "unknown") as $name
+      | (.args // {}) as $a
+      | cloud_tool_name(.) as $name
       | select($name | '"$TOOL_FILTER"')
+      | (if ($name != (.name // "unknown")) and (($a.args? | type) == "object")
+         then $a.args else $a end) as $input
       | if $names == 1 then {tool: $name}
-        else {id: (.callId // null), tool: $name, input: (.args // {})} end
+        else {id: (.callId // null), tool: $name, input: $input} end
     ' "$f"
   elif [[ "$AGENT" == "cursor" ]]; then
     jq -c --argjson names "$NAMES_ONLY" "$CURSOR_TOOL_NAME_JQ"'
@@ -246,7 +259,7 @@ metrics() {
                       cache_write: ($u.cacheWriteTokens // 0), cache_read: ($u.cacheReadTokens // 0)}
                    else null end),
           tool_calls_total: ($tools | length),
-          tool_calls_by_name: ($tools | group_by(.name // "unknown") | map("\(length) \(.[0].name // "unknown")") | sort | reverse),
+          tool_calls_by_name: ($tools | map(cloud_tool_name(.)) | group_by(.) | map("\(length) \(.[0])") | sort | reverse),
           est_cost_usd: null
         }
     ' "$snap"
