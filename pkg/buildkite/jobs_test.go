@@ -388,6 +388,7 @@ func TestListJobs(t *testing.T) {
 					SoftFailed:      true,
 					SignalReason:    "agent_stop",
 					StepKey:         "test",
+					Step:            &buildkite.StepInfo{ID: "step-1"},
 					RetriesCount:    1,
 					RetrySource:     &buildkite.JobRetrySource{JobID: "job-0", RetryType: "manual"},
 					BuildURL:        "https://api.buildkite.com/v2/builds/123",
@@ -411,7 +412,7 @@ func TestListJobs(t *testing.T) {
 		require.Len(t, response.Items, 1)
 		assert.Equal(t, map[string]any{
 			"id": "job-1", "name": "test", "state": "failed", "command": "go test ./...", "exit_status": float64(1),
-			"soft_failed": true, "signal_reason": "agent_stop", "step_key": "test",
+			"soft_failed": true, "signal_reason": "agent_stop", "step_key": "test", "step_id": "step-1",
 			"retries_count": float64(1), "retry_source": map[string]any{"job_id": "job-0", "retry_type": "manual"},
 		}, response.Items[0])
 	})
