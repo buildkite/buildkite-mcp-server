@@ -94,6 +94,10 @@ var instructionSections = []instructionSection{
 		text:    "Job state \"broken\" means the job did not run because something inside the build prevented execution: an if conditional evaluated to false, a branch filter did not match, or an upstream dependency failed. It does not mean the job's command failed. Distinguish: broken = build configuration or dependencies prevented execution; failed = job ran but exited non-zero; skipped = external factor (e.g. a newer build superseded it). When both failed and broken jobs are present, investigate failed upstream jobs first.",
 	},
 	{
+		toolset: toolsets.ToolsetBuilds,
+		text:    "Job output links: Job summaries expose a step ID as step_id; full job responses expose it as step.id. To link directly to that job's output, use https://buildkite.com/{org_slug}/{pipeline_slug}/builds/{build_number}/list?sid={step_id}&tab=output.",
+	},
+	{
 		toolset: toolsets.ToolsetLogs,
 		text:    "Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.",
 	},
