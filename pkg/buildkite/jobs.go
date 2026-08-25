@@ -55,6 +55,7 @@ type JobSummary struct {
 	SoftFailed   bool                      `json:"soft_failed,omitempty"`
 	SignalReason string                    `json:"signal_reason,omitempty"`
 	StepKey      string                    `json:"step_key,omitempty"`
+	StepID       string                    `json:"step_id,omitempty"`
 	RetriesCount int                       `json:"retries_count,omitempty"`
 	RetrySource  *buildkite.JobRetrySource `json:"retry_source,omitempty"`
 }
@@ -84,6 +85,11 @@ type JobListResult[T any] struct {
 }
 
 func summarizeJob(job buildkite.Job) JobSummary {
+	var stepID string
+	if job.Step != nil {
+		stepID = job.Step.ID
+	}
+
 	return JobSummary{
 		ID:           job.ID,
 		Name:         job.Name,
@@ -93,6 +99,7 @@ func summarizeJob(job buildkite.Job) JobSummary {
 		SoftFailed:   job.SoftFailed,
 		SignalReason: job.SignalReason,
 		StepKey:      job.StepKey,
+		StepID:       stepID,
 		RetriesCount: job.RetriesCount,
 		RetrySource:  job.RetrySource,
 	}
