@@ -119,6 +119,7 @@ matrix:
     # The build above lives in the `buildkite` org, not the default eval org.
     token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
     mcp_version: source
+    compare_base: build:62
 
   # A no-build scenario: analyze an existing build and propose speedups. Produces
   # only a written proposal — no git push, no new Buildkite build — so it is
