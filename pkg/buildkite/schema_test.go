@@ -23,13 +23,13 @@ func sortedRequired[T any](t *testing.T) []string {
 	return sortedToolRequired(t, schemaFor[T](t))
 }
 
-// sortedToolRequired returns the tool-specific required fields after verifying
-// and removing the telemetry field common to every tool input.
+// sortedToolRequired returns the tool's required fields after verifying that
+// the telemetry field common to every tool input stays optional: clients that
+// cached a pre-telemetry schema must not fail validation for omitting it.
 func sortedToolRequired(t *testing.T, s *jsonschema.Schema) []string {
 	t.Helper()
-	require.Contains(t, s.Required, "telemetry")
+	require.NotContains(t, s.Required, "telemetry")
 	req := slices.Clone(s.Required)
-	req = slices.DeleteFunc(req, func(field string) bool { return field == "telemetry" })
 	slices.Sort(req)
 	return req
 }
@@ -38,7 +38,7 @@ func TestToolTelemetrySchema(t *testing.T) {
 	const contextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
 
 	s := schemaFor[AccessTokenArgs](t)
-	require.Contains(t, s.Required, "telemetry")
+	require.NotContains(t, s.Required, "telemetry")
 
 	telemetry := s.Properties["telemetry"]
 	require.NotNil(t, telemetry)
