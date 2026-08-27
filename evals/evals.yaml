@@ -151,7 +151,7 @@ matrix:
     # Explicitly the default: the one-shot cloud agent (and the entry token in
     # its env) is deleted when the run ends. Flip to false to keep it for
     # postmortems in the Cursor dashboard.
-    kill_agent_on_complete: true
+    kill_agent_on_complete: false
 
   # Diagnosis-only variant: point at ANY existing red build — including one on a
   # pipeline we don't own and must not mutate — and produce a written diagnosis.
