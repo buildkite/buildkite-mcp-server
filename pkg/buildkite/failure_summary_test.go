@@ -565,6 +565,73 @@ func TestGetBuildFailureSummaryLimitsFinalEscapedJSONPayload(t *testing.T) {
 	require.Less(t, len(summary.Jobs[0].Command), len(escapeHeavy))
 }
 
+func TestGetBuildFailureSummaryHonorsContentLimitBytesArg(t *testing.T) {
+	large := strings.Repeat("x", failureSummaryContentByteLimit)
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+				ID:      "build-id",
+				Number:  1,
+				State:   "failed",
+				Message: large,
+			}, &buildkite.Response{}, nil
+		},
+	}
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			return buildkite.JobsList{Items: []buildkite.Job{{
+				ID:      "job-id",
+				Name:    "large command",
+				State:   "failed",
+				Command: large,
+			}}}, &buildkite.Response{}, nil
+		},
+	}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient: buildsClient,
+		JobsClient:   jobsClient,
+	})
+	_, handler, _ := GetBuildFailureSummary()
+
+	t.Run("lowers the payload cap", func(t *testing.T) {
+		requested := 8 * 1024
+		callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+			OrgSlug:           "org",
+			PipelineSlug:      "pipeline",
+			BuildNumber:       "1",
+			ContentLimitBytes: requested,
+		})
+
+		require.NoError(t, err)
+		require.False(t, callResult.IsError)
+		text := getTextResult(t, callResult).Text
+		require.LessOrEqual(t, len(text), requested)
+
+		var summary BuildFailureSummary
+		require.NoError(t, json.Unmarshal([]byte(text), &summary))
+		require.Equal(t, requested, summary.ContentLimitBytes)
+		require.True(t, summary.ContentTruncated)
+	})
+
+	t.Run("clamps values above the server maximum", func(t *testing.T) {
+		callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+			OrgSlug:           "org",
+			PipelineSlug:      "pipeline",
+			BuildNumber:       "1",
+			ContentLimitBytes: failureSummaryContentByteLimit * 2,
+		})
+
+		require.NoError(t, err)
+		require.False(t, callResult.IsError)
+		text := getTextResult(t, callResult).Text
+		require.LessOrEqual(t, len(text), failureSummaryContentByteLimit)
+
+		var summary BuildFailureSummary
+		require.NoError(t, json.Unmarshal([]byte(text), &summary))
+		require.Equal(t, failureSummaryContentByteLimit, summary.ContentLimitBytes)
+	})
+}
+
 func TestGetBuildFailureSummaryBoundsTestEngineWork(t *testing.T) {
 	runs := make([]buildkite.TestEngineRun, 4)
 	for i := range runs {

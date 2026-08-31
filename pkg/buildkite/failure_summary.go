@@ -52,6 +52,7 @@ type GetBuildFailureSummaryArgs struct {
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to inspect (default 5, max 20)"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed test executions to return across all Test Engine runs (default 100, max 200)"`
 	MaxFailedTestsPerRun   int    `json:"max_failed_tests_per_run,omitempty" jsonschema:"Maximum failed test executions to return per Test Engine run (default 20, max 100)"`
+	ContentLimitBytes      int    `json:"content_limit_bytes,omitempty" jsonschema:"Maximum bytes for the response payload (default and max 262144); lower it to fit clients with small tool-result limits, combining with log_tail and max_jobs for finer trimming"`
 	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed, timed-out, canceled, and promised-failing jobs (default true)"`
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include failed Test Engine executions when the build has Test Engine runs (default true)"`
@@ -738,6 +739,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			maxTestRuns := boundedValue(args.MaxTestRuns, defaultFailureSummaryTestRuns, maxFailureSummaryTestRuns)
 			maxFailedTestsPerRun := boundedValue(args.MaxFailedTestsPerRun, defaultFailureSummaryTestsPerRun, maxFailureSummaryTestsPerRun)
 			maxFailedTests := boundedValue(args.MaxFailedTests, defaultFailureSummaryFailedTests, maxFailureSummaryFailedTests)
+			contentLimit := boundedValue(args.ContentLimitBytes, failureSummaryContentByteLimit, failureSummaryContentByteLimit)
 
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
@@ -747,6 +749,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				attribute.Int("max_jobs", maxJobs),
 				attribute.Int("max_test_runs", maxTestRuns),
 				attribute.Int("max_failed_tests", maxFailedTests),
+				attribute.Int("content_limit_bytes", contentLimit),
 				attribute.Bool("include_logs", defaultTrue(args.IncludeLogs)),
 				attribute.Bool("include_annotations", defaultTrue(args.IncludeAnnotations)),
 				attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
@@ -884,6 +887,6 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				attribute.Int("test_run_count", len(result.TestRuns)),
 			)
 
-			return mcpTextResultWithByteLimit(span, &result, failureSummaryContentByteLimit)
+			return mcpTextResultWithByteLimit(span, &result, contentLimit)
 		}, []string{"read_builds", "read_build_logs", "read_suites"}
 }
