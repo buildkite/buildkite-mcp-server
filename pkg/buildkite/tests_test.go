@@ -14,15 +14,15 @@ import (
 )
 
 type MockTestsClient struct {
-	GetFunc  func(ctx context.Context, org, slug, testID string) (buildkite.Test, *buildkite.Response, error)
+	GetFunc  func(ctx context.Context, org, slug, testID string, opt *buildkite.TestsGetOptions) (buildkite.TestWithMetrics, *buildkite.Response, error)
 	ListFunc func(ctx context.Context, org, slug string, opt *buildkite.TestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error)
 }
 
-func (m *MockTestsClient) Get(ctx context.Context, org, slug, testID string) (buildkite.Test, *buildkite.Response, error) {
+func (m *MockTestsClient) Get(ctx context.Context, org, slug, testID string, opt *buildkite.TestsGetOptions) (buildkite.TestWithMetrics, *buildkite.Response, error) {
 	if m.GetFunc != nil {
-		return m.GetFunc(ctx, org, slug, testID)
+		return m.GetFunc(ctx, org, slug, testID, opt)
 	}
-	return buildkite.Test{}, nil, nil
+	return buildkite.TestWithMetrics{}, nil, nil
 }
 
 func (m *MockTestsClient) List(ctx context.Context, org, slug string, opt *buildkite.TestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
@@ -268,11 +268,13 @@ func TestGetTest(t *testing.T) {
 	assert := require.New(t)
 
 	client := &MockTestsClient{
-		GetFunc: func(ctx context.Context, org, slug, testID string) (buildkite.Test, *buildkite.Response, error) {
-			return buildkite.Test{
-					ID:       "test-123",
-					Name:     "Example Test",
-					Location: "spec/example_test.rb",
+		GetFunc: func(ctx context.Context, org, slug, testID string, opt *buildkite.TestsGetOptions) (buildkite.TestWithMetrics, *buildkite.Response, error) {
+			return buildkite.TestWithMetrics{
+					Test: buildkite.Test{
+						ID:       "test-123",
+						Name:     "Example Test",
+						Location: "spec/example_test.rb",
+					},
 				}, &buildkite.Response{
 					Response: &http.Response{
 						StatusCode: 200,
