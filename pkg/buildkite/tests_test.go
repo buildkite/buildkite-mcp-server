@@ -114,6 +114,7 @@ func TestListTests(t *testing.T) {
 			require.Equal(t, buildkite.ListOptions{Page: 2, PerPage: 50}, opt.ListOptions)
 			require.Equal(t, minTimestamp, opt.MinTimestamp)
 			require.Equal(t, maxTimestamp, opt.MaxTimestamp)
+			require.Equal(t, 5, opt.MinExecutions)
 			require.Equal(t, "flaky,!slow", opt.Labels)
 			require.Equal(t, "main*", opt.Branch)
 			require.Equal(t, "payments,!platform", opt.Owners)
@@ -177,6 +178,7 @@ func TestListTests(t *testing.T) {
 		PerPage:       50,
 		MinTimestamp:  minTimestamp,
 		MaxTimestamp:  maxTimestamp,
+		MinExecutions: 5,
 		Labels:        "flaky,!slow",
 		Branch:        "main*",
 		Owners:        "payments,!platform",
@@ -221,6 +223,7 @@ func TestListTestsUsesDefaultPagination(t *testing.T) {
 			require.Equal(t, "7days", opt.Period)
 			require.True(t, opt.MinTimestamp.IsZero())
 			require.True(t, opt.MaxTimestamp.IsZero())
+			require.Zero(t, opt.MinExecutions)
 			return []buildkite.TestWithMetrics{}, &buildkite.Response{Response: &http.Response{Header: http.Header{}}}, nil
 		},
 	}

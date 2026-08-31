@@ -28,6 +28,7 @@ type ListTestsArgs struct {
 	Period        string    `json:"period,omitempty" jsonschema:"Relative aggregation window, such as '7days' or '28days'. Whether selected by period or timestamps, the aggregation window cannot exceed the organization's maximum Test Engine window. Cannot be combined with min_timestamp or max_timestamp."`
 	MinTimestamp  time.Time `json:"min_timestamp,omitzero" jsonschema:"Start of the aggregation window in RFC3339 format. When omitted, defaults to the organization's default Test Engine period before the current time."`
 	MaxTimestamp  time.Time `json:"max_timestamp,omitzero" jsonschema:"End of the aggregation window in RFC3339 format. Defaults to the current time when omitted."`
+	MinExecutions int       `json:"min_executions,omitempty" jsonschema:"Return only tests with at least this many executions after applying the selected time window and execution filters (min 1)."`
 	Labels        string    `json:"labels,omitempty" jsonschema:"Filter by comma-separated test labels. Prefix a label with '!' to exclude it, for example 'flaky,!slow'."`
 	Branch        string    `json:"branch,omitempty" jsonschema:"Filter executions included in the metrics by branch. Prefix with '!' to exclude an exact branch or suffix with '*' to match by prefix, for example '!main' or 'feature*'. Use at most one operator."`
 	Owners        string    `json:"owners,omitempty" jsonschema:"Filter by comma-separated test owner slugs. Prefix an owner with '!' to exclude it, for example 'payments,!platform'."`
@@ -74,17 +75,18 @@ func ListTests() (mcp.Tool, mcp.ToolHandlerFor[ListTestsArgs, any], []string) {
 
 			paginationParams := paginationFromArgs(args.Page, args.PerPage)
 			options := &buildkite.TestsListOptions{
-				ListOptions:  paginationParams,
-				Period:       args.Period,
-				MinTimestamp: args.MinTimestamp,
-				MaxTimestamp: args.MaxTimestamp,
-				Labels:       args.Labels,
-				Branch:       args.Branch,
-				Owners:       args.Owners,
-				State:        args.State,
-				Tags:         args.Tags,
-				SortBy:       args.SortBy,
-				Order:        args.Order,
+				ListOptions:   paginationParams,
+				Period:        args.Period,
+				MinTimestamp:  args.MinTimestamp,
+				MaxTimestamp:  args.MaxTimestamp,
+				MinExecutions: args.MinExecutions,
+				Labels:        args.Labels,
+				Branch:        args.Branch,
+				Owners:        args.Owners,
+				State:         args.State,
+				Tags:          args.Tags,
+				SortBy:        args.SortBy,
+				Order:         args.Order,
 			}
 
 			attributes := []attribute.KeyValue{
@@ -93,6 +95,7 @@ func ListTests() (mcp.Tool, mcp.ToolHandlerFor[ListTestsArgs, any], []string) {
 				attribute.Int("page", paginationParams.Page),
 				attribute.Int("per_page", paginationParams.PerPage),
 				attribute.String("period", args.Period),
+				attribute.Int("min_executions", args.MinExecutions),
 				attribute.String("labels", args.Labels),
 				attribute.String("branch", args.Branch),
 				attribute.String("owners", args.Owners),
