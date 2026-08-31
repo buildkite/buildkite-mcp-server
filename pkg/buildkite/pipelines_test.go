@@ -157,6 +157,7 @@ steps:
 			assert.Equal("Test Pipeline", p.Name)
 			assert.Equal("https://example.com/repo.git", p.Repository)
 			assert.Equal(testPipelineDefinition, p.Configuration)
+			assert.Equal(map[string]string{"team-uuid-1": "build_and_read"}, p.Teams)
 
 			return buildkite.Pipeline{
 					ID:        "123",
@@ -199,6 +200,7 @@ steps:
 		Description:   "A test pipeline",
 		Configuration: testPipelineDefinition,
 		Tags:          []string{"tag1", "tag2"},
+		Teams:         map[string]string{"team-uuid-1": "build_and_read"},
 		CreateWebhook: true, // should create webhook by default
 	}
 

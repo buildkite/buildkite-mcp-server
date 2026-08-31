@@ -11,7 +11,7 @@ import (
 )
 
 type TestsClient interface {
-	Get(ctx context.Context, org, slug, testID string) (buildkite.Test, *buildkite.Response, error)
+	Get(ctx context.Context, org, slug, testID string, opt *buildkite.TestsGetOptions) (buildkite.TestWithMetrics, *buildkite.Response, error)
 	List(ctx context.Context, org, slug string, opt *buildkite.TestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error)
 }
 
@@ -206,7 +206,7 @@ func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {
 			)
 
 			deps := DepsFromContext(ctx)
-			test, _, err := deps.TestsClient.Get(ctx, args.OrgSlug, args.TestSuiteSlug, args.TestID)
+			test, _, err := deps.TestsClient.Get(ctx, args.OrgSlug, args.TestSuiteSlug, args.TestID, nil)
 			if err != nil {
 				return handleBuildkiteError(err)
 			}

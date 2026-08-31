@@ -241,17 +241,18 @@ func createPaginatedResult[T any](pipelines []buildkite.Pipeline, converter func
 
 type CreatePipelineArgs struct {
 	ToolInput
-	OrgSlug                   string   `json:"org_slug"`
-	Name                      string   `json:"name"`
-	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
-	ClusterID                 string   `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
-	Description               string   `json:"description,omitempty"`
-	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
-	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
-	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
-	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
-	Tags                      []string `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
-	CreateWebhook             bool     `json:"create_webhook,omitempty" jsonschema:"Create a GitHub webhook to trigger builds on pull-request and push events"`
+	OrgSlug                   string            `json:"org_slug"`
+	Name                      string            `json:"name"`
+	RepositoryURL             string            `json:"repository_url" jsonschema:"The Git repository URL"`
+	ClusterID                 string            `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
+	Description               string            `json:"description,omitempty"`
+	Configuration             string            `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
+	DefaultBranch             string            `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    bool              `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds bool              `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Tags                      []string          `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
+	Teams                     map[string]string `json:"teams,omitempty" jsonschema:"Team UUIDs mapped to their access level on the pipeline: read_only, build_and_read or manage_build_and_read. Organizations with teams enabled require at least one team, unless the user is an organization administrator"`
+	CreateWebhook             bool              `json:"create_webhook,omitempty" jsonschema:"Create a GitHub webhook to trigger builds on pull-request and push events"`
 }
 
 func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []string) {
@@ -282,6 +283,7 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 				SkipQueuedBranchBuilds:    args.SkipQueuedBranchBuilds,
 				Configuration:             args.Configuration,
 				Tags:                      args.Tags,
+				Teams:                     args.Teams,
 			}
 
 			if args.DefaultBranch != "" {
