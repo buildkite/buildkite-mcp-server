@@ -179,8 +179,9 @@ annotate_codeblock() {
 run_agent() {
     local agent="$1"; shift
     case "$agent" in
-        claude) run_claude "$@" ;;
-        cursor) run_cursor "$@" ;;
+        claude)       run_claude "$@" ;;
+        cursor)       run_cursor "$@" ;;
+        cursor-cloud) run_cursor_cloud "$@" ;;
     esac
 }
 
@@ -306,20 +307,67 @@ $(cat "$prompt_file")" --force --approve-mcps "${args[@]}" | tee "$log"; then
     fi
 }
 
+# run_cursor_cloud <rendered_prompt_file> <model> <log_file> -- the Cursor
+# CLOUD agent (the hosted harness behind the Cursor app's Agents window),
+# same contract as run_claude/run_cursor. One code path for CI and local: the
+# agent executes in Cursor's cloud VM either way, so there is no sandbox /
+# permission split here and the local clone (cwd) is only the place scenario
+# setup pushed the branch from — the VM makes its own clone at that branch.
+# cursor-cloud.sh owns the API launch, SSE transcript capture, and usage
+# collection; see its header for the cloud-specific caveats (prepended system
+# prompt, MCP server built in the VM from MCP_SRC_SHA, etc.).
+# Like the other runners, the pipeline must be checked explicitly: errexit is
+# dead in here (run_entry sits on the left of `||`).
+run_cursor_cloud() {
+    local prompt_file="$1" model="$2" log="$3"
+    local args=(--repo "https://github.com/${REPO_SLUG}" --name "eval-${ENTRY_ID}-${DATETIME}")
+    [[ -n "$model" ]] && args+=(--model "$model")
+    # The scenario branch (when this entry's setup created one) becomes the
+    # VM's startingRef, so the agent boots directly on the red branch. Read it
+    # from the assembled vars file (run_entry's local, via dynamic scoping);
+    # last value wins, matching render_prompt. Entries without one (e.g.
+    # analyze-build) start on the repo's default branch.
+    local ref=""
+    if [[ -n "${VARS_FILE:-}" && -f "${VARS_FILE:-}" ]]; then
+        ref="$(awk -F= '$1 == "SCENARIO_BRANCH" { v = substr($0, index($0, "=") + 1) } END { print v }' "$VARS_FILE")"
+    fi
+    [[ -n "$ref" ]] && args+=(--starting-ref "$ref")
+    # Per-entry agent retention: kill_agent_on_complete (run_entry's local,
+    # via dynamic scoping; validated there, default true) maps onto
+    # cursor-cloud.sh's CURSOR_CLOUD_KEEP_AGENT for THIS invocation only.
+    # false = keep the agent (and the entry token in its env) for dashboard
+    # postmortems. An ambient CURSOR_CLOUD_KEEP_AGENT=1 still keeps it too —
+    # the entry field only ever adds retention, never forces deletion over it.
+    local runner_env=()
+    [[ "${KILL_AGENT_ON_COMPLETE:-true}" == "false" ]] && runner_env=(CURSOR_CLOUD_KEEP_AGENT=1)
+    if ! env ${runner_env[@]+"${runner_env[@]}"} \
+        "$SCRIPT_DIR/cursor-cloud.sh" "$prompt_file" "${args[@]}" | tee "$log"; then
+        return 1
+    fi
+    SESSION_ID=$(sed -n 's/^CURSOR_CLOUD_SESSION_ID=//p' "$log" | tail -n1)
+    TRANSCRIPT=$(sed -n 's/^CURSOR_CLOUD_TRANSCRIPT=//p' "$log" | tail -n1)
+    EVAL_RESULT_FILE=$(sed -n 's/^CURSOR_CLOUD_RESULT_FILE=//p' "$log" | tail -n1)
+}
+
 # run_entry <entry_json> -- execute one matrix entry end to end. Best-effort: a
 # failure in one entry logs and returns without aborting the rest of the matrix.
 run_entry() {
     local entry="$1"
-    local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV
+    local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
     AGENT=$(jq -r '.agent // "claude"'        <<<"$entry")
     MODEL=$(jq -r '.model // ""'              <<<"$entry")
     # Model ids are per-agent namespaces (cursor rejects claude-* ids; see
     # `cursor-agent --list-models`), so the default is agent-aware.
+    # cursor-cloud stays empty on purpose: the launch request omits the model
+    # field entirely and the Cursor account's configured default applies (ids
+    # discoverable via GET /v1/models) — pin one in the entry for stable
+    # cross-build comparisons.
     if [[ -z "$MODEL" ]]; then
         case "$AGENT" in
-            cursor) MODEL="composer-1" ;;
-            *)      MODEL="claude-opus-4-8" ;;
+            cursor)       MODEL="composer" ;;
+            cursor-cloud) ;;
+            *)            MODEL="claude-opus-4-8" ;;
         esac
     fi
     PROMPT_NAME=$(jq -r '.prompt'             <<<"$entry")
@@ -328,6 +376,9 @@ run_entry() {
     COMPARE_BASE=$(jq -r '.compare_base // ""'   <<<"$entry")
     COMPARE_TARGET=$(jq -r '.compare_target // ""' <<<"$entry")
     TOKEN_ENV=$(jq -r '.token_env // ""'      <<<"$entry")
+    # jq's `//` treats false as absent, so an explicit `false` must be read
+    # with has() rather than defaulted over.
+    KILL_AGENT_ON_COMPLETE=$(jq -r 'if has("kill_agent_on_complete") then (.kill_agent_on_complete | tostring) else "true" end' <<<"$entry")
 
     echo "+++ :robot_face: Eval entry: $ENTRY_ID"
 
@@ -342,6 +393,21 @@ run_entry() {
             fi
             if [[ "${RUN_IN_CI:-false}" != "true" && "$LOCAL_BYPASS_PERMISSION" != "true" ]]; then
                 echo "WARNING: entry '$ENTRY_ID': local cursor runs require LOCAL_BYPASS_PERMISSION=true (cursor-agent's restricted allowlist — .cursor/cli.json permissions — is not wired up); skipping." >&2
+                return 0
+            fi
+            ;;
+        cursor-cloud)
+            # Same auth as cursor, but NO LOCAL_BYPASS_PERMISSION gate: the
+            # agent executes in Cursor's cloud VM, never on this host, so the
+            # local permission posture is irrelevant. Containment comes from
+            # Cursor's sandbox + the --read-only MCP server built in the VM +
+            # the read-only entry token (see cursor-cloud.sh).
+            if [[ -z "${CURSOR_API_KEY:-}" ]]; then
+                echo "WARNING: entry '$ENTRY_ID' uses agent 'cursor-cloud' but CURSOR_API_KEY is unset (see .buildkite/pipeline.evals.yml); skipping." >&2
+                return 0
+            fi
+            if [[ "$KILL_AGENT_ON_COMPLETE" != "true" && "$KILL_AGENT_ON_COMPLETE" != "false" ]]; then
+                echo "WARNING: entry '$ENTRY_ID' has invalid kill_agent_on_complete '$KILL_AGENT_ON_COMPLETE' (want true or false); skipping." >&2
                 return 0
             fi
             ;;

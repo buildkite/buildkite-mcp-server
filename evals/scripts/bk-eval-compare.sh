@@ -128,6 +128,16 @@ metrics_table() {
         def cell(x): if x == null then "N/A" else x end;
         def delta(bv; cv): if bv == null or cv == null then "N/A" else sign(cv - bv) end;
         def r(lbl; bv; cv): "| \(lbl) | \(cell(bv)) | \(cell(cv)) | \(delta(bv; cv)) |";
+        # Cache writes are reported differently per agent: claude splits them
+        # into 5m/1h TTL buckets, cursor-cloud emits a single aggregate
+        # (tokens.cache_write). The total row is the one comparable across
+        # agents — aggregate when present, else the sum of the buckets, else
+        # not reported.
+        def cwt(t): if t == null then null
+          elif (t.cache_write // null) != null then t.cache_write
+          elif ((t.cache_write_5m // null) != null) or ((t.cache_write_1h // null) != null)
+            then ((t.cache_write_5m // 0) + (t.cache_write_1h // 0))
+          else null end;
         [
           "| Metric | Base (\($bl)) | Target (\($cl)) | Δ |",
           "|---|---:|---:|---:|",
@@ -135,6 +145,7 @@ metrics_table() {
           r("Output tokens";       $B.tokens.output;         $C.tokens.output),
           r("Cache write (5m)";    $B.tokens.cache_write_5m; $C.tokens.cache_write_5m),
           r("Cache write (1h)";    $B.tokens.cache_write_1h; $C.tokens.cache_write_1h),
+          r("Cache write (total)"; cwt($B.tokens);           cwt($C.tokens)),
           r("Cache read";          $B.tokens.cache_read;     $C.tokens.cache_read),
           r("Tool calls (total)";  $B.tool_calls_total;      $C.tool_calls_total),
           r("Assistant responses"; $B.assistant_responses;   $C.assistant_responses),

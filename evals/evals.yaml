@@ -5,19 +5,34 @@
 #                 Buildkite annotations, and is the key used to match this entry
 #                 against the same entry in a previous build for comparison.
 #                 Keep it stable across builds; keep it unique within this file.
-#   agent         Which LLM agent runs the prompt: 'claude' (Claude Code CLI)
-#                 or 'cursor' (Cursor CLI, cursor-agent). Other values are
-#                 skipped with a loud warning (codex/opencode land in a later
-#                 stage). Cursor entries additionally need CURSOR_API_KEY (see
+#   agent         Which LLM agent runs the prompt: 'claude' (Claude Code CLI),
+#                 'cursor' (Cursor CLI, cursor-agent) or 'cursor-cloud' (Cursor
+#                 CLOUD agents — the hosted harness behind the Cursor app's
+#                 Agents window, driven via the Cloud Agents API; see
+#                 scripts/cursor-cloud.sh). Other values are skipped with a
+#                 loud warning (codex/opencode land in a later stage).
+#                 cursor and cursor-cloud entries need CURSOR_API_KEY (see
 #                 .buildkite/pipeline.evals.yml) and are skipped loudly when it
-#                 is unset; their metrics are partial (cursor-agent's
-#                 stream-json emits no token usage, so tokens/cost are null)
-#                 and prompts/system.md is prepended to the prompt rather than
-#                 appended as a system prompt (no cursor-agent equivalent).
+#                 is unset; both prepend prompts/system.md to the prompt rather
+#                 than sending a system prompt (no equivalent channel).
+#                 cursor metrics are partial (no token usage in its
+#                 stream-json: tokens/cost null); cursor-cloud reports real
+#                 token totals (Cloud Agents /usage) but null cost and null
+#                 message counts (its transcript is an SSE delta stream).
+#                 cursor-cloud runs in Cursor's cloud VM, so it needs no local
+#                 permission posture — but DOES need the Cursor GitHub
+#                 integration granted on EVAL_REPO_SLUG (one-time, in the
+#                 Cursor dashboard), and its MCP server is BUILT IN THE VM
+#                 from the commit under review (see mcp_cursor_cloud.json),
+#                 so local uncommitted changes are not what it tests.
 #   model         Passed to the agent as --model. Model ids are per-agent
-#                 namespaces: claude-* ids for claude; Cursor ids (composer-1,
-#                 sonnet-4.5, gpt-5.2, ... — see `cursor-agent --list-models`)
-#                 for cursor. Defaults: claude-opus-4-8 / composer-1.
+#                 namespaces: claude-* ids for claude; Cursor ids (composer-2.5,
+#                 sonnet-4.5, gpt-5.2, ... — see `cursor-agent --list-models`,
+#                 or GET https://api.cursor.com/v1/models for cursor-cloud;
+#                 ids rotate, aliases like `composer` track latest).
+#                 Defaults: claude-opus-4-8 / composer / for cursor-cloud,
+#                 unset (the Cursor account's default model applies — pin one
+#                 here for stable cross-build comparisons).
 #   prompt        Name of a template under prompts/<prompt>.md. Rendered with the
 #                 substitution vars below (Go-style {{.KEY}} placeholders).
 #   scenario:
@@ -29,6 +44,15 @@
 #                 environment. To pass values on to the prompt, append KEY=VALUE
 #                 lines to the file at $SCENARIO_VARS_FILE.
 #     vars        Static KEY=VALUE map substituted into the prompt template.
+#   kill_agent_on_complete  Optional, cursor-cloud only. Whether to DELETE the
+#                 one-shot cloud agent when the run ends (any outcome — success,
+#                 failure, or abort). Default: true, because the agent is
+#                 durable and keeps its injected env (this entry's Buildkite
+#                 API token) until deleted. Set false to keep the agent for
+#                 postmortems in the Cursor dashboard — accepting that the
+#                 token persists inside it until you delete the agent manually.
+#                 (An ambient CURSOR_CLOUD_KEEP_AGENT=1 also keeps it; that's
+#                 the local-debugging escape hatch in cursor-cloud.sh.)
 #   token_env     Optional. NAME of an env var holding the Buildkite API token
 #                 for the org this entry's scenario lives in — scenarios can
 #                 point anywhere (e.g. an arbitrary BUILD_URL), and API tokens
@@ -102,6 +126,32 @@ matrix:
   #      echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
   #  compare_base: build:94
   #  mcp_version: source
+
+  # The same scenario on a Cursor CLOUD agent — the hosted harness behind the
+  # Cursor app's Agents window (what Origin users run), always at Cursor's
+  # latest release. The setup still pushes the scenario branch from here; the
+  # cloud VM then clones the eval repo at that branch (startingRef) and works
+  # there. Requires CURSOR_API_KEY and the Cursor GitHub integration granted
+  # on the eval repo; skipped loudly while the key is unset. The MCP server is
+  # built inside the VM from the commit under review (mcp_cursor_cloud.json),
+  # preserving mcp_version: source. Metrics include real token totals (unlike
+  # the cursor CLI) but null cost/message counts.
+  #- id: red-to-green-complete-cursor-cloud
+  #  agent: cursor-cloud
+  #  model: composer-2.5
+  #  prompt: red-to-green-complete
+  #  scenario:
+  #    setup: |
+  #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
+  #      git fetch
+  #      git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
+  #      git push -u origin HEAD
+  #      echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
+  #  mcp_version: source
+  #  # Explicitly the default: the one-shot cloud agent (and the entry token in
+  #  # its env) is deleted when the run ends. Flip to false to keep it for
+  #  # postmortems in the Cursor dashboard.
+  #  kill_agent_on_complete: true
 
   # Diagnosis-only variant: point at ANY existing red build — including one on a
   # pipeline we don't own and must not mutate — and produce a written diagnosis.
