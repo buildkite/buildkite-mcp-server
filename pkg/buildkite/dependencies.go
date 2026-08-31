@@ -27,6 +27,7 @@ type ToolDependencies struct {
 	JobsClient              JobsClient
 	StepUploadsClient       StepUploadsClient
 	TestRunsClient          TestRunsClient
+	TestSuitesClient        TestSuitesClient
 	TestExecutionsClient    TestExecutionsClient
 	TestsClient             TestsClient
 	BuildTestsClient        BuildTestsClient
