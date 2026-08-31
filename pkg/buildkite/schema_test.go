@@ -232,8 +232,8 @@ func TestListTestsArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"org_slug", "test_suite_slug"}, sortedRequired[ListTestsArgs](t))
 
 	optional := []string{
-		"page", "per_page", "period", "min_timestamp", "max_timestamp", "labels",
-		"branch", "owners", "state", "tags", "sort_by", "order",
+		"page", "per_page", "period", "min_timestamp", "max_timestamp", "min_executions",
+		"labels", "branch", "owners", "state", "tags", "sort_by", "order",
 	}
 	for _, property := range optional {
 		require.Contains(t, s.Properties, property)
@@ -242,6 +242,8 @@ func TestListTestsArgsSchema(t *testing.T) {
 
 	require.Equal(t, "string", s.Properties["min_timestamp"].Type)
 	require.Equal(t, "string", s.Properties["max_timestamp"].Type)
+	require.Equal(t, "integer", s.Properties["min_executions"].Type)
+	require.Contains(t, s.Properties["min_executions"].Description, "at least this many executions")
 	require.Contains(t, s.Properties["min_timestamp"].Description, "RFC3339")
 	require.Contains(t, s.Properties["max_timestamp"].Description, "RFC3339")
 	require.Contains(t, s.Properties["period"].Description, "Cannot be combined")
