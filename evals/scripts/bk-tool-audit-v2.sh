@@ -97,46 +97,75 @@ newest_session() {
 #   shellToolCall, ...), with the call's arguments under that key's .args.
 #   MCP invocations are wrapped: mcpToolCall's real identity lives at
 #   .args.toolName + .args.serverIdentifier and the real tool arguments nest
-#   at .args.args (observed schema — eval build 98). Normalize those to
-#   claude-style mcp__<server>__<tool> so cross-agent tool tables line up;
-#   getMcpToolsToolCall (schema fetch) stays as-is — it is a distinct
-#   tool-discovery step worth seeing in audits. function.name is a defensive
-#   fallback for the OpenAI-style shape other cursor versions may emit.
+#   at .args.args (observed schema — eval build 98; newer runs also emit the
+#   Cloud-style {server, toolName, arguments} field names, so both spellings
+#   are accepted). Normalize those to claude-style mcp__<server>__<tool> so
+#   cross-agent tool tables line up; getMcpToolsToolCall (schema fetch) stays
+#   as-is — it is a distinct tool-discovery step worth seeing in audits.
+#   function.name is a defensive fallback for the OpenAI-style shape other
+#   cursor versions may emit.
+#   CAVEAT (same as cursor-cloud below): the FIRST event for a call may be an
+#   args-less placeholder, with args only arriving on a later event for the
+#   same call_id. Reading only "started" events therefore loses MCP identity
+#   ("4 mcpToolCall" instead of per-tool names). cursor_calls collapses ALL
+#   tool_call events by call_id — first occurrence keeps its stream position,
+#   but an args-less stored event is upgraded to a later sibling that has
+#   args. Events with no call_id pass through unmerged (one call each).
 CURSOR_TOOL_NAME_JQ='
   def cursor_tool_name($t):
     ($t.value.args // {}) as $a
     | if $t.key == "mcpToolCall" and (($a.toolName // $a.name) != null) then
-        "mcp__\($a.serverIdentifier // $a.providerIdentifier // "mcp")__\($a.toolName // $a.name)"
+        "mcp__\($a.serverIdentifier // $a.providerIdentifier // $a.server // "mcp")__\($a.toolName // $a.name)"
       elif (($a.function? | type) == "object") and ($a.function.name != null) then
         $a.function.name
-      else $t.key end;'
+      else $t.key end;
+  def cursor_calls:
+    reduce (.[] | select(.type=="tool_call" and (.tool_call|type=="object"))) as $e (
+      {seen: {}, out: []};
+      (($e.call_id // "") | tostring) as $id
+      | if $id == "" then
+          (if $e.subtype == "started" then .out += [$e] else . end)
+        elif .seen[$id] == null then .seen[$id] = (.out|length) | .out += [$e]
+        elif ((.out[.seen[$id]].tool_call | to_entries[0].value.args // null) == null)
+             and (($e.tool_call | to_entries[0].value.args // null) != null)
+        then .out[.seen[$id]] = $e
+        else . end)
+    | .out;'
 # cursor-cloud: cursor-cloud.sh captures the Cloud Agents SSE stream as
 # {"type": "<event>", "data": {...}} lines. A tool call appears at least twice
 # (a started/running event with args, a completed event repeating them with the
 # result), all sharing data.callId — and the stream may additionally REPLAY
 # events if the SSE connection dropped and reconnected mid-run. So calls are
-# deduped by callId, keeping the FIRST occurrence to preserve stream order
-# (group_by would sort by id and scramble the timeline). Tool names: the docs
-# describe tool_call.name as the PUBLIC wrapper name — "mcp" for every MCP
-# invocation — which would collapse all MCP calls into one bucket and break
-# per-tool comparisons. When the name is such a wrapper, derive the identity
-# from the args (same field candidates the cursor CLI dialect uses for its
-# mcpToolCall shape) into claude-style mcp__<server>__<tool>; non-wrapper
-# names pass through as sent. The exact args shape is a first-live-run check.
+# deduped by callId, keeping the FIRST occurrence's stream position to
+# preserve order (group_by would sort by id and scramble the timeline) — BUT
+# NOT its payload: live runs show the first event for a callId is often an
+# args-less "running" placeholder, with args arriving only on a later event.
+# Keeping the bare first event blanked every MCP identity ("5 mcp" in
+# metrics), so an args-less stored event is upgraded in place to a later
+# sibling that has args. Tool names: the docs describe tool_call.name as the
+# PUBLIC wrapper name — "mcp" for every MCP invocation — which would collapse
+# all MCP calls into one bucket and break per-tool comparisons. When the name
+# is such a wrapper, derive the identity from the args into claude-style
+# mcp__<server>__<tool>; non-wrapper names pass through as sent. The args
+# shape per the Cloud Agents API is {server, toolName, arguments} — the older
+# CLI-observed spellings (serverIdentifier, .args nesting) stay as fallbacks.
 CURSOR_CLOUD_CALLS_JQ='
   def cloud_tool_events: [.[] | select(type=="object" and .type=="tool_call" and (.data|type=="object")) | .data];
   def dedupe_calls:
     reduce .[] as $e ({seen: {}, out: []};
         (($e.callId // "") | tostring) as $id
-        | if $id != "" and .seen[$id] then .
-          else .seen[$id] = true | .out += [$e] end)
+        | if $id == "" then .out += [$e]
+          elif .seen[$id] == null then .seen[$id] = (.out|length) | .out += [$e]
+          elif ((.out[.seen[$id]].args // null) == null) and (($e.args // null) != null)
+          then .out[.seen[$id]] = $e
+          else . end)
     | .out;
   def cloud_tool_name($d):
     ($d.args // {}) as $a
     | (($d.name // "unknown") | tostring) as $n
     | if ($n == "mcp" or $n == "mcpToolCall" or $n == "mcp_tool_call")
          and (($a.toolName // $a.name // null) != null)
-      then "mcp__\($a.serverIdentifier // $a.providerIdentifier // $a.server // "mcp")__\($a.toolName // $a.name)"
+      then "mcp__\($a.server // $a.serverIdentifier // $a.providerIdentifier // "mcp")__\($a.toolName // $a.name)"
       else $n end;'
 extract() {
   local f="$1"
@@ -146,18 +175,21 @@ extract() {
       | (.args // {}) as $a
       | cloud_tool_name(.) as $name
       | select($name | '"$TOOL_FILTER"')
-      | (if ($name != (.name // "unknown")) and (($a.args? | type) == "object")
-         then $a.args else $a end) as $input
+      | (if $name != (.name // "unknown") then
+           (if ($a.arguments? | type) == "object" then $a.arguments
+            elif ($a.args? | type) == "object" then $a.args
+            else $a end)
+         else $a end) as $input
       | if $names == 1 then {tool: $name}
         else {id: (.callId // null), tool: $name, input: $input} end
     ' "$f"
   elif [[ "$AGENT" == "cursor" ]]; then
-    jq -c --argjson names "$NAMES_ONLY" "$CURSOR_TOOL_NAME_JQ"'
-      select(.type=="tool_call" and .subtype=="started" and (.tool_call|type=="object"))
+    jq -c -n --argjson names "$NAMES_ONLY" "$CURSOR_TOOL_NAME_JQ"'
+      [inputs] | cursor_calls | .[]
       | (.tool_call | to_entries[0]) as $t
       | ($t.value.args // {}) as $a
       | cursor_tool_name($t) as $name
-      | (if $t.key == "mcpToolCall" then ($a.args // {}) else $a end) as $input
+      | (if $t.key == "mcpToolCall" then ($a.args // $a.arguments // {}) else $a end) as $input
       | select($name | '"$TOOL_FILTER"')
       | if $names == 1 then {tool: $name}
         else {id: (.call_id // null), tool: $name, input: $input} end
@@ -278,8 +310,8 @@ metrics() {
     # mcp__<server>__<tool>), so metrics and tool listings agree.
     jq -nr "$CURSOR_TOOL_NAME_JQ"'
       [inputs | select(type=="object")] as $all
-      | ($all | map(select(.type=="tool_call" and .subtype=="started" and (.tool_call|type=="object"))
-                    | (.tool_call | to_entries[0]) as $t | cursor_tool_name($t))) as $tools
+      | ($all | cursor_calls
+              | map((.tool_call | to_entries[0]) as $t | cursor_tool_name($t))) as $tools
       | ($all | map(select(.type=="result")) | last) as $res
       | ($all | map(select(.type=="system" and .subtype=="init")) | first) as $init
       | {
