@@ -505,7 +505,8 @@ run_entry() {
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
     fi
-    local EVAL_ELAPSED; EVAL_ELAPSED=$(fmt_elapsed $(( $(date +%s) - EVAL_START )))
+    local EVAL_ELAPSED_SECS=$(( $(date +%s) - EVAL_START ))
+    local EVAL_ELAPSED; EVAL_ELAPSED=$(fmt_elapsed "$EVAL_ELAPSED_SECS")
     echo "*** [$ENTRY_ID] EVAL ELAPSED: $EVAL_ELAPSED  SESSION_ID: $SESSION_ID"
     echo "*** [$ENTRY_ID] TRANSCRIPT: $TRANSCRIPT"
 
@@ -519,6 +520,40 @@ run_entry() {
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE" || true
     echo "--- :bar_chart: [$ENTRY_ID] session metrics"
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE" || true
+
+    # --- Goal outcome ---------------------------------------------------------
+    # Scenario-shaped: entries whose setup pushed a scenario branch
+    # (SCENARIO_BRANCH in the vars file; last value wins, matching
+    # render_prompt) achieved their goal when that branch's LATEST build in the
+    # eval org is green — the red->green contract. Entries without a branch
+    # (e.g. analyze-build) have no machine-checkable goal and stay "unknown";
+    # so does an API failure or a branch with no builds, so a Datadog gap
+    # never miscounts as a miss.
+    local GOAL_ACHIEVED="unknown" SCENARIO_BRANCH_VAL="" FINAL_BUILD_STATE=""
+    SCENARIO_BRANCH_VAL="$(awk -F= '$1 == "SCENARIO_BRANCH" { v = substr($0, index($0, "=") + 1) } END { print v }' "$VARS_FILE")"
+    if [[ -n "$SCENARIO_BRANCH_VAL" ]]; then
+        FINAL_BUILD_STATE="$(curl -fsS --max-time 30 \
+            -H "Authorization: Bearer $ENTRY_TOKEN" \
+            "https://api.buildkite.com/v2/organizations/$ORG_SLUG/pipelines/$PIPELINE_SLUG/builds?branch=$SCENARIO_BRANCH_VAL&per_page=1" \
+            | jq -r '.[0].state // "none"' || echo "unknown")"
+        case "$FINAL_BUILD_STATE" in
+            passed)       GOAL_ACHIEVED="true" ;;
+            unknown|none) GOAL_ACHIEVED="unknown" ;;
+            *)            GOAL_ACHIEVED="false" ;;
+        esac
+        echo "*** [$ENTRY_ID] scenario branch '$SCENARIO_BRANCH_VAL' latest build state: $FINAL_BUILD_STATE (goal_achieved: $GOAL_ACHIEVED)"
+    fi
+
+    # --- Publish run metrics to Datadog (best-effort) ------------------------
+    # Skips loudly when DD_API_KEY is unset (local runs, forks). Klaren's own
+    # runtime is deliberately excluded: EVAL_DURATION_SECONDS measures the
+    # agent under test, not the judge.
+    echo "--- :datadog: [$ENTRY_ID] datadog metrics"
+    ENTRY_ID="$ENTRY_ID" PROMPT_NAME="$PROMPT_NAME" AGENT="$AGENT" MODEL="${MODEL:-default}" \
+    GOAL_ACHIEVED="$GOAL_ACHIEVED" EVAL_DURATION_SECONDS="$EVAL_ELAPSED_SECS" \
+    METRICS_FILE="$AUDIT_METRICS_FILE" \
+        "$SCRIPT_DIR/dd-metrics.sh" \
+        || echo "WARNING: datadog publish failed for '$ENTRY_ID'" >&2
 
     # --- Klaren review (best-effort) ---------------------------------------
     # Klaren always runs on claude regardless of the entry's agent: it is the

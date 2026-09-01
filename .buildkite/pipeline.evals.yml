@@ -14,6 +14,8 @@ env:
   # token (this org, used by bk-eval-compare.sh).
   EVAL_ORG_SLUG: "anothertest"
   EVAL_PIPELINE_SLUG: "buildkite-mcp-server"
+  # Datadog site for dd-metrics.sh (the API key comes from secrets below).
+  DD_SITE: "datadoghq.com"
 
 # PR CI (lint/test) and the generator step run here. The bork PR builds the eval
 # waits on also run on this queue.
@@ -63,6 +65,12 @@ steps:
             # to the commit under review (mcp_version: source). Interpolated
             # at pipeline-upload time, when BUILDKITE_COMMIT is this commit.
             - MCP_SRC_SHA=${BUILDKITE_COMMIT}
+            # Per-entry run metrics -> Datadog (evals/scripts/dd-metrics.sh).
+            # Publishing skips loudly when DD_API_KEY is empty; the build
+            # number becomes a buildkite_build tag on every series.
+            - DD_API_KEY
+            - DD_SITE
+            - BUILDKITE_BUILD_NUMBER
             - BUILDKITE_ORGANIZATION_SLUG
             - BUILDKITE_PIPELINE_SLUG
             - BUILDKITE_MCP_SERVER_VERSION
@@ -97,3 +105,7 @@ steps:
       # Cursor CLI API key (generate in the Cursor Dashboard). Maps into
       # the CURSOR_API_KEY env line above.
       CURSOR_API_KEY: MCP_EVAL_FRAMEWORK_CURSOR_API_KEY
+      # Datadog API key for dd-metrics.sh. NOTE: the secret must exist in the
+      # cluster before this mapping ships, or the step fails at secret
+      # resolution (create it even with an empty value to disable publishing).
+      DD_API_KEY: MCP_EVAL_FRAMEWORK_DATADOG_API_KEY
