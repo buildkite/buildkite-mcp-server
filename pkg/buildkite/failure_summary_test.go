@@ -613,6 +613,63 @@ func TestGetBuildFailureSummaryHonorsContentLimitBytesArg(t *testing.T) {
 		require.True(t, summary.ContentTruncated)
 	})
 
+	t.Run("trims log tails semantically before the generic limiter", func(t *testing.T) {
+		lines := make([]string, 60)
+		for i := range lines {
+			lines[i] = fmt.Sprintf("line-%02d %s", i, strings.Repeat("x", 200))
+		}
+		logPath := t.TempDir() + "/failed.parquet"
+		writeTestParquetFile(t, logPath, lines)
+		logsClient := &MockBuildkiteLogsClient{
+			NewReaderFunc: func(_ context.Context, _, _, _, _ string, _ time.Duration, _ bool) (*buildkitelogs.ParquetReader, error) {
+				return buildkitelogs.NewParquetReader(logPath), nil
+			},
+		}
+		logCtx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient: &MockBuildsClient{
+				GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+					return buildkite.Build{ID: "build-id", Number: 1, State: "failed"}, &buildkite.Response{}, nil
+				},
+			},
+			JobsClient: &MockJobsClient{
+				ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+					if options.State[0] == "failed" {
+						return buildkite.JobsList{Items: []buildkite.Job{{ID: "job-id", State: "failed"}}}, &buildkite.Response{}, nil
+					}
+					return buildkite.JobsList{}, &buildkite.Response{}, nil
+				},
+			},
+			BuildkiteLogsClient: logsClient,
+		})
+
+		requested := 6 * 1024
+		include := false
+		callResult, _, err := handler(logCtx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+			OrgSlug:            "org",
+			PipelineSlug:       "pipeline",
+			BuildNumber:        "1",
+			ContentLimitBytes:  requested,
+			IncludeAnnotations: &include,
+			IncludeFailedTests: &include,
+		})
+
+		require.NoError(t, err)
+		require.False(t, callResult.IsError)
+		text := getTextResult(t, callResult).Text
+		require.LessOrEqual(t, len(text), requested)
+
+		var summary BuildFailureSummary
+		require.NoError(t, json.Unmarshal([]byte(text), &summary))
+		require.Len(t, summary.Jobs, 1)
+		job := summary.Jobs[0]
+		require.NotEmpty(t, job.LogTail)
+		require.Positive(t, job.LogEntriesOmitted)
+		require.True(t, job.LogTruncated)
+		// The semantic trim keeps the newest lines, so the final fetched line
+		// must survive.
+		require.Contains(t, job.LogTail[len(job.LogTail)-1].C, "line-59")
+	})
+
 	t.Run("clamps values above the server maximum", func(t *testing.T) {
 		callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 			OrgSlug:           "org",

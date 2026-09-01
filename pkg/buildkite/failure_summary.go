@@ -877,7 +877,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			}
 
 			applyFailureSummaryContentLimits(&result)
-			if err := limitFailureSummaryLogCollections(&result, failureSummaryContentByteLimit); err != nil {
+			if err := limitFailureSummaryLogCollections(&result, contentLimit); err != nil {
 				return utils.NewToolResultError(fmt.Sprintf("failed to limit failure summary logs: %v", err)), nil, nil
 			}
 
