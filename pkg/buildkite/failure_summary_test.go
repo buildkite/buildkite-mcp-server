@@ -670,6 +670,61 @@ func TestGetBuildFailureSummaryHonorsContentLimitBytesArg(t *testing.T) {
 		require.Contains(t, job.LogTail[len(job.LogTail)-1].C, "line-59")
 	})
 
+	t.Run("trims failed-test collections semantically instead of erroring", func(t *testing.T) {
+		runs := make([]buildkite.TestEngineRun, 4)
+		for i := range runs {
+			runs[i] = buildkite.TestEngineRun{
+				ID:    fmt.Sprintf("run-%d", i+1),
+				Suite: buildkite.TestEngineSuite{Slug: fmt.Sprintf("suite-%d", i+1)},
+			}
+		}
+		testCtx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient: &MockBuildsClient{
+				GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+					return buildkite.Build{Number: 1, State: "failed", TestEngine: &buildkite.TestEngineProperty{Runs: runs}}, &buildkite.Response{}, nil
+				},
+			},
+			JobsClient: &MockJobsClient{
+				ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+					return buildkite.JobsList{}, &buildkite.Response{}, nil
+				},
+			},
+			TestExecutionsClient: &MockTestExecutionsClient{
+				GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, options *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+					executions := make([]buildkite.FailedExecution, options.PerPage)
+					for i := range executions {
+						executions[i] = buildkite.FailedExecution{
+							ExecutionID:   fmt.Sprintf("%s-execution-%d", runID, i+1),
+							TestName:      fmt.Sprintf("test %d", i+1),
+							FailureReason: "expected true to be false",
+						}
+					}
+					return executions, &buildkite.Response{}, nil
+				},
+			},
+		})
+
+		requested := 8 * 1024
+		include := false
+		callResult, _, err := handler(testCtx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+			OrgSlug:            "org",
+			PipelineSlug:       "pipeline",
+			BuildNumber:        "1",
+			ContentLimitBytes:  requested,
+			IncludeAnnotations: &include,
+		})
+
+		require.NoError(t, err)
+		require.False(t, callResult.IsError)
+		text := getTextResult(t, callResult).Text
+		require.LessOrEqual(t, len(text), requested)
+
+		var summary BuildFailureSummary
+		require.NoError(t, json.Unmarshal([]byte(text), &summary))
+		require.True(t, summary.FailedTestsTruncated)
+		require.True(t, summary.ContentTruncated)
+	})
+
 	t.Run("clamps values above the server maximum", func(t *testing.T) {
 		callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 			OrgSlug:           "org",
@@ -1096,7 +1151,7 @@ func TestLimitFailureSummaryLogCollectionsRetainsNewestRowsAndUpdatesMetadata(t 
 		require.Len(t, job.LogTail, entriesPerJob)
 	}
 
-	require.NoError(t, limitFailureSummaryLogCollections(&result, failureSummaryContentByteLimit))
+	require.NoError(t, limitFailureSummaryCollections(&result, failureSummaryContentByteLimit))
 	payload, err := marshalFailureSummaryWithContentBytes(&result)
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(payload), failureSummaryContentByteLimit)

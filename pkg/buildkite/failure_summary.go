@@ -682,28 +682,57 @@ func marshalFailureSummaryWithContentBytes(result *BuildFailureSummary) ([]byte,
 	}
 }
 
-func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) error {
-	payload, err := marshalFailureSummaryWithContentBytes(result)
-	if err != nil {
-		return err
+// failureSummaryWithExecutionLimit returns a copy of the summary where every
+// test run keeps at most its first perRunLimit failed executions.
+func failureSummaryWithExecutionLimit(result *BuildFailureSummary, perRunLimit int) BuildFailureSummary {
+	limited := *result
+	limited.TestRuns = append([]FailureSummaryTestRun(nil), result.TestRuns...)
+	for i := range limited.TestRuns {
+		executions := result.TestRuns[i].FailedExecutions
+		if len(executions) <= perRunLimit {
+			continue
+		}
+
+		limited.TestRuns[i].FailedExecutions = executions[:perRunLimit]
+		limited.TestRuns[i].Truncated = true
+		limited.FailedTestsTruncated = true
+		limited.ContentTruncated = true
 	}
-	if len(payload) <= limit {
-		return nil
+	return limited
+}
+
+// failureSummaryWithAnnotationLimit returns a copy of the summary keeping at
+// most the first maxAnnotations annotations (the API returns them in priority
+// order).
+func failureSummaryWithAnnotationLimit(result *BuildFailureSummary, maxAnnotations int) BuildFailureSummary {
+	limited := *result
+	if len(result.Annotations) <= maxAnnotations {
+		return limited
 	}
 
-	maxEntries := 0
-	for _, job := range result.Jobs {
-		maxEntries = max(maxEntries, len(job.LogTail))
-	}
+	limited.Annotations = append([]FailureSummaryAnnotation(nil), result.Annotations[:maxAnnotations]...)
+	limited.AnnotationsTruncated = true
+	limited.ContentTruncated = true
+	return limited
+}
+
+// shrinkFailureSummaryToFit binary-searches the largest per-collection entry
+// count whose serialized payload fits limit and replaces *result with that
+// candidate (or the zero-entry candidate when nothing fits, so later
+// reduction passes start from the smallest form). Entry counts map
+// monotonically to payload size but not arithmetically — JSON escaping,
+// conditional truncation metadata, and the self-referential content_bytes
+// field all shift the size — so each candidate is marshaled and measured.
+func shrinkFailureSummaryToFit(result *BuildFailureSummary, limit, maxEntries int, withLimit func(*BuildFailureSummary, int) BuildFailureSummary) error {
 	if maxEntries == 0 {
 		return nil
 	}
 
-	best := failureSummaryWithLogEntryLimit(result, 0)
+	best := withLimit(result, 0)
 	low, high := 0, maxEntries
 	for low <= high {
 		mid := low + (high-low)/2
-		candidate := failureSummaryWithLogEntryLimit(result, mid)
+		candidate := withLimit(result, mid)
 		candidatePayload, candidateErr := marshalFailureSummaryWithContentBytes(&candidate)
 		if candidateErr != nil {
 			return candidateErr
@@ -717,6 +746,58 @@ func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) e
 	}
 
 	*result = best
+	return nil
+}
+
+// limitFailureSummaryCollections reduces the summary's semantic collections
+// until the serialized payload fits limit, sacrificing the least diagnostic
+// value first: per-job log tails (newest lines kept), then failed test
+// executions per run, then annotations. The generic payload limiter that runs
+// afterwards only shortens strings — it never drops array items — so any
+// item-count reduction must happen here.
+func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) error {
+	reductions := []struct {
+		maxEntries func(*BuildFailureSummary) int
+		withLimit  func(*BuildFailureSummary, int) BuildFailureSummary
+	}{
+		{
+			maxEntries: func(r *BuildFailureSummary) int {
+				entries := 0
+				for _, job := range r.Jobs {
+					entries = max(entries, len(job.LogTail))
+				}
+				return entries
+			},
+			withLimit: failureSummaryWithLogEntryLimit,
+		},
+		{
+			maxEntries: func(r *BuildFailureSummary) int {
+				entries := 0
+				for _, run := range r.TestRuns {
+					entries = max(entries, len(run.FailedExecutions))
+				}
+				return entries
+			},
+			withLimit: failureSummaryWithExecutionLimit,
+		},
+		{
+			maxEntries: func(r *BuildFailureSummary) int { return len(r.Annotations) },
+			withLimit:  failureSummaryWithAnnotationLimit,
+		},
+	}
+
+	for _, reduction := range reductions {
+		payload, err := marshalFailureSummaryWithContentBytes(result)
+		if err != nil {
+			return err
+		}
+		if len(payload) <= limit {
+			return nil
+		}
+		if err := shrinkFailureSummaryToFit(result, limit, reduction.maxEntries(result), reduction.withLimit); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -877,7 +958,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			}
 
 			applyFailureSummaryContentLimits(&result)
-			if err := limitFailureSummaryLogCollections(&result, contentLimit); err != nil {
+			if err := limitFailureSummaryCollections(&result, contentLimit); err != nil {
 				return utils.NewToolResultError(fmt.Sprintf("failed to limit failure summary logs: %v", err)), nil, nil
 			}
 
