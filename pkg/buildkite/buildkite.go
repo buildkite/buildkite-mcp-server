@@ -110,6 +110,35 @@ func mcpSanitizedTextResult(span trace.Span, sanitized []byte) (*mcp.CallToolRes
 	return utils.NewToolResultText(string(sanitized)), nil, nil
 }
 
+// payloadStructureBytes reports the serialized size of the payload with every
+// string emptied and the truncation metadata limitSanitizedJSONPayload would
+// add — the smallest size the generic limiter can reach without dropping
+// array items. When this floor exceeds the limit, the generic limiter fails,
+// so semantic item-count reduction is needed exactly then and only then.
+func payloadStructureBytes(payload []byte, limit int) (int, error) {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return 0, fmt.Errorf("decode sanitized JSON: %w", err)
+	}
+
+	root, ok := value.(map[string]any)
+	if !ok {
+		return 0, fmt.Errorf("expected a JSON object")
+	}
+	if _, ok := root["content_limit_bytes"]; ok {
+		root["content_limit_bytes"] = limit
+	}
+	root["content_truncated"] = true
+
+	structure, err := marshalLimitedJSON(root, 0)
+	if err != nil {
+		return 0, err
+	}
+	return len(structure), nil
+}
+
 func limitSanitizedJSONPayload(payload []byte, limit int) ([]byte, error) {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.UseNumber()

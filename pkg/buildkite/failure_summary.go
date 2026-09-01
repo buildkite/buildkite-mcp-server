@@ -716,14 +716,37 @@ func failureSummaryWithAnnotationLimit(result *BuildFailureSummary, maxAnnotatio
 	return limited
 }
 
+// failureSummaryPayloadBytes measures a candidate by its full serialized
+// size — the budget the per-job log trim targets.
+func failureSummaryPayloadBytes(result *BuildFailureSummary, _ int) (int, error) {
+	payload, err := marshalFailureSummaryWithContentBytes(result)
+	if err != nil {
+		return 0, err
+	}
+	return len(payload), nil
+}
+
+// failureSummaryStructureBytes measures a candidate by its strings-emptied
+// floor — the smallest size the generic limiter can reach without dropping
+// array items. Item-bearing collections only need reducing while this floor
+// exceeds the limit; string overage is the generic limiter's job, and
+// dropping items for it would discard diagnostics the limiter could keep.
+func failureSummaryStructureBytes(result *BuildFailureSummary, limit int) (int, error) {
+	payload, err := marshalFailureSummaryWithContentBytes(result)
+	if err != nil {
+		return 0, err
+	}
+	return payloadStructureBytes(payload, limit)
+}
+
 // shrinkFailureSummaryToFit binary-searches the largest per-collection entry
-// count whose serialized payload fits limit and replaces *result with that
+// count whose measured size fits limit and replaces *result with that
 // candidate (or the zero-entry candidate when nothing fits, so later
 // reduction passes start from the smallest form). Entry counts map
-// monotonically to payload size but not arithmetically — JSON escaping,
-// conditional truncation metadata, and the self-referential content_bytes
-// field all shift the size — so each candidate is marshaled and measured.
-func shrinkFailureSummaryToFit(result *BuildFailureSummary, limit, maxEntries int, withLimit func(*BuildFailureSummary, int) BuildFailureSummary) error {
+// monotonically to size but not arithmetically — JSON escaping, conditional
+// truncation metadata, and the self-referential content_bytes field all
+// shift it — so each candidate is marshaled and measured.
+func shrinkFailureSummaryToFit(result *BuildFailureSummary, limit, maxEntries int, withLimit func(*BuildFailureSummary, int) BuildFailureSummary, measure func(*BuildFailureSummary, int) (int, error)) error {
 	if maxEntries == 0 {
 		return nil
 	}
@@ -733,11 +756,11 @@ func shrinkFailureSummaryToFit(result *BuildFailureSummary, limit, maxEntries in
 	for low <= high {
 		mid := low + (high-low)/2
 		candidate := withLimit(result, mid)
-		candidatePayload, candidateErr := marshalFailureSummaryWithContentBytes(&candidate)
-		if candidateErr != nil {
-			return candidateErr
+		size, err := measure(&candidate, limit)
+		if err != nil {
+			return err
 		}
-		if len(candidatePayload) <= limit {
+		if size <= limit {
 			best = candidate
 			low = mid + 1
 		} else {
@@ -750,26 +773,34 @@ func shrinkFailureSummaryToFit(result *BuildFailureSummary, limit, maxEntries in
 }
 
 // limitFailureSummaryCollections reduces the summary's semantic collections
-// until the serialized payload fits limit, sacrificing the least diagnostic
-// value first: per-job log tails (newest lines kept), then failed test
-// executions per run, then annotations. The generic payload limiter that runs
-// afterwards only shortens strings — it never drops array items — so any
-// item-count reduction must happen here.
+// so the generic payload limiter that runs afterwards can fit the limit by
+// shortening strings alone — it never drops array items. Per-job log tails
+// are trimmed against the full serialized size (newest lines kept, the
+// long-standing behavior). Failed test executions and annotations are only
+// reduced while the strings-emptied structure floor exceeds the limit — the
+// exact condition under which the generic limiter would fail — so a payload
+// oversized by string content alone keeps its default collection membership.
 func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) error {
-	reductions := []struct {
+	size, err := failureSummaryPayloadBytes(result, limit)
+	if err != nil {
+		return err
+	}
+	if size <= limit {
+		return nil
+	}
+
+	logEntries := 0
+	for _, job := range result.Jobs {
+		logEntries = max(logEntries, len(job.LogTail))
+	}
+	if err := shrinkFailureSummaryToFit(result, limit, logEntries, failureSummaryWithLogEntryLimit, failureSummaryPayloadBytes); err != nil {
+		return err
+	}
+
+	structureReductions := []struct {
 		maxEntries func(*BuildFailureSummary) int
 		withLimit  func(*BuildFailureSummary, int) BuildFailureSummary
 	}{
-		{
-			maxEntries: func(r *BuildFailureSummary) int {
-				entries := 0
-				for _, job := range r.Jobs {
-					entries = max(entries, len(job.LogTail))
-				}
-				return entries
-			},
-			withLimit: failureSummaryWithLogEntryLimit,
-		},
 		{
 			maxEntries: func(r *BuildFailureSummary) int {
 				entries := 0
@@ -786,15 +817,15 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 		},
 	}
 
-	for _, reduction := range reductions {
-		payload, err := marshalFailureSummaryWithContentBytes(result)
+	for _, reduction := range structureReductions {
+		floor, err := failureSummaryStructureBytes(result, limit)
 		if err != nil {
 			return err
 		}
-		if len(payload) <= limit {
+		if floor <= limit {
 			return nil
 		}
-		if err := shrinkFailureSummaryToFit(result, limit, reduction.maxEntries(result), reduction.withLimit); err != nil {
+		if err := shrinkFailureSummaryToFit(result, limit, reduction.maxEntries(result), reduction.withLimit, failureSummaryStructureBytes); err != nil {
 			return err
 		}
 	}
