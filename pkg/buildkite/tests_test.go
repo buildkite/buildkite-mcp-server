@@ -270,14 +270,25 @@ func TestListTestsReturnsAPIError(t *testing.T) {
 func TestGetTest(t *testing.T) {
 	assert := require.New(t)
 
+	reliability := 0.97
+
 	client := &MockTestsClient{
 		GetFunc: func(ctx context.Context, org, slug, testID string, opt *buildkite.TestsGetOptions) (buildkite.TestWithMetrics, *buildkite.Response, error) {
+			assert.Equal("org", org)
+			assert.Equal("suite1", slug)
+			assert.Equal("test-123", testID)
+			assert.Equal(&buildkite.TestsGetOptions{}, opt)
+
 			return buildkite.TestWithMetrics{
 					Test: buildkite.Test{
 						ID:       "test-123",
 						Name:     "Example Test",
 						Location: "spec/example_test.rb",
 					},
+					Reliability:             &reliability,
+					DurationAverage:         1.5,
+					ExecutionsCount:         100,
+					ExecutionsCountByResult: map[string]int{"passed": 97, "failed": 3},
 				}, &buildkite.Response{
 					Response: &http.Response{
 						StatusCode: 200,
@@ -289,14 +300,16 @@ func TestGetTest(t *testing.T) {
 
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestsClient: client})
 
-	tool, handler, _ := GetTest()
+	tool, handler, scopes := GetTest()
 	assert.NotNil(tool)
 	assert.NotNil(handler)
 
 	// Test the tool definition
 	assert.Equal("get_test", tool.Name)
 	assert.Contains(tool.Description, "specific test")
+	assert.Contains(tool.Description, "metrics")
 	assert.True(tool.Annotations.ReadOnlyHint)
+	assert.Equal([]string{"read_suites"}, scopes)
 
 	// Test successful request
 	request := createMCPRequest(t, map[string]any{})
@@ -308,7 +321,100 @@ func TestGetTest(t *testing.T) {
 	assert.NoError(err)
 	assert.NotNil(result)
 
-	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, "test-123")
-	assert.Contains(textContent.Text, "Example Test")
+	var test buildkite.TestWithMetrics
+	assert.NoError(json.Unmarshal([]byte(getTextResult(t, result).Text), &test))
+	assert.Equal("test-123", test.ID)
+	assert.Equal("Example Test", test.Name)
+	assert.NotNil(test.Reliability)
+	assert.InDelta(reliability, *test.Reliability, 0.0001)
+	assert.InDelta(1.5, test.DurationAverage, 0.0001)
+	assert.Equal(100, test.ExecutionsCount)
+	assert.Equal(map[string]int{"passed": 97, "failed": 3}, test.ExecutionsCountByResult)
+}
+
+func TestGetTestWithTimeWindow(t *testing.T) {
+	minTimestamp := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	maxTimestamp := time.Date(2026, time.July, 8, 0, 0, 0, 0, time.UTC)
+
+	client := &MockTestsClient{
+		GetFunc: func(ctx context.Context, org, slug, testID string, opt *buildkite.TestsGetOptions) (buildkite.TestWithMetrics, *buildkite.Response, error) {
+			require.Equal(t, &buildkite.TestsGetOptions{
+				MinTimestamp: minTimestamp,
+				MaxTimestamp: maxTimestamp,
+			}, opt)
+
+			return buildkite.TestWithMetrics{Test: buildkite.Test{ID: "test-123"}}, &buildkite.Response{
+				Response: &http.Response{StatusCode: 200},
+			}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestsClient: client})
+	_, handler, _ := GetTest()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetTestArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		TestID:        "test-123",
+		MinTimestamp:  minTimestamp,
+		MaxTimestamp:  maxTimestamp,
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.Contains(t, getTextResult(t, result).Text, "test-123")
+}
+
+func TestGetTestWithPeriod(t *testing.T) {
+	client := &MockTestsClient{
+		GetFunc: func(ctx context.Context, org, slug, testID string, opt *buildkite.TestsGetOptions) (buildkite.TestWithMetrics, *buildkite.Response, error) {
+			require.Equal(t, &buildkite.TestsGetOptions{Period: "28days"}, opt)
+
+			return buildkite.TestWithMetrics{Test: buildkite.Test{ID: "test-123"}}, &buildkite.Response{
+				Response: &http.Response{StatusCode: 200},
+			}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestsClient: client})
+	_, handler, _ := GetTest()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetTestArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		TestID:        "test-123",
+		Period:        "28days",
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.Contains(t, getTextResult(t, result).Text, "test-123")
+}
+
+func TestGetTestPropagatesAPIError(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: 422,
+		Body:       io.NopCloser(strings.NewReader(`{"message":"period cannot be combined with min_timestamp"}`)),
+	}
+
+	client := &MockTestsClient{
+		GetFunc: func(ctx context.Context, org, slug, testID string, opt *buildkite.TestsGetOptions) (buildkite.TestWithMetrics, *buildkite.Response, error) {
+			return buildkite.TestWithMetrics{}, &buildkite.Response{Response: resp}, &buildkite.ErrorResponse{
+				Response: resp,
+				Message:  "period cannot be combined with min_timestamp",
+			}
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{TestsClient: client})
+	_, handler, _ := GetTest()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetTestArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite1",
+		TestID:        "test-123",
+		Period:        "7days",
+		MinTimestamp:  time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
+	})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, getTextResult(t, result).Text, "period cannot be combined with min_timestamp")
 }

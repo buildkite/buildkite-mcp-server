@@ -55,9 +55,12 @@ type ListTestsForBuildArgs struct {
 
 type GetTestArgs struct {
 	ToolInput
-	OrgSlug       string `json:"org_slug"`
-	TestSuiteSlug string `json:"test_suite_slug"`
-	TestID        string `json:"test_id"`
+	OrgSlug       string    `json:"org_slug"`
+	TestSuiteSlug string    `json:"test_suite_slug"`
+	TestID        string    `json:"test_id"`
+	Period        string    `json:"period,omitempty" jsonschema:"Relative aggregation window for the returned metrics, such as '7days' or '28days'. Whether selected by period or timestamps, the aggregation window cannot exceed the organization's maximum Test Engine window. Cannot be combined with min_timestamp or max_timestamp."`
+	MinTimestamp  time.Time `json:"min_timestamp,omitzero" jsonschema:"Start of the aggregation window in RFC3339 format. When omitted, defaults to the organization's default Test Engine period before the current time."`
+	MaxTimestamp  time.Time `json:"max_timestamp,omitzero" jsonschema:"End of the aggregation window in RFC3339 format. Defaults to the current time when omitted."`
 }
 
 func ListTests() (mcp.Tool, mcp.ToolHandlerFor[ListTestsArgs, any], []string) {
@@ -192,7 +195,7 @@ func ListTestsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListTestsForBuildArgs, an
 func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_test",
-			Description: "Get a specific test in Buildkite Test Engine. This provides additional metadata for failed test executions",
+			Description: "Get a specific test in Buildkite Test Engine, including execution metrics aggregated over a selected time window. This provides additional metadata for failed test executions.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Test",
 				ReadOnlyHint: true,
@@ -202,14 +205,28 @@ func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {
 			ctx, span := trace.Start(ctx, "buildkite.GetTest")
 			defer span.End()
 
-			span.SetAttributes(
+			options := &buildkite.TestsGetOptions{
+				Period:       args.Period,
+				MinTimestamp: args.MinTimestamp,
+				MaxTimestamp: args.MaxTimestamp,
+			}
+
+			attributes := []attribute.KeyValue{
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("test_suite_slug", args.TestSuiteSlug),
 				attribute.String("test_id", args.TestID),
-			)
+				attribute.String("period", args.Period),
+			}
+			if !args.MinTimestamp.IsZero() {
+				attributes = append(attributes, attribute.String("min_timestamp", args.MinTimestamp.Format(time.RFC3339)))
+			}
+			if !args.MaxTimestamp.IsZero() {
+				attributes = append(attributes, attribute.String("max_timestamp", args.MaxTimestamp.Format(time.RFC3339)))
+			}
+			span.SetAttributes(attributes...)
 
 			deps := DepsFromContext(ctx)
-			test, _, err := deps.TestsClient.Get(ctx, args.OrgSlug, args.TestSuiteSlug, args.TestID, nil)
+			test, _, err := deps.TestsClient.Get(ctx, args.OrgSlug, args.TestSuiteSlug, args.TestID, options)
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
