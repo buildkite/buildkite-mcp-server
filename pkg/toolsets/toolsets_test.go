@@ -677,6 +677,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	}
 	assert.Contains(toolNames, "list_tests")
 	assert.Contains(toolNames, "list_tests_for_build")
+	assert.Contains(toolNames, "list_test_suites_for_pipeline")
 }
 
 func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
