@@ -223,8 +223,19 @@ func TestGetArtifactArgsSchema(t *testing.T) {
 }
 
 func TestGetTestArgsSchema(t *testing.T) {
-	req := sortedRequired[GetTestArgs](t)
-	require.Equal(t, []string{"org_slug", "test_id", "test_suite_slug"}, req)
+	s := schemaFor[GetTestArgs](t)
+	require.Equal(t, []string{"org_slug", "test_id", "test_suite_slug"}, sortedRequired[GetTestArgs](t))
+
+	for _, property := range []string{"period", "min_timestamp", "max_timestamp"} {
+		require.Contains(t, s.Properties, property)
+		require.NotContains(t, s.Required, property, "%s should be optional", property)
+	}
+
+	require.Equal(t, "string", s.Properties["min_timestamp"].Type)
+	require.Equal(t, "string", s.Properties["max_timestamp"].Type)
+	require.Contains(t, s.Properties["min_timestamp"].Description, "RFC3339")
+	require.Contains(t, s.Properties["max_timestamp"].Description, "RFC3339")
+	require.Contains(t, s.Properties["period"].Description, "Cannot be combined")
 }
 
 func TestListTestsArgsSchema(t *testing.T) {
