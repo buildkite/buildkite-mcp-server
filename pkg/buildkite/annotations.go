@@ -67,7 +67,7 @@ func normalizeAnnotationScope(scope, jobID string) (string, error) {
 func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_annotations",
-			Description: "List annotations for a build or a specific job. Use scope='build' (default) or scope='job' with job_id",
+			Description: "List annotations for a build or a specific job. Use scope='build' (default) or scope='job' with job_id. Annotation content is in the body_html field; there is no body field",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Annotations",
 				ReadOnlyHint: true,

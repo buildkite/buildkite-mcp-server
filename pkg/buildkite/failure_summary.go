@@ -722,7 +722,7 @@ func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) e
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_build_failure_summary",
-			Description: "Diagnose a Buildkite build failure in one call. Returns build state, job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
+			Description: "Diagnose a Buildkite build failure in one call. Returns build state, job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Build Failure Summary",
 				ReadOnlyHint: true,
