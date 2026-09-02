@@ -8,6 +8,7 @@
     "group:allNonMajor"
   ],
   "labels": ["dependencies"],
+  "addLabels": ["buildsworth:manual"],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 2,
   "minimumReleaseAge": "3 days",
