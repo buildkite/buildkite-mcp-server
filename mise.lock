@@ -39,36 +39,43 @@ backend = "aqua:golangci/golangci-lint"
 [tools.golangci-lint."platforms.linux-arm64"]
 checksum = "sha256:44cd40a8c76c86755375adfeea52cfd3533cb43d7bd647771e0ae065e166df3a"
 url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/413470996"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-arm64-musl"]
 checksum = "sha256:44cd40a8c76c86755375adfeea52cfd3533cb43d7bd647771e0ae065e166df3a"
 url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-arm64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/413470996"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-x64"]
 checksum = "sha256:8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
 url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/413471054"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.linux-x64-musl"]
 checksum = "sha256:8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
 url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/413471054"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.macos-arm64"]
 checksum = "sha256:a9c54498731b3128f79e090be6110f3e5fffccc617b08142ed244d4126c73f29"
 url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-darwin-arm64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/413470950"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.macos-x64"]
 checksum = "sha256:f6f06d94b6241521c53d15450c5209b028270bf966f842afb11c030c79f5bc16"
 url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-darwin-amd64.tar.gz"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/413470980"
 provenance = "github-attestations"
 
 [tools.golangci-lint."platforms.windows-x64"]
 checksum = "sha256:bd42e3ebc8cb4ececb86941983baaf1dc221bbb04d838e94ce63b49cc91e02bb"
 url = "https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-windows-amd64.zip"
+url_api = "https://api.github.com/repos/golangci/golangci-lint/releases/assets/413471017"
 provenance = "github-attestations"
 
 [[tools.goreleaser]]
@@ -222,3 +229,35 @@ checksum = "sha256:df7fb73aca464e455f66ab231965cfb15aaea4ccd45be4af4f7df908fc407
 url = "https://github.com/evilmartians/lefthook/releases/download/v2.1.11/lefthook_2.1.11_Windows_x86_64.gz"
 url_api = "https://api.github.com/repos/evilmartians/lefthook/releases/assets/523446762"
 provenance = "github-attestations"
+
+[[tools.node]]
+version = "22.22.3"
+backend = "core:node"
+
+[tools.node."platforms.linux-arm64"]
+checksum = "sha256:cc8bc82b2dd0b595c3b95a4c3c9c8c350907cff011afbdee3d1379e812e1e3e3"
+url = "https://nodejs.org/dist/v22.22.3/node-v22.22.3-linux-arm64.tar.gz"
+
+[tools.node."platforms.linux-arm64-musl"]
+checksum = "sha256:09c87acbafae65e18fcc0eb188376c1254cab74dc769118f4b60479c5fa326cf"
+url = "https://unofficial-builds.nodejs.org/download/release/v22.22.3/node-v22.22.3-linux-arm64-musl.tar.gz"
+
+[tools.node."platforms.linux-x64"]
+checksum = "sha256:c7a10d6816da8eaaa7534dd73c71c6e2b2c391dbbf845e364902d156615dd1b8"
+url = "https://nodejs.org/dist/v22.22.3/node-v22.22.3-linux-x64.tar.gz"
+
+[tools.node."platforms.linux-x64-musl"]
+checksum = "sha256:d227692583d6ae17c44028fd8f17cb1b3672167a6baa035818240cbb9db6ea4a"
+url = "https://unofficial-builds.nodejs.org/download/release/v22.22.3/node-v22.22.3-linux-x64-musl.tar.gz"
+
+[tools.node."platforms.macos-arm64"]
+checksum = "sha256:0da7ff74ef8611328c8212f17943368713a2ad953fb7d89a8c8a0eae87c23207"
+url = "https://nodejs.org/dist/v22.22.3/node-v22.22.3-darwin-arm64.tar.gz"
+
+[tools.node."platforms.macos-x64"]
+checksum = "sha256:45830ba752fa0d892c6dcd640946669801293cac820a33591ded40ac075198ec"
+url = "https://nodejs.org/dist/v22.22.3/node-v22.22.3-darwin-x64.tar.gz"
+
+[tools.node."platforms.windows-x64"]
+checksum = "sha256:6c8d54f635feff4df76c2ca80f45332eb2ff57d25226edce36592e51a177ee33"
+url = "https://nodejs.org/dist/v22.22.3/node-v22.22.3-win-x64.zip"

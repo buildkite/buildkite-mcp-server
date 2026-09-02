@@ -4,8 +4,8 @@ pre-commit:
   parallel: true
   jobs:
     - name: lint
-      run: golangci-lint run
+      run: make lint
     - name: go mod tidy
-      run: go mod tidy -diff
+      run: make tidy-check
     - name: go fix
-      run: go fix -diff ./...
+      run: make fix-check
