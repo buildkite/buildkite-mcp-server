@@ -64,6 +64,7 @@ The primary commands are:
 | --- | --- |
 | `mise run setup` | Download Go modules and install the Git hooks |
 | `mise run check` | Run lint, module tidiness, Go fix, and tests |
+| `mise run lint-fix` | Run the linter and apply supported fixes |
 | `mise run build` | Build `./buildkite-mcp-server` |
 | `mise run run` | Run the server over stdio |
 

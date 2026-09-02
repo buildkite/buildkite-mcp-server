@@ -23,6 +23,10 @@ run = [
 description = "Run all local validation checks"
 run = "make check"
 
+[tasks.lint-fix]
+description = "Run the linter and apply supported fixes"
+run = "make lint-fix"
+
 [tasks.build]
 description = "Build the server binary"
 run = "make build"
