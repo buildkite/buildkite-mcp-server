@@ -25,7 +25,7 @@ run = "make check"
 
 [tasks.lint-fix]
 description = "Run the linter and apply supported fixes"
-run = "make lint-fix"
+run = "golangci-lint run --fix ./..."
 
 [tasks.build]
 description = "Build the server binary"
