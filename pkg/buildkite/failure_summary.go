@@ -834,69 +834,91 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "get_build_failure_summary",
-			Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Get Build Failure Summary",
-				ReadOnlyHint: true,
+		Name:        "get_build_failure_summary",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Build Failure Summary",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetBuildFailureSummaryArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetBuildFailureSummary")
+		defer span.End()
+
+		deps := DepsFromContext(ctx)
+		logTail := boundedValue(args.LogTail, defaultFailureSummaryLogTail, maxFailureSummaryLogTail)
+		maxJobs := boundedFailureSummaryJobs(args.MaxJobs, deps.FailureSummary.MaxJobs)
+		maxAnnotations := boundedValue(args.MaxAnnotations, defaultFailureSummaryAnnotations, maxFailureSummaryAnnotations)
+		maxTestRuns := boundedValue(args.MaxTestRuns, defaultFailureSummaryTestRuns, maxFailureSummaryTestRuns)
+		maxFailedTestsPerRun := boundedValue(args.MaxFailedTestsPerRun, defaultFailureSummaryTestsPerRun, maxFailureSummaryTestsPerRun)
+		maxFailedTests := boundedValue(args.MaxFailedTests, defaultFailureSummaryFailedTests, maxFailureSummaryFailedTests)
+		contentLimit := boundedValue(args.ContentLimitBytes, failureSummaryContentByteLimit, failureSummaryContentByteLimit)
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("build_number", args.BuildNumber),
+			attribute.Int("log_tail", logTail),
+			attribute.Int("max_jobs", maxJobs),
+			attribute.Int("max_test_runs", maxTestRuns),
+			attribute.Int("max_failed_tests", maxFailedTests),
+			attribute.Int("content_limit_bytes", contentLimit),
+			attribute.Bool("include_logs", defaultTrue(args.IncludeLogs)),
+			attribute.Bool("include_annotations", defaultTrue(args.IncludeAnnotations)),
+			attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
+		)
+
+		build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
+			BuildsListOptions: buildkite.BuildsListOptions{
+				ExcludeJobs:     true,
+				ExcludePipeline: true,
 			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args GetBuildFailureSummaryArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.GetBuildFailureSummary")
-			defer span.End()
+			IncludeTestEngine: true,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			deps := DepsFromContext(ctx)
-			logTail := boundedValue(args.LogTail, defaultFailureSummaryLogTail, maxFailureSummaryLogTail)
-			maxJobs := boundedFailureSummaryJobs(args.MaxJobs, deps.FailureSummary.MaxJobs)
-			maxAnnotations := boundedValue(args.MaxAnnotations, defaultFailureSummaryAnnotations, maxFailureSummaryAnnotations)
-			maxTestRuns := boundedValue(args.MaxTestRuns, defaultFailureSummaryTestRuns, maxFailureSummaryTestRuns)
-			maxFailedTestsPerRun := boundedValue(args.MaxFailedTestsPerRun, defaultFailureSummaryTestsPerRun, maxFailureSummaryTestsPerRun)
-			maxFailedTests := boundedValue(args.MaxFailedTests, defaultFailureSummaryFailedTests, maxFailureSummaryFailedTests)
-			contentLimit := boundedValue(args.ContentLimitBytes, failureSummaryContentByteLimit, failureSummaryContentByteLimit)
+		result := BuildFailureSummary{Build: failureSummaryBuild(build), JobLimit: maxJobs}
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("build_number", args.BuildNumber),
-				attribute.Int("log_tail", logTail),
-				attribute.Int("max_jobs", maxJobs),
-				attribute.Int("max_test_runs", maxTestRuns),
-				attribute.Int("max_failed_tests", maxFailedTests),
-				attribute.Int("content_limit_bytes", contentLimit),
-				attribute.Bool("include_logs", defaultTrue(args.IncludeLogs)),
-				attribute.Bool("include_annotations", defaultTrue(args.IncludeAnnotations)),
-				attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
-			)
+		includeRetriedJobs := false
+		primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+			// The API's failed filter includes running jobs with a hard promised
+			// failure. Querying running separately can include promises covered by
+			// soft-fail or retry rules that do not put the build into failing.
+			State:              []string{"failed", "timed_out", "expired"},
+			IncludeRetriedJobs: &includeRetriedJobs,
+			PerPage:            maxJobs + 1,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
-				BuildsListOptions: buildkite.BuildsListOptions{
-					ExcludeJobs:     true,
-					ExcludePipeline: true,
-				},
-				IncludeTestEngine: true,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
+		sourceJobs := make([]buildkite.Job, 0, maxJobs)
+		jobsTruncated := primaryJobsList.Links.Next != ""
+		for _, job := range primaryJobsList.Items {
+			if !isPrimaryFailureSummaryJob(job) {
+				continue
 			}
+			if len(sourceJobs) < maxJobs {
+				sourceJobs = append(sourceJobs, job)
+			} else {
+				jobsTruncated = true
+			}
+		}
 
-			result := BuildFailureSummary{Build: failureSummaryBuild(build), JobLimit: maxJobs}
-
-			includeRetriedJobs := false
-			primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				// The API's failed filter includes running jobs with a hard promised
-				// failure. Querying running separately can include promises covered by
-				// soft-fail or retry rules that do not put the build into failing.
-				State:              []string{"failed", "timed_out", "expired"},
+		remainingJobs := maxJobs - len(sourceJobs)
+		if remainingJobs > 0 || !jobsTruncated {
+			canceledJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              []string{"canceled"},
 				IncludeRetriedJobs: &includeRetriedJobs,
-				PerPage:            maxJobs + 1,
+				PerPage:            remainingJobs + 1,
 			})
-			if err != nil {
-				return handleBuildkiteError(err)
+			if listErr != nil {
+				return handleBuildkiteError(listErr)
 			}
-
-			sourceJobs := make([]buildkite.Job, 0, maxJobs)
-			jobsTruncated := primaryJobsList.Links.Next != ""
-			for _, job := range primaryJobsList.Items {
-				if !isPrimaryFailureSummaryJob(job) {
+			jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
+			for _, job := range canceledJobsList.Items {
+				if !isCanceledFailureSummaryJob(job) {
 					continue
 				}
 				if len(sourceJobs) < maxJobs {
@@ -905,100 +927,78 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 					jobsTruncated = true
 				}
 			}
+		}
 
-			remainingJobs := maxJobs - len(sourceJobs)
-			if remainingJobs > 0 || !jobsTruncated {
-				canceledJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-					State:              []string{"canceled"},
-					IncludeRetriedJobs: &includeRetriedJobs,
-					PerPage:            remainingJobs + 1,
-				})
-				if listErr != nil {
-					return handleBuildkiteError(listErr)
-				}
-				jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
-				for _, job := range canceledJobsList.Items {
-					if !isCanceledFailureSummaryJob(job) {
-						continue
-					}
-					if len(sourceJobs) < maxJobs {
-						sourceJobs = append(sourceJobs, job)
-					} else {
-						jobsTruncated = true
-					}
-				}
+		remainingJobs = maxJobs - len(sourceJobs)
+		if remainingJobs > 0 || !jobsTruncated {
+			downstreamJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
+				IncludeRetriedJobs: &includeRetriedJobs,
+				PerPage:            remainingJobs + 1,
+			})
+			if listErr != nil {
+				return handleBuildkiteError(listErr)
 			}
-
-			remainingJobs = maxJobs - len(sourceJobs)
-			if remainingJobs > 0 || !jobsTruncated {
-				downstreamJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-					State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
-					IncludeRetriedJobs: &includeRetriedJobs,
-					PerPage:            remainingJobs + 1,
-				})
-				if listErr != nil {
-					return handleBuildkiteError(listErr)
+			jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
+			for _, job := range downstreamJobsList.Items {
+				if !isDownstreamFailureSummaryJob(job) {
+					continue
 				}
-				jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
-				for _, job := range downstreamJobsList.Items {
-					if !isDownstreamFailureSummaryJob(job) {
-						continue
-					}
-					if len(sourceJobs) < maxJobs {
-						sourceJobs = append(sourceJobs, job)
-					} else {
-						jobsTruncated = true
-					}
+				if len(sourceJobs) < maxJobs {
+					sourceJobs = append(sourceJobs, job)
+				} else {
+					jobsTruncated = true
 				}
 			}
-			result.Jobs = make([]FailureSummaryJob, len(sourceJobs))
-			for i, job := range sourceJobs {
-				result.Jobs[i] = failureSummaryJob(job)
-			}
-			result.JobsTruncated = jobsTruncated
+		}
+		result.Jobs = make([]FailureSummaryJob, len(sourceJobs))
+		for i, job := range sourceJobs {
+			result.Jobs[i] = failureSummaryJob(job)
+		}
+		result.JobsTruncated = jobsTruncated
 
-			if defaultTrue(args.IncludeLogs) && deps.BuildkiteLogsClient != nil {
-				if err := loadFailureLogs(ctx, deps.BuildkiteLogsClient, args, sourceJobs, result.Jobs, logTail); err != nil {
-					return nil, nil, err
+		if defaultTrue(args.IncludeLogs) && deps.BuildkiteLogsClient != nil {
+			if err := loadFailureLogs(ctx, deps.BuildkiteLogsClient, args, sourceJobs, result.Jobs, logTail); err != nil {
+				return nil, nil, err
+			}
+		}
+
+		if defaultTrue(args.IncludeAnnotations) && deps.AnnotationsClient != nil {
+			result.Annotations, result.AnnotationsTruncated, err = loadFailureAnnotations(ctx, deps.AnnotationsClient, args, maxAnnotations)
+			if err != nil {
+				if isBuildkiteUnauthorized(err) {
+					return nil, nil, ErrUnauthorized
 				}
+				result.Warnings = append(result.Warnings, fmt.Sprintf("annotations unavailable after partial scan: %v", err))
 			}
+		}
 
-			if defaultTrue(args.IncludeAnnotations) && deps.AnnotationsClient != nil {
-				result.Annotations, result.AnnotationsTruncated, err = loadFailureAnnotations(ctx, deps.AnnotationsClient, args, maxAnnotations)
-				if err != nil {
-					if isBuildkiteUnauthorized(err) {
-						return nil, nil, ErrUnauthorized
-					}
-					result.Warnings = append(result.Warnings, fmt.Sprintf("annotations unavailable after partial scan: %v", err))
-				}
-			}
-
-			if defaultTrue(args.IncludeFailedTests) && deps.TestExecutionsClient != nil && build.TestEngine != nil {
-				result.TestRuns, result.TestRunsTruncated, result.FailedTestsTruncated, err = loadFailureTestRuns(
-					ctx,
-					deps.TestExecutionsClient,
-					args,
-					build.TestEngine.Runs,
-					maxTestRuns,
-					maxFailedTestsPerRun,
-					maxFailedTests,
-				)
-				if err != nil {
-					return nil, nil, err
-				}
-			}
-
-			applyFailureSummaryContentLimits(&result)
-			if err := limitFailureSummaryCollections(&result, contentLimit); err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("failed to limit failure summary logs: %v", err)), nil, nil
-			}
-
-			span.SetAttributes(
-				attribute.Int("failure_job_count", len(result.Jobs)),
-				attribute.Int("annotation_count", len(result.Annotations)),
-				attribute.Int("test_run_count", len(result.TestRuns)),
+		if defaultTrue(args.IncludeFailedTests) && deps.TestExecutionsClient != nil && build.TestEngine != nil {
+			result.TestRuns, result.TestRunsTruncated, result.FailedTestsTruncated, err = loadFailureTestRuns(
+				ctx,
+				deps.TestExecutionsClient,
+				args,
+				build.TestEngine.Runs,
+				maxTestRuns,
+				maxFailedTestsPerRun,
+				maxFailedTests,
 			)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 
-			return mcpTextResultWithByteLimit(span, &result, contentLimit)
-		}, []string{"read_builds", "read_build_logs", "read_suites"}
+		applyFailureSummaryContentLimits(&result)
+		if err := limitFailureSummaryCollections(&result, contentLimit); err != nil {
+			return utils.NewToolResultError(fmt.Sprintf("failed to limit failure summary logs: %v", err)), nil, nil
+		}
+
+		span.SetAttributes(
+			attribute.Int("failure_job_count", len(result.Jobs)),
+			attribute.Int("annotation_count", len(result.Annotations)),
+			attribute.Int("test_run_count", len(result.TestRuns)),
+		)
+
+		return mcpTextResultWithByteLimit(span, &result, contentLimit)
+	}, []string{"read_builds", "read_build_logs", "read_suites"}
 }

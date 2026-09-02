@@ -67,197 +67,197 @@ type ResumeClusterQueueDispatchArgs struct {
 
 func ListClusterQueues() (mcp.Tool, mcp.ToolHandlerFor[ListClusterQueuesArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "list_cluster_queues",
-			Description: "List all queues in a cluster with their keys, descriptions, dispatch status, and agent configuration",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "List Cluster Queues",
-				ReadOnlyHint: true,
+		Name:        "list_cluster_queues",
+		Description: "List all queues in a cluster with their keys, descriptions, dispatch status, and agent configuration",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "List Cluster Queues",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListClusterQueuesArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListClusterQueues")
+		defer span.End()
+
+		paginationParams := paginationFromArgs(args.Page, args.PerPage)
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("cluster_id", args.ClusterID),
+			attribute.Int("page", paginationParams.Page),
+			attribute.Int("per_page", paginationParams.PerPage),
+		)
+
+		deps := DepsFromContext(ctx)
+		queues, resp, err := deps.ClusterQueuesClient.List(ctx, args.OrgSlug, args.ClusterID, &buildkite.ClusterQueuesListOptions{
+			ListOptions: paginationParams,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+
+		result := PaginatedResult[buildkite.ClusterQueue]{
+			Items: queues,
+			Headers: map[string]string{
+				"Link": resp.Header.Get("Link"),
 			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListClusterQueuesArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ListClusterQueues")
-			defer span.End()
+		}
 
-			paginationParams := paginationFromArgs(args.Page, args.PerPage)
+		span.SetAttributes(
+			attribute.Int("item_count", len(queues)),
+		)
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("cluster_id", args.ClusterID),
-				attribute.Int("page", paginationParams.Page),
-				attribute.Int("per_page", paginationParams.PerPage),
-			)
-
-			deps := DepsFromContext(ctx)
-			queues, resp, err := deps.ClusterQueuesClient.List(ctx, args.OrgSlug, args.ClusterID, &buildkite.ClusterQueuesListOptions{
-				ListOptions: paginationParams,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
-
-			result := PaginatedResult[buildkite.ClusterQueue]{
-				Items: queues,
-				Headers: map[string]string{
-					"Link": resp.Header.Get("Link"),
-				},
-			}
-
-			span.SetAttributes(
-				attribute.Int("item_count", len(queues)),
-			)
-
-			return mcpTextResult(span, &result)
-		}, []string{"read_clusters"}
+		return mcpTextResult(span, &result)
+	}, []string{"read_clusters"}
 }
 
 func GetClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[GetClusterQueueArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "get_cluster_queue",
-			Description: "Get detailed information about a specific queue including its key, description, dispatch status, and hosted agent configuration",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Get Cluster Queue",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args GetClusterQueueArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.GetClusterQueue")
-			defer span.End()
+		Name:        "get_cluster_queue",
+		Description: "Get detailed information about a specific queue including its key, description, dispatch status, and hosted agent configuration",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Cluster Queue",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetClusterQueueArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetClusterQueue")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("cluster_id", args.ClusterID),
-				attribute.String("queue_id", args.QueueID),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("cluster_id", args.ClusterID),
+			attribute.String("queue_id", args.QueueID),
+		)
 
-			deps := DepsFromContext(ctx)
-			queue, _, err := deps.ClusterQueuesClient.Get(ctx, args.OrgSlug, args.ClusterID, args.QueueID)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		queue, _, err := deps.ClusterQueuesClient.Get(ctx, args.OrgSlug, args.ClusterID, args.QueueID)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &queue)
-		}, []string{"read_clusters"}
+		return mcpTextResult(span, &queue)
+	}, []string{"read_clusters"}
 }
 
 func CreateClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[CreateClusterQueueArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "create_cluster_queue",
-			Description: "Create a new queue in a cluster",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Create Cluster Queue",
-				DestructiveHint: boolPtr(false),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args CreateClusterQueueArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.CreateClusterQueue")
-			defer span.End()
+		Name:        "create_cluster_queue",
+		Description: "Create a new queue in a cluster",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Cluster Queue",
+			DestructiveHint: boolPtr(false),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args CreateClusterQueueArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.CreateClusterQueue")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("cluster_id", args.ClusterID),
-				attribute.String("key", args.Key),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("cluster_id", args.ClusterID),
+			attribute.String("key", args.Key),
+		)
 
-			deps := DepsFromContext(ctx)
-			queue, _, err := deps.ClusterQueuesClient.Create(ctx, args.OrgSlug, args.ClusterID, buildkite.ClusterQueueCreate{
-				Key:         args.Key,
-				Description: args.Description,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		queue, _, err := deps.ClusterQueuesClient.Create(ctx, args.OrgSlug, args.ClusterID, buildkite.ClusterQueueCreate{
+			Key:         args.Key,
+			Description: args.Description,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &queue)
-		}, []string{"write_clusters"}
+		return mcpTextResult(span, &queue)
+	}, []string{"write_clusters"}
 }
 
 func UpdateClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[UpdateClusterQueueArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "update_cluster_queue",
-			Description: "Update an existing cluster queue's description or retry agent affinity",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Update Cluster Queue",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdateClusterQueueArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.UpdateClusterQueue")
-			defer span.End()
+		Name:        "update_cluster_queue",
+		Description: "Update an existing cluster queue's description or retry agent affinity",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Update Cluster Queue",
+			DestructiveHint: boolPtr(true),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdateClusterQueueArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.UpdateClusterQueue")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("cluster_id", args.ClusterID),
-				attribute.String("queue_id", args.QueueID),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("cluster_id", args.ClusterID),
+			attribute.String("queue_id", args.QueueID),
+		)
 
-			deps := DepsFromContext(ctx)
-			update := buildkite.ClusterQueueUpdate{}
-			if args.Description != nil {
-				update.Description = buildkite.Some(*args.Description)
-			}
-			if args.RetryAgentAffinity != nil {
-				update.RetryAgentAffinity = buildkite.Some(buildkite.RetryAgentAffinity(*args.RetryAgentAffinity))
-			}
+		deps := DepsFromContext(ctx)
+		update := buildkite.ClusterQueueUpdate{}
+		if args.Description != nil {
+			update.Description = buildkite.Some(*args.Description)
+		}
+		if args.RetryAgentAffinity != nil {
+			update.RetryAgentAffinity = buildkite.Some(buildkite.RetryAgentAffinity(*args.RetryAgentAffinity))
+		}
 
-			queue, _, err := deps.ClusterQueuesClient.Update(ctx, args.OrgSlug, args.ClusterID, args.QueueID, update)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		queue, _, err := deps.ClusterQueuesClient.Update(ctx, args.OrgSlug, args.ClusterID, args.QueueID, update)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &queue)
-		}, []string{"write_clusters"}
+		return mcpTextResult(span, &queue)
+	}, []string{"write_clusters"}
 }
 
 func PauseClusterQueueDispatch() (mcp.Tool, mcp.ToolHandlerFor[PauseClusterQueueDispatchArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "pause_cluster_queue_dispatch",
-			Description: "Pause dispatch on a cluster queue, preventing new jobs from being dispatched to agents",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Pause Cluster Queue Dispatch",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args PauseClusterQueueDispatchArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.PauseClusterQueueDispatch")
-			defer span.End()
+		Name:        "pause_cluster_queue_dispatch",
+		Description: "Pause dispatch on a cluster queue, preventing new jobs from being dispatched to agents",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Pause Cluster Queue Dispatch",
+			DestructiveHint: boolPtr(true),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args PauseClusterQueueDispatchArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.PauseClusterQueueDispatch")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("cluster_id", args.ClusterID),
-				attribute.String("queue_id", args.QueueID),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("cluster_id", args.ClusterID),
+			attribute.String("queue_id", args.QueueID),
+		)
 
-			deps := DepsFromContext(ctx)
-			queue, _, err := deps.ClusterQueuesClient.Pause(ctx, args.OrgSlug, args.ClusterID, args.QueueID, buildkite.ClusterQueuePause{
-				Note: args.Note,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		queue, _, err := deps.ClusterQueuesClient.Pause(ctx, args.OrgSlug, args.ClusterID, args.QueueID, buildkite.ClusterQueuePause{
+			Note: args.Note,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &queue)
-		}, []string{"write_clusters"}
+		return mcpTextResult(span, &queue)
+	}, []string{"write_clusters"}
 }
 
 func ResumeClusterQueueDispatch() (mcp.Tool, mcp.ToolHandlerFor[ResumeClusterQueueDispatchArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "resume_cluster_queue_dispatch",
-			Description: "Resume dispatch on a paused cluster queue, allowing jobs to be dispatched to agents again",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Resume Cluster Queue Dispatch",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ResumeClusterQueueDispatchArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ResumeClusterQueueDispatch")
-			defer span.End()
+		Name:        "resume_cluster_queue_dispatch",
+		Description: "Resume dispatch on a paused cluster queue, allowing jobs to be dispatched to agents again",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Resume Cluster Queue Dispatch",
+			DestructiveHint: boolPtr(true),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ResumeClusterQueueDispatchArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ResumeClusterQueueDispatch")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("cluster_id", args.ClusterID),
-				attribute.String("queue_id", args.QueueID),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("cluster_id", args.ClusterID),
+			attribute.String("queue_id", args.QueueID),
+		)
 
-			deps := DepsFromContext(ctx)
-			_, err := deps.ClusterQueuesClient.Resume(ctx, args.OrgSlug, args.ClusterID, args.QueueID)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		_, err := deps.ClusterQueuesClient.Resume(ctx, args.OrgSlug, args.ClusterID, args.QueueID)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, "Cluster queue dispatch resumed successfully")
-		}, []string{"write_clusters"}
+		return mcpTextResult(span, "Cluster queue dispatch resumed successfully")
+	}, []string{"write_clusters"}
 }

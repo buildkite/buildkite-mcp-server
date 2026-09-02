@@ -40,67 +40,67 @@ type WebhookInfo struct {
 
 func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "list_pipelines",
-			Description: "List all pipelines in an organization with their basic details, build counts, and current status",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "List Pipelines",
-				ReadOnlyHint: true,
+		Name:        "list_pipelines",
+		Description: "List all pipelines in an organization with their basic details, build counts, and current status",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "List Pipelines",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListPipelinesArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListPipelines")
+		defer span.End()
+
+		// Set defaults
+		if args.DetailLevel == "" {
+			args.DetailLevel = "summary"
+		}
+		if args.Page == 0 {
+			args.Page = 1
+		}
+		if args.PerPage == 0 {
+			args.PerPage = 30
+		}
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("name_filter", args.Name),
+			attribute.String("repository_filter", args.Repository),
+			attribute.String("detail_level", args.DetailLevel),
+			attribute.Int("page", args.Page),
+			attribute.Int("per_page", args.PerPage),
+		)
+
+		deps := DepsFromContext(ctx)
+		pipelines, resp, err := deps.PipelinesClient.List(ctx, args.OrgSlug, &buildkite.PipelineListOptions{
+			ListOptions: buildkite.ListOptions{
+				Page:    args.Page,
+				PerPage: args.PerPage,
 			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListPipelinesArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ListPipelines")
-			defer span.End()
+			Name:       args.Name,
+			Repository: args.Repository,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			// Set defaults
-			if args.DetailLevel == "" {
-				args.DetailLevel = "summary"
-			}
-			if args.Page == 0 {
-				args.Page = 1
-			}
-			if args.PerPage == 0 {
-				args.PerPage = 30
-			}
+		headers := map[string]string{"Link": resp.Header.Get("Link")}
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("name_filter", args.Name),
-				attribute.String("repository_filter", args.Repository),
-				attribute.String("detail_level", args.DetailLevel),
-				attribute.Int("page", args.Page),
-				attribute.Int("per_page", args.PerPage),
-			)
+		var result any
+		switch args.DetailLevel {
+		case "summary":
+			result = createPaginatedResult(pipelines, summarizePipeline, headers)
+		case "detailed":
+			result = createPaginatedResult(pipelines, detailPipeline, headers)
+		default: // "full"
+			result = createPaginatedResult(pipelines, func(p buildkite.Pipeline) buildkite.Pipeline { return p }, headers)
+		}
 
-			deps := DepsFromContext(ctx)
-			pipelines, resp, err := deps.PipelinesClient.List(ctx, args.OrgSlug, &buildkite.PipelineListOptions{
-				ListOptions: buildkite.ListOptions{
-					Page:    args.Page,
-					PerPage: args.PerPage,
-				},
-				Name:       args.Name,
-				Repository: args.Repository,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		span.SetAttributes(
+			attribute.Int("item_count", len(pipelines)),
+		)
 
-			headers := map[string]string{"Link": resp.Header.Get("Link")}
-
-			var result any
-			switch args.DetailLevel {
-			case "summary":
-				result = createPaginatedResult(pipelines, summarizePipeline, headers)
-			case "detailed":
-				result = createPaginatedResult(pipelines, detailPipeline, headers)
-			default: // "full"
-				result = createPaginatedResult(pipelines, func(p buildkite.Pipeline) buildkite.Pipeline { return p }, headers)
-			}
-
-			span.SetAttributes(
-				attribute.Int("item_count", len(pipelines)),
-			)
-
-			return mcpTextResult(span, &result)
-		}, []string{"read_pipelines"}
+		return mcpTextResult(span, &result)
+	}, []string{"read_pipelines"}
 }
 
 type GetPipelineArgs struct {
@@ -338,57 +338,57 @@ type UpdatePipelineArgs struct {
 
 func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "update_pipeline",
-			Description: "Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Update Pipeline",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.UpdatePipeline")
-			defer span.End()
+		Name:        "update_pipeline",
+		Description: "Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Update Pipeline",
+			DestructiveHint: boolPtr(true),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.UpdatePipeline")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+		)
 
-			update := buildkite.UpdatePipeline{}
-			if args.Name != nil {
-				update.Name = buildkite.Some(*args.Name)
-			}
-			if args.RepositoryURL != nil {
-				span.SetAttributes(attribute.String("repository_url", *args.RepositoryURL))
-				update.Repository = buildkite.Some(*args.RepositoryURL)
-			}
-			if args.ClusterID != nil {
-				update.ClusterID = buildkite.Some(*args.ClusterID)
-			}
-			if args.Description != nil {
-				update.Description = buildkite.Some(*args.Description)
-			}
-			if args.Configuration != nil {
-				update.Configuration = buildkite.Some(*args.Configuration)
-			}
-			if args.DefaultBranch != nil {
-				update.DefaultBranch = buildkite.Some(*args.DefaultBranch)
-			}
-			if args.SkipQueuedBranchBuilds != nil {
-				update.SkipQueuedBranchBuilds = buildkite.Some(*args.SkipQueuedBranchBuilds)
-			}
-			if args.CancelRunningBranchBuilds != nil {
-				update.CancelRunningBranchBuilds = buildkite.Some(*args.CancelRunningBranchBuilds)
-			}
-			if args.Tags != nil {
-				update.Tags = buildkite.Some(args.Tags)
-			}
+		update := buildkite.UpdatePipeline{}
+		if args.Name != nil {
+			update.Name = buildkite.Some(*args.Name)
+		}
+		if args.RepositoryURL != nil {
+			span.SetAttributes(attribute.String("repository_url", *args.RepositoryURL))
+			update.Repository = buildkite.Some(*args.RepositoryURL)
+		}
+		if args.ClusterID != nil {
+			update.ClusterID = buildkite.Some(*args.ClusterID)
+		}
+		if args.Description != nil {
+			update.Description = buildkite.Some(*args.Description)
+		}
+		if args.Configuration != nil {
+			update.Configuration = buildkite.Some(*args.Configuration)
+		}
+		if args.DefaultBranch != nil {
+			update.DefaultBranch = buildkite.Some(*args.DefaultBranch)
+		}
+		if args.SkipQueuedBranchBuilds != nil {
+			update.SkipQueuedBranchBuilds = buildkite.Some(*args.SkipQueuedBranchBuilds)
+		}
+		if args.CancelRunningBranchBuilds != nil {
+			update.CancelRunningBranchBuilds = buildkite.Some(*args.CancelRunningBranchBuilds)
+		}
+		if args.Tags != nil {
+			update.Tags = buildkite.Some(args.Tags)
+		}
 
-			deps := DepsFromContext(ctx)
-			pipeline, _, err := deps.PipelinesClient.Update(ctx, args.OrgSlug, args.PipelineSlug, update)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		pipeline, _, err := deps.PipelinesClient.Update(ctx, args.OrgSlug, args.PipelineSlug, update)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &pipeline)
-		}, []string{"write_pipelines"}
+		return mcpTextResult(span, &pipeline)
+	}, []string{"write_pipelines"}
 }

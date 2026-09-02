@@ -46,17 +46,17 @@ func TestListAgents(t *testing.T) {
 			assert.Equal(50, opts.PerPage)
 
 			return []gobuildkite.Agent{{
-					ID:             "agent-id",
-					Name:           "agent-name",
-					ConnectedState: "connected",
-					Hostname:       "host-1",
-					Version:        "3.90.0",
-				}}, &gobuildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-						Header:     http.Header{"Link": []string{"<next>"}},
-					},
-				}, nil
+				ID:             "agent-id",
+				Name:           "agent-name",
+				ConnectedState: "connected",
+				Hostname:       "host-1",
+				Version:        "3.90.0",
+			}}, &gobuildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+					Header:     http.Header{"Link": []string{"<next>"}},
+				},
+			}, nil
 		},
 	}
 

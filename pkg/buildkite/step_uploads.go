@@ -39,71 +39,71 @@ type GetStepUploadArgs struct {
 // dynamic pipeline uploads.
 func ListStepUploads() (mcp.Tool, mcp.ToolHandlerFor[ListStepUploadsArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "list_step_uploads",
-			Description: "List the dynamic pipeline uploads (`buildkite-agent pipeline upload`) a build received, newest first, without their definitions. Each item includes state, the uploading job (source_job_id), created_jobs_count (omitted until applied, 0 when applied but no jobs were created), and rejection details. Use get_step_upload to read an upload's pipeline definition. Only available while the build is within its maximum lifetime (~30 days); older builds return 410 Gone",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "List Step Uploads",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListStepUploadsArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ListStepUploads")
-			defer span.End()
+		Name:        "list_step_uploads",
+		Description: "List the dynamic pipeline uploads (`buildkite-agent pipeline upload`) a build received, newest first, without their definitions. Each item includes state, the uploading job (source_job_id), created_jobs_count (omitted until applied, 0 when applied but no jobs were created), and rejection details. Use get_step_upload to read an upload's pipeline definition. Only available while the build is within its maximum lifetime (~30 days); older builds return 410 Gone",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "List Step Uploads",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListStepUploadsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListStepUploads")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("build_number", args.BuildNumber),
-				attribute.String("source_job_id", args.SourceJobID),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("build_number", args.BuildNumber),
+			attribute.String("source_job_id", args.SourceJobID),
+		)
 
-			deps := DepsFromContext(ctx)
+		deps := DepsFromContext(ctx)
 
-			uploads, _, err := deps.StepUploadsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.StepUploadsListOptions{
-				SourceJobID: args.SourceJobID,
-				PerPage:     args.PerPage,
-				After:       args.After,
-				Before:      args.Before,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		uploads, _, err := deps.StepUploadsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.StepUploadsListOptions{
+			SourceJobID: args.SourceJobID,
+			PerPage:     args.PerPage,
+			After:       args.After,
+			Before:      args.Before,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			span.SetAttributes(
-				attribute.Int("item_count", len(uploads.Items)),
-			)
+		span.SetAttributes(
+			attribute.Int("item_count", len(uploads.Items)),
+		)
 
-			return mcpTextResult(span, &uploads)
-		}, []string{"read_builds"}
+		return mcpTextResult(span, &uploads)
+	}, []string{"read_builds"}
 }
 
 // GetStepUpload returns an MCP tool + handler pair that fetches one step
 // upload including its pipeline definition rendered as YAML.
 func GetStepUpload() (mcp.Tool, mcp.ToolHandlerFor[GetStepUploadArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "get_step_upload",
-			Description: "Get a single dynamic pipeline upload including its pipeline definition rendered as YAML (definition_yaml). Definitions over the API's render limit are omitted: definition_yaml is omitted, definition_yaml_omitted is true and definition_bytes reports the size. Only available while the build is within its maximum lifetime (~30 days); older builds return 410 Gone",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Get Step Upload",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args GetStepUploadArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.GetStepUpload")
-			defer span.End()
+		Name:        "get_step_upload",
+		Description: "Get a single dynamic pipeline upload including its pipeline definition rendered as YAML (definition_yaml). Definitions over the API's render limit are omitted: definition_yaml is omitted, definition_yaml_omitted is true and definition_bytes reports the size. Only available while the build is within its maximum lifetime (~30 days); older builds return 410 Gone",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Step Upload",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetStepUploadArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetStepUpload")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("build_number", args.BuildNumber),
-				attribute.String("upload_uuid", args.UploadUUID),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("build_number", args.BuildNumber),
+			attribute.String("upload_uuid", args.UploadUUID),
+		)
 
-			deps := DepsFromContext(ctx)
+		deps := DepsFromContext(ctx)
 
-			upload, _, err := deps.StepUploadsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.UploadUUID)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		upload, _, err := deps.StepUploadsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.UploadUUID)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &upload)
-		}, []string{"read_builds"}
+		return mcpTextResult(span, &upload)
+	}, []string{"read_builds"}
 }

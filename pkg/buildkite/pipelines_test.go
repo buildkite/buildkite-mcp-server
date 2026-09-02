@@ -61,17 +61,17 @@ func TestListPipelines(t *testing.T) {
 	client := &MockPipelinesClient{
 		ListFunc: func(ctx context.Context, org string, opt *buildkite.PipelineListOptions) ([]buildkite.Pipeline, *buildkite.Response, error) {
 			return []buildkite.Pipeline{
-					{
-						ID:        "123",
-						Slug:      "test-pipeline",
-						Name:      "Test Pipeline",
-						CreatedAt: &buildkite.Timestamp{},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				{
+					ID:        "123",
+					Slug:      "test-pipeline",
+					Name:      "Test Pipeline",
+					CreatedAt: &buildkite.Timestamp{},
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -101,15 +101,15 @@ func TestGetPipeline(t *testing.T) {
 	client := &MockPipelinesClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string) (buildkite.Pipeline, *buildkite.Response, error) {
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					CreatedAt: &buildkite.Timestamp{},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				CreatedAt: &buildkite.Timestamp{},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -160,17 +160,17 @@ steps:
 			assert.Equal(map[string]string{"team-uuid-1": "build_and_read"}, p.Teams)
 
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					ClusterID: "cluster-123",
-					CreatedAt: &buildkite.Timestamp{},
-					Tags:      []string{"tag1", "tag2"},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				ClusterID: "cluster-123",
+				CreatedAt: &buildkite.Timestamp{},
+				Tags:      []string{"tag1", "tag2"},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
 			assert.Equal("org", org)
@@ -241,17 +241,17 @@ steps:
 			assert.Equal(testPipelineDefinition, p.Configuration)
 
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					ClusterID: "cluster-123",
-					CreatedAt: &buildkite.Timestamp{},
-					Tags:      []string{"tag1", "tag2"},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 201,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				ClusterID: "cluster-123",
+				CreatedAt: &buildkite.Timestamp{},
+				Tags:      []string{"tag1", "tag2"},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 201,
+				},
+			}, nil
 		},
 		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
 			// validate required fields
@@ -323,17 +323,17 @@ steps:
 			assert.Equal(testPipelineDefinition, p.Configuration)
 
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					ClusterID: "cluster-123",
-					CreatedAt: &buildkite.Timestamp{},
-					Tags:      []string{"tag1", "tag2"},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 201,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				ClusterID: "cluster-123",
+				CreatedAt: &buildkite.Timestamp{},
+				Tags:      []string{"tag1", "tag2"},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 201,
+				},
+			}, nil
 		},
 		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
 			webhookCalled = true
@@ -405,17 +405,17 @@ steps:
 			assert.Equal([]string{"tag1", "tag2"}, tags)
 
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					ClusterID: "abc-123",
-					CreatedAt: &buildkite.Timestamp{},
-					Tags:      []string{"tag1", "tag2"},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				ClusterID: "abc-123",
+				CreatedAt: &buildkite.Timestamp{},
+				Tags:      []string{"tag1", "tag2"},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -461,12 +461,12 @@ func TestUpdatePipelineOmittedFieldsAndEmptyTags(t *testing.T) {
 			assert.Empty(tags)
 
 			return buildkite.Pipeline{
-					ID: "123",
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID: "123",
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -497,14 +497,14 @@ func TestUpdatePipelineSendsEmptyTags(t *testing.T) {
 			assert.Equal([]string{}, tags)
 
 			return buildkite.Pipeline{
-					ID:   "123",
-					Slug: "test-pipeline",
-					Tags: []string{},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:   "123",
+				Slug: "test-pipeline",
+				Tags: []string{},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 

@@ -70,14 +70,14 @@ func TestListClusterQueues(t *testing.T) {
 	client := &mockClusterQueuesClient{
 		ListFunc: func(ctx context.Context, org, clusterID string, opts *buildkite.ClusterQueuesListOptions) ([]buildkite.ClusterQueue, *buildkite.Response, error) {
 			return []buildkite.ClusterQueue{
-					{
-						ID: "queue-id",
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				{
+					ID: "queue-id",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -104,12 +104,12 @@ func TestGetClusterQueue(t *testing.T) {
 	client := &mockClusterQueuesClient{
 		GetFunc: func(ctx context.Context, org, clusterID, queueID string) (buildkite.ClusterQueue, *buildkite.Response, error) {
 			return buildkite.ClusterQueue{
-					ID: "queue-id",
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID: "queue-id",
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -137,13 +137,13 @@ func TestCreateClusterQueue(t *testing.T) {
 	client := &mockClusterQueuesClient{
 		CreateFunc: func(ctx context.Context, org, clusterID string, qc buildkite.ClusterQueueCreate) (buildkite.ClusterQueue, *buildkite.Response, error) {
 			return buildkite.ClusterQueue{
-					ID:  "new-queue-id",
-					Key: qc.Key,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 201,
-					},
-				}, nil
+				ID:  "new-queue-id",
+				Key: qc.Key,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 201,
+				},
+			}, nil
 		},
 	}
 
@@ -177,13 +177,13 @@ func TestUpdateClusterQueue(t *testing.T) {
 			assert.True(qu.RetryAgentAffinity.IsZero())
 
 			return buildkite.ClusterQueue{
-					ID:          queueID,
-					Description: description,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:          queueID,
+				Description: description,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -218,13 +218,13 @@ func TestUpdateClusterQueueSendsRetryAgentAffinity(t *testing.T) {
 			assert.True(qu.Description.IsZero())
 
 			return buildkite.ClusterQueue{
-					ID:                 queueID,
-					RetryAgentAffinity: retryAgentAffinity,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:                 queueID,
+				RetryAgentAffinity: retryAgentAffinity,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -248,13 +248,13 @@ func TestPauseClusterQueueDispatch(t *testing.T) {
 	client := &mockClusterQueuesClient{
 		PauseFunc: func(ctx context.Context, org, clusterID, queueID string, qp buildkite.ClusterQueuePause) (buildkite.ClusterQueue, *buildkite.Response, error) {
 			return buildkite.ClusterQueue{
-					ID:             queueID,
-					DispatchPaused: true,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:             queueID,
+				DispatchPaused: true,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
