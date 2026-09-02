@@ -348,6 +348,11 @@ func TestGetClusterArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"cluster_id", "org_slug"}, req)
 }
 
+func TestGetClusterSecretArgsSchema(t *testing.T) {
+	req := sortedRequired[GetClusterSecretArgs](t)
+	require.Equal(t, []string{"cluster_id", "org_slug", "secret_id"}, req)
+}
+
 func TestListAgentsArgsSchema(t *testing.T) {
 	s := schemaFor[ListAgentsArgs](t)
 	req := sortedToolRequired(t, s)
