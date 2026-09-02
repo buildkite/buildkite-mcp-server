@@ -99,6 +99,7 @@ matrix:
         # never exist in the repo hosting this eval, so the eval pipeline cannot
         # recurse (see the CROSS-REPO note in .buildkite/pipeline.evals.yml).
         SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
+        git config user.email "secret-agent@llm.com" && git config user.name "secret-agent"
         git fetch
         git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
         git push -u origin HEAD
