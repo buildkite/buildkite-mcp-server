@@ -2,9 +2,11 @@ package buildkite
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v5"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -78,4 +80,28 @@ func TestGetClusterSecret(t *testing.T) {
 		"organization": {}
 	}`, textContent.Text)
 	require.NotContains(t, textContent.Text, `"value"`)
+}
+
+func TestGetClusterSecretWithError(t *testing.T) {
+	assert := require.New(t)
+
+	client := &mockClusterSecretsClient{
+		GetFunc: func(
+			ctx context.Context,
+			org string,
+			clusterID string,
+			secretID string,
+		) (buildkite.ClusterSecret, *buildkite.Response, error) {
+			return buildkite.ClusterSecret{}, &buildkite.Response{}, fmt.Errorf("API error")
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClusterSecretsClient: client})
+
+	_, handler, _ := GetClusterSecret()
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, GetClusterSecretArgs{OrgSlug: "org", ClusterID: "cluster-id", SecretID: "secret-id"})
+	assert.NoError(err)
+	assert.True(result.IsError)
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
 }
