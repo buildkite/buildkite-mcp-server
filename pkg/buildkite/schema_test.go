@@ -348,6 +348,17 @@ func TestGetClusterArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"cluster_id", "org_slug"}, req)
 }
 
+func TestListClusterSecretsArgsSchema(t *testing.T) {
+	s := schemaFor[ListClusterSecretsArgs](t)
+	req := sortedToolRequired(t, s)
+	require.Equal(t, []string{"cluster_id", "org_slug"}, req)
+
+	for _, opt := range []string{"page", "per_page"} {
+		require.Contains(t, s.Properties, opt)
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
 func TestGetClusterSecretArgsSchema(t *testing.T) {
 	req := sortedRequired[GetClusterSecretArgs](t)
 	require.Equal(t, []string{"cluster_id", "org_slug", "secret_id"}, req)

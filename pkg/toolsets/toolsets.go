@@ -347,6 +347,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Description: "Tools for managing Buildkite cluster secrets",
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.GetClusterSecret),
+				newToolDef(buildkite.ListClusterSecrets),
 			},
 		},
 		ToolsetAgents: {
