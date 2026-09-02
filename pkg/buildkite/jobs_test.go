@@ -100,13 +100,13 @@ func TestUnblockJob(t *testing.T) {
 				assert.Equal(t, "job-123", jobID)
 
 				return buildkite.Job{
-						ID:    jobID,
-						State: "unblocked",
-					}, &buildkite.Response{
-						Response: &http.Response{
-							StatusCode: 200,
-						},
-					}, nil
+					ID:    jobID,
+					State: "unblocked",
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
 			},
 		}
 
@@ -140,13 +140,13 @@ func TestUnblockJob(t *testing.T) {
 				assert.Equal(t, "prod", opt.Fields["environment"])
 
 				return buildkite.Job{
-						ID:    jobID,
-						State: "unblocked",
-					}, &buildkite.Response{
-						Response: &http.Response{
-							StatusCode: 200,
-						},
-					}, nil
+					ID:    jobID,
+					State: "unblocked",
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
 			},
 		}
 
@@ -211,11 +211,11 @@ func TestRetryJob(t *testing.T) {
 				assert.Equal(t, "job-456", jobID)
 
 				return buildkite.Job{
-						ID:    "job-789",
-						State: "scheduled",
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					ID:    "job-789",
+					State: "scheduled",
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 		}
 
@@ -272,13 +272,13 @@ func TestGetJobEnvironmentVariables(t *testing.T) {
 				assert.Equal(t, "job-456", jobID)
 
 				return buildkite.JobEnvs{
-						EnvironmentVariables: map[string]string{
-							"BUILDKITE_BRANCH": "main",
-							"CI":               "true",
-						},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					EnvironmentVariables: map[string]string{
+						"BUILDKITE_BRANCH": "main",
+						"CI":               "true",
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 		}
 

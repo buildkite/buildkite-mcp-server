@@ -74,20 +74,20 @@ func TestListArtifactsForBuild(t *testing.T) {
 	mockArtifactsClient := &MockArtifactsClient{
 		ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
 			return []buildkite.Artifact{
-					{
-						ID:          "abc123",
-						JobID:       "job-789",
-						URL:         "https://example.com/artifact-resource",
-						Dirname:     "build/logs",
-						Filename:    "test-artifact.txt",
-						State:       "finished",
-						DownloadURL: "https://example.com/artifact",
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				{
+					ID:          "abc123",
+					JobID:       "job-789",
+					URL:         "https://example.com/artifact-resource",
+					Dirname:     "build/logs",
+					Filename:    "test-artifact.txt",
+					State:       "finished",
+					DownloadURL: "https://example.com/artifact",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -123,20 +123,20 @@ func TestListArtifactsForJob(t *testing.T) {
 	mockArtifactsClient := &MockArtifactsClient{
 		ListByJobFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, jobID string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
 			return []buildkite.Artifact{
-					{
-						ID:          "abc123",
-						JobID:       "job-789",
-						URL:         "https://example.com/artifact-resource",
-						Dirname:     "build/logs",
-						Filename:    "test-artifact.txt",
-						State:       "finished",
-						DownloadURL: "https://example.com/artifact",
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				{
+					ID:          "abc123",
+					JobID:       "job-789",
+					URL:         "https://example.com/artifact-resource",
+					Dirname:     "build/logs",
+					Filename:    "test-artifact.txt",
+					State:       "finished",
+					DownloadURL: "https://example.com/artifact",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 

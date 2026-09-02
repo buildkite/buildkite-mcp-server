@@ -85,25 +85,25 @@ func TestGetBuild(t *testing.T) {
 				assert.Equal("pipeline", pipeline)
 				assert.Equal("1", id)
 				return buildkite.Build{
-						ID:     "123",
-						Number: 1,
-						State:  "passed",
-						Branch: "main",
-						Env: map[string]any{
-							"SECRET_TOKEN": "redacted",
-						},
-						Jobs: []buildkite.Job{{
-							ID: "job-1",
-						}},
-						Pipeline: &buildkite.Pipeline{
-							ID:            "pipeline-1",
-							Configuration: "steps:\n  - command: echo secret",
-							Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
-						},
-						CreatedAt: &buildkite.Timestamp{},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					ID:     "123",
+					Number: 1,
+					State:  "passed",
+					Branch: "main",
+					Env: map[string]any{
+						"SECRET_TOKEN": "redacted",
+					},
+					Jobs: []buildkite.Job{{
+						ID: "job-1",
+					}},
+					Pipeline: &buildkite.Pipeline{
+						ID:            "pipeline-1",
+						Configuration: "steps:\n  - command: echo secret",
+						Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
+					},
+					CreatedAt: &buildkite.Timestamp{},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 		}
 
@@ -114,12 +114,12 @@ func TestGetBuild(t *testing.T) {
 				assert.Equal("pipeline", pipelineSlug)
 				assert.Equal("1", buildNumber)
 				return []buildkite.Annotation{
-						{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, BodyHTML: "<p>large body</p>"},
-						{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, BodyHTML: "<p>another large body</p>"},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-						NextPage: 2,
-					}, nil
+					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, BodyHTML: "<p>large body</p>"},
+					{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, BodyHTML: "<p>another large body</p>"},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+					NextPage: 2,
+				}, nil
 			},
 		}
 
@@ -266,10 +266,10 @@ func TestListBuilds(t *testing.T) {
 			ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
 				capturedOptions = opt
 				return []buildkite.Build{
-						{ID: "123", Number: 1, State: "running", CreatedAt: &buildkite.Timestamp{}},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					{ID: "123", Number: 1, State: "running", CreatedAt: &buildkite.Timestamp{}},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 		}
 
@@ -343,10 +343,10 @@ func TestListBuilds(t *testing.T) {
 				called = true
 				assert.Equal("org", org)
 				return []buildkite.Build{
-						{ID: "123", Number: 1, State: "passed", CreatedAt: &buildkite.Timestamp{}},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					{ID: "123", Number: 1, State: "passed", CreatedAt: &buildkite.Timestamp{}},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 			ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
 				t.Fatal("ListByPipeline should not be called when pipeline_slug is omitted")
@@ -398,31 +398,31 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 			capturedOptions = opt
 			// Return build with test engine data
 			return buildkite.Build{
-					ID:     "123",
-					Number: 1,
-					TestEngine: &buildkite.TestEngineProperty{
-						Runs: []buildkite.TestEngineRun{
-							{
-								ID: "run-1",
-								Suite: buildkite.TestEngineSuite{
-									ID:   "suite-1",
-									Slug: "my-test-suite",
-								},
+				ID:     "123",
+				Number: 1,
+				TestEngine: &buildkite.TestEngineProperty{
+					Runs: []buildkite.TestEngineRun{
+						{
+							ID: "run-1",
+							Suite: buildkite.TestEngineSuite{
+								ID:   "suite-1",
+								Slug: "my-test-suite",
 							},
-							{
-								ID: "run-2",
-								Suite: buildkite.TestEngineSuite{
-									ID:   "suite-2",
-									Slug: "another-test-suite",
-								},
+						},
+						{
+							ID: "run-2",
+							Suite: buildkite.TestEngineSuite{
+								ID:   "suite-2",
+								Slug: "another-test-suite",
 							},
 						},
 					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -464,14 +464,14 @@ func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 			// Return build without test engine data
 			return buildkite.Build{
-					ID:         "123",
-					Number:     1,
-					TestEngine: nil,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:         "123",
+				Number:     1,
+				TestEngine: nil,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -506,21 +506,21 @@ func TestCreateBuild(t *testing.T) {
 
 			// Return created build
 			return buildkite.Build{
-					ID:        "123",
-					Number:    1,
-					State:     "created",
-					CreatedAt: &buildkite.Timestamp{},
-					Env: map[string]any{
-						"ENV_VAR": "value",
-					},
-					MetaData: map[string]string{
-						"meta_key": "meta_value",
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 201,
-					},
-				}, nil
+				ID:        "123",
+				Number:    1,
+				State:     "created",
+				CreatedAt: &buildkite.Timestamp{},
+				Env: map[string]any{
+					"ENV_VAR": "value",
+				},
+				MetaData: map[string]string{
+					"meta_key": "meta_value",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 201,
+				},
+			}, nil
 		},
 	}
 

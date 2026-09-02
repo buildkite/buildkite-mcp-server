@@ -26,46 +26,46 @@ type ListPipelineSchedulesArgs struct {
 
 func ListPipelineSchedules() (mcp.Tool, mcp.ToolHandlerFor[ListPipelineSchedulesArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "list_pipeline_schedules",
-			Description: "List the pipeline schedules for a pipeline, including cron expression, target branch, environment variables, enabled state, and next scheduled build time",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "List Pipeline Schedules",
-				ReadOnlyHint: true,
+		Name:        "list_pipeline_schedules",
+		Description: "List the pipeline schedules for a pipeline, including cron expression, target branch, environment variables, enabled state, and next scheduled build time",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "List Pipeline Schedules",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListPipelineSchedulesArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListPipelineSchedules")
+		defer span.End()
+
+		paginationParams := paginationFromArgs(args.Page, args.PerPage)
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.Int("page", paginationParams.Page),
+			attribute.Int("per_page", paginationParams.PerPage),
+		)
+
+		deps := DepsFromContext(ctx)
+		schedules, resp, err := deps.PipelineSchedulesClient.List(ctx, args.OrgSlug, args.PipelineSlug, &buildkite.PipelineScheduleListOptions{
+			ListOptions: paginationParams,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+
+		result := PaginatedResult[buildkite.PipelineSchedule]{
+			Items: schedules,
+			Headers: map[string]string{
+				"Link": resp.Header.Get("Link"),
 			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListPipelineSchedulesArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ListPipelineSchedules")
-			defer span.End()
+		}
 
-			paginationParams := paginationFromArgs(args.Page, args.PerPage)
+		span.SetAttributes(
+			attribute.Int("item_count", len(schedules)),
+		)
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.Int("page", paginationParams.Page),
-				attribute.Int("per_page", paginationParams.PerPage),
-			)
-
-			deps := DepsFromContext(ctx)
-			schedules, resp, err := deps.PipelineSchedulesClient.List(ctx, args.OrgSlug, args.PipelineSlug, &buildkite.PipelineScheduleListOptions{
-				ListOptions: paginationParams,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
-
-			result := PaginatedResult[buildkite.PipelineSchedule]{
-				Items: schedules,
-				Headers: map[string]string{
-					"Link": resp.Header.Get("Link"),
-				},
-			}
-
-			span.SetAttributes(
-				attribute.Int("item_count", len(schedules)),
-			)
-
-			return mcpTextResult(span, &result)
-		}, []string{"read_pipelines"}
+		return mcpTextResult(span, &result)
+	}, []string{"read_pipelines"}
 }
 
 type GetPipelineScheduleArgs struct {
@@ -77,30 +77,30 @@ type GetPipelineScheduleArgs struct {
 
 func GetPipelineSchedule() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineScheduleArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "get_pipeline_schedule",
-			Description: "Get detailed information about a single pipeline schedule including its cron expression, target branch, environment variables, enabled state, last failure, and next build time",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Get Pipeline Schedule",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args GetPipelineScheduleArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.GetPipelineSchedule")
-			defer span.End()
+		Name:        "get_pipeline_schedule",
+		Description: "Get detailed information about a single pipeline schedule including its cron expression, target branch, environment variables, enabled state, last failure, and next build time",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Pipeline Schedule",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetPipelineScheduleArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetPipelineSchedule")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("schedule_id", args.ScheduleID),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("schedule_id", args.ScheduleID),
+		)
 
-			deps := DepsFromContext(ctx)
-			schedule, _, err := deps.PipelineSchedulesClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.ScheduleID)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		schedule, _, err := deps.PipelineSchedulesClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.ScheduleID)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &schedule)
-		}, []string{"read_pipelines"}
+		return mcpTextResult(span, &schedule)
+	}, []string{"read_pipelines"}
 }
 
 type CreatePipelineScheduleArgs struct {
@@ -118,40 +118,40 @@ type CreatePipelineScheduleArgs struct {
 
 func CreatePipelineSchedule() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineScheduleArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "create_pipeline_schedule",
-			Description: "Create a new pipeline schedule that triggers builds on a cron-driven interval",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Create Pipeline Schedule",
-				DestructiveHint: boolPtr(false),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args CreatePipelineScheduleArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.CreatePipelineSchedule")
-			defer span.End()
+		Name:        "create_pipeline_schedule",
+		Description: "Create a new pipeline schedule that triggers builds on a cron-driven interval",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Pipeline Schedule",
+			DestructiveHint: boolPtr(false),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args CreatePipelineScheduleArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.CreatePipelineSchedule")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("cronline", args.Cronline),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("cronline", args.Cronline),
+		)
 
-			create := buildkite.CreatePipelineSchedule{
-				Cronline: args.Cronline,
-				Label:    args.Label,
-				Message:  args.Message,
-				Commit:   args.Commit,
-				Branch:   args.Branch,
-				Env:      args.Env,
-				Enabled:  args.Enabled,
-			}
+		create := buildkite.CreatePipelineSchedule{
+			Cronline: args.Cronline,
+			Label:    args.Label,
+			Message:  args.Message,
+			Commit:   args.Commit,
+			Branch:   args.Branch,
+			Env:      args.Env,
+			Enabled:  args.Enabled,
+		}
 
-			deps := DepsFromContext(ctx)
-			schedule, _, err := deps.PipelineSchedulesClient.Create(ctx, args.OrgSlug, args.PipelineSlug, create)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		schedule, _, err := deps.PipelineSchedulesClient.Create(ctx, args.OrgSlug, args.PipelineSlug, create)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &schedule)
-		}, []string{"write_pipelines"}
+		return mcpTextResult(span, &schedule)
+	}, []string{"write_pipelines"}
 }
 
 type UpdatePipelineScheduleArgs struct {
@@ -170,51 +170,51 @@ type UpdatePipelineScheduleArgs struct {
 
 func UpdatePipelineSchedule() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineScheduleArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "update_pipeline_schedule",
-			Description: "Modify an existing pipeline schedule's cron expression, branch, environment variables, or enabled state",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Update Pipeline Schedule",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineScheduleArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.UpdatePipelineSchedule")
-			defer span.End()
+		Name:        "update_pipeline_schedule",
+		Description: "Modify an existing pipeline schedule's cron expression, branch, environment variables, or enabled state",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Update Pipeline Schedule",
+			DestructiveHint: boolPtr(true),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineScheduleArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.UpdatePipelineSchedule")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("schedule_id", args.ScheduleID),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("schedule_id", args.ScheduleID),
+		)
 
-			update := buildkite.UpdatePipelineSchedule{}
-			if args.Cronline != nil {
-				update.Cronline = buildkite.Some(*args.Cronline)
-			}
-			if args.Label != nil {
-				update.Label = buildkite.Some(*args.Label)
-			}
-			if args.Message != nil {
-				update.Message = buildkite.Some(*args.Message)
-			}
-			if args.Commit != nil {
-				update.Commit = buildkite.Some(*args.Commit)
-			}
-			if args.Branch != nil {
-				update.Branch = buildkite.Some(*args.Branch)
-			}
-			if args.Env != nil {
-				update.Env = buildkite.Some(args.Env)
-			}
-			if args.Enabled != nil {
-				update.Enabled = buildkite.Some(*args.Enabled)
-			}
+		update := buildkite.UpdatePipelineSchedule{}
+		if args.Cronline != nil {
+			update.Cronline = buildkite.Some(*args.Cronline)
+		}
+		if args.Label != nil {
+			update.Label = buildkite.Some(*args.Label)
+		}
+		if args.Message != nil {
+			update.Message = buildkite.Some(*args.Message)
+		}
+		if args.Commit != nil {
+			update.Commit = buildkite.Some(*args.Commit)
+		}
+		if args.Branch != nil {
+			update.Branch = buildkite.Some(*args.Branch)
+		}
+		if args.Env != nil {
+			update.Env = buildkite.Some(args.Env)
+		}
+		if args.Enabled != nil {
+			update.Enabled = buildkite.Some(*args.Enabled)
+		}
 
-			deps := DepsFromContext(ctx)
-			schedule, _, err := deps.PipelineSchedulesClient.Update(ctx, args.OrgSlug, args.PipelineSlug, args.ScheduleID, update)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		schedule, _, err := deps.PipelineSchedulesClient.Update(ctx, args.OrgSlug, args.PipelineSlug, args.ScheduleID, update)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &schedule)
-		}, []string{"write_pipelines"}
+		return mcpTextResult(span, &schedule)
+	}, []string{"write_pipelines"}
 }

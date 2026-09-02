@@ -54,15 +54,15 @@ func TestListClusters(t *testing.T) {
 	client := &mockClustersClient{
 		ListFunc: func(ctx context.Context, org string, opts *buildkite.ClustersListOptions) ([]buildkite.Cluster, *buildkite.Response, error) {
 			return []buildkite.Cluster{
-					{
-						ID:   "cluster-id",
-						Name: "cluster-name",
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				{
+					ID:   "cluster-id",
+					Name: "cluster-name",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -88,13 +88,13 @@ func TestGetCluster(t *testing.T) {
 	client := &mockClustersClient{
 		GetFunc: func(ctx context.Context, org, id string) (buildkite.Cluster, *buildkite.Response, error) {
 			return buildkite.Cluster{
-					ID:   "cluster-id",
-					Name: "cluster-name",
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:   "cluster-id",
+				Name: "cluster-name",
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -121,13 +121,13 @@ func TestCreateCluster(t *testing.T) {
 	client := &mockClustersClient{
 		CreateFunc: func(ctx context.Context, org string, cc buildkite.ClusterCreate) (buildkite.Cluster, *buildkite.Response, error) {
 			return buildkite.Cluster{
-					ID:   "new-cluster-id",
-					Name: cc.Name,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 201,
-					},
-				}, nil
+				ID:   "new-cluster-id",
+				Name: cc.Name,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 201,
+				},
+			}, nil
 		},
 	}
 
@@ -160,13 +160,13 @@ func TestUpdateCluster(t *testing.T) {
 			assert.True(cu.Description.IsZero())
 
 			return buildkite.Cluster{
-					ID:   id,
-					Name: name,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:   id,
+				Name: name,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -200,13 +200,13 @@ func TestUpdateClusterSendsExplicitEmptyString(t *testing.T) {
 			assert.True(cu.Name.IsZero())
 
 			return buildkite.Cluster{
-					ID:          id,
-					Description: description,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:          id,
+				Description: description,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 

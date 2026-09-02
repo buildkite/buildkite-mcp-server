@@ -60,12 +60,12 @@ func TestListTestsForBuild(t *testing.T) {
 
 			reliability := 0.97
 			return []buildkite.TestWithMetrics{{
-					Test:            buildkite.Test{ID: "test-123", Name: "Example Test"},
-					Reliability:     &reliability,
-					ExecutionsCount: 100,
-				}}, &buildkite.Response{Response: &http.Response{Header: http.Header{
-					"Link": []string{`<https://api.buildkite.com/v2/analytics/organizations/org/builds/019d66fb-e8db-47eb-866c-94b85d42b9a1/tests?page=3>; rel="next"`},
-				}}}, nil
+				Test:            buildkite.Test{ID: "test-123", Name: "Example Test"},
+				Reliability:     &reliability,
+				ExecutionsCount: 100,
+			}}, &buildkite.Response{Response: &http.Response{Header: http.Header{
+				"Link": []string{`<https://api.buildkite.com/v2/analytics/organizations/org/builds/019d66fb-e8db-47eb-866c-94b85d42b9a1/tests?page=3>; rel="next"`},
+			}}}, nil
 		},
 	}
 
@@ -124,41 +124,41 @@ func TestListTests(t *testing.T) {
 			require.Equal(t, "asc", opt.Order)
 
 			return []buildkite.TestWithMetrics{
-					{
-						Test: buildkite.Test{
-							ID:       "test-123",
-							Name:     "Example Test",
-							Location: "spec/example_test.rb:42",
-							FileName: "spec/example_test.rb",
-							Labels:   []string{"flaky"},
-						},
-						Reliability:     &reliability,
-						DurationAverage: 1.4,
-						DurationTotal:   140,
-						DurationMinimum: 0.5,
-						DurationMaximum: 4.2,
-						ExecutionsCount: 100,
-						ExecutionsCountByResult: map[string]int{
-							"passed": 97,
-							"failed": 3,
-						},
+				{
+					Test: buildkite.Test{
+						ID:       "test-123",
+						Name:     "Example Test",
+						Location: "spec/example_test.rb:42",
+						FileName: "spec/example_test.rb",
+						Labels:   []string{"flaky"},
 					},
-					{
-						Test:            buildkite.Test{ID: "test-456", Name: "Skipped Test"},
-						Reliability:     nil,
-						ExecutionsCount: 1,
-						ExecutionsCountByResult: map[string]int{
-							"passed":  0,
-							"failed":  0,
-							"skipped": 1,
-						},
+					Reliability:     &reliability,
+					DurationAverage: 1.4,
+					DurationTotal:   140,
+					DurationMinimum: 0.5,
+					DurationMaximum: 4.2,
+					ExecutionsCount: 100,
+					ExecutionsCountByResult: map[string]int{
+						"passed": 97,
+						"failed": 3,
 					},
-				}, &buildkite.Response{Response: &http.Response{
-					StatusCode: http.StatusOK,
-					Header: http.Header{
-						"Link": []string{`<https://api.buildkite.com/v2/analytics/organizations/org/suites/suite1/tests?page=3>; rel="next"`},
+				},
+				{
+					Test:            buildkite.Test{ID: "test-456", Name: "Skipped Test"},
+					Reliability:     nil,
+					ExecutionsCount: 1,
+					ExecutionsCountByResult: map[string]int{
+						"passed":  0,
+						"failed":  0,
+						"skipped": 1,
 					},
-				}}, nil
+				},
+			}, &buildkite.Response{Response: &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Link": []string{`<https://api.buildkite.com/v2/analytics/organizations/org/suites/suite1/tests?page=3>; rel="next"`},
+				},
+			}}, nil
 		},
 	}
 
@@ -280,21 +280,21 @@ func TestGetTest(t *testing.T) {
 			assert.Equal(&buildkite.TestsGetOptions{}, opt)
 
 			return buildkite.TestWithMetrics{
-					Test: buildkite.Test{
-						ID:       "test-123",
-						Name:     "Example Test",
-						Location: "spec/example_test.rb",
-					},
-					Reliability:             &reliability,
-					DurationAverage:         1.5,
-					ExecutionsCount:         100,
-					ExecutionsCountByResult: map[string]int{"passed": 97, "failed": 3},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-						Body:       io.NopCloser(strings.NewReader(`{"id": "test-123"}`)),
-					},
-				}, nil
+				Test: buildkite.Test{
+					ID:       "test-123",
+					Name:     "Example Test",
+					Location: "spec/example_test.rb",
+				},
+				Reliability:             &reliability,
+				DurationAverage:         1.5,
+				ExecutionsCount:         100,
+				ExecutionsCountByResult: map[string]int{"passed": 97, "failed": 3},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+					Body:       io.NopCloser(strings.NewReader(`{"id": "test-123"}`)),
+				},
+			}, nil
 		},
 	}
 

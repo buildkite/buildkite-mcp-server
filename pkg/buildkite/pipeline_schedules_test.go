@@ -56,15 +56,15 @@ func TestListPipelineSchedules(t *testing.T) {
 			assert.Equal(1, opt.Page)
 			assert.Equal(100, opt.PerPage)
 			return []buildkite.PipelineSchedule{
-					{
-						ID:       "abc",
-						Label:    "Nightly build",
-						Cronline: "@daily",
-						Enabled:  true,
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{StatusCode: 200},
-				}, nil
+				{
+					ID:       "abc",
+					Label:    "Nightly build",
+					Cronline: "@daily",
+					Enabled:  true,
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{StatusCode: 200},
+			}, nil
 		},
 	}
 
@@ -94,14 +94,14 @@ func TestGetPipelineSchedule(t *testing.T) {
 			assert.Equal("pipeline", pipelineSlug)
 			assert.Equal("abc", id)
 			return buildkite.PipelineSchedule{
-					ID:       "abc",
-					Label:    "Nightly build",
-					Cronline: "@daily",
-					Branch:   "main",
-					Enabled:  true,
-				}, &buildkite.Response{
-					Response: &http.Response{StatusCode: 200},
-				}, nil
+				ID:       "abc",
+				Label:    "Nightly build",
+				Cronline: "@daily",
+				Branch:   "main",
+				Enabled:  true,
+			}, &buildkite.Response{
+				Response: &http.Response{StatusCode: 200},
+			}, nil
 		},
 	}
 
@@ -137,13 +137,13 @@ func TestCreatePipelineSchedule(t *testing.T) {
 			assert.NotNil(in.Enabled)
 			assert.False(*in.Enabled)
 			return buildkite.PipelineSchedule{
-					ID:       "new-id",
-					Cronline: "@daily",
-					Label:    "Nightly build",
-					Enabled:  false,
-				}, &buildkite.Response{
-					Response: &http.Response{StatusCode: 201},
-				}, nil
+				ID:       "new-id",
+				Cronline: "@daily",
+				Label:    "Nightly build",
+				Enabled:  false,
+			}, &buildkite.Response{
+				Response: &http.Response{StatusCode: 201},
+			}, nil
 		},
 	}
 
@@ -190,12 +190,12 @@ func TestUpdatePipelineSchedule(t *testing.T) {
 			assert.True(in.Branch.IsZero())
 			assert.True(in.Env.IsZero())
 			return buildkite.PipelineSchedule{
-					ID:      "abc",
-					Label:   "Updated label",
-					Enabled: true,
-				}, &buildkite.Response{
-					Response: &http.Response{StatusCode: 200},
-				}, nil
+				ID:      "abc",
+				Label:   "Updated label",
+				Enabled: true,
+			}, &buildkite.Response{
+				Response: &http.Response{StatusCode: 200},
+			}, nil
 		},
 	}
 

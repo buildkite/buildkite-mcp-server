@@ -19,28 +19,28 @@ type UserTokenOrganizationArgs struct {
 
 func UserTokenOrganization() (mcp.Tool, mcp.ToolHandlerFor[UserTokenOrganizationArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "user_token_organization",
-			Description: "Get the organization associated with the user token used for this request",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Get Organization for User Token",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args UserTokenOrganizationArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.UserTokenOrganization")
-			defer span.End()
+		Name:        "user_token_organization",
+		Description: "Get the organization associated with the user token used for this request",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Organization for User Token",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args UserTokenOrganizationArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.UserTokenOrganization")
+		defer span.End()
 
-			deps := DepsFromContext(ctx)
-			orgs, _, err := deps.OrganizationsClient.List(ctx, &buildkite.OrganizationListOptions{})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		orgs, _, err := deps.OrganizationsClient.List(ctx, &buildkite.OrganizationListOptions{})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			if len(orgs) == 0 {
-				return utils.NewToolResultError("no organization found for the current user token"), nil, nil
-			}
+		if len(orgs) == 0 {
+			return utils.NewToolResultError("no organization found for the current user token"), nil, nil
+		}
 
-			return mcpTextResult(span, &orgs[0])
-		}, []string{"read_organizations"}
+		return mcpTextResult(span, &orgs[0])
+	}, []string{"read_organizations"}
 }
 
 func HandleUserTokenOrganizationPrompt(

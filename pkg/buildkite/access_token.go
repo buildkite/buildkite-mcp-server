@@ -18,22 +18,22 @@ type AccessTokenArgs struct {
 
 func AccessToken() (mcp.Tool, mcp.ToolHandlerFor[AccessTokenArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "access_token",
-			Description: "Get information about the current API access token including its scopes and UUID",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Get Access Token",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args AccessTokenArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.AccessToken")
-			defer span.End()
+		Name:        "access_token",
+		Description: "Get information about the current API access token including its scopes and UUID",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Access Token",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args AccessTokenArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.AccessToken")
+		defer span.End()
 
-			deps := DepsFromContext(ctx)
-			token, _, err := deps.AccessTokensClient.Get(ctx)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		token, _, err := deps.AccessTokensClient.Get(ctx)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &token)
-		}, []string{"read_user"}
+		return mcpTextResult(span, &token)
+	}, []string{"read_user"}
 }

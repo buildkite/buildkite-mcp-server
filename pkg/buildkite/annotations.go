@@ -66,123 +66,123 @@ func normalizeAnnotationScope(scope, jobID string) (string, error) {
 // ListAnnotations returns an MCP tool + handler pair that lists annotations for a build or job.
 func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "list_annotations",
-			Description: "List annotations for a build or a specific job. Use scope='build' (default) or scope='job' with job_id. Annotation content is in the body_html field; there is no body field",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "List Annotations",
-				ReadOnlyHint: true,
+		Name:        "list_annotations",
+		Description: "List annotations for a build or a specific job. Use scope='build' (default) or scope='job' with job_id. Annotation content is in the body_html field; there is no body field",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "List Annotations",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListAnnotationsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListAnnotations")
+		defer span.End()
+
+		scope, scopeErr := normalizeAnnotationScope(args.Scope, args.JobID)
+		if scopeErr != nil {
+			return utils.NewToolResultError(scopeErr.Error()), nil, nil
+		}
+
+		paginationParams := paginationFromArgs(args.Page, args.PerPage)
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("build_number", args.BuildNumber),
+			attribute.String("scope", scope),
+			attribute.String("job_id", args.JobID),
+			attribute.Int("page", paginationParams.Page),
+			attribute.Int("per_page", paginationParams.PerPage),
+		)
+
+		deps := DepsFromContext(ctx)
+
+		var (
+			annotations []buildkite.Annotation
+			resp        *buildkite.Response
+			err         error
+		)
+
+		if scope == annotationScopeJob {
+			annotations, resp, err = deps.AnnotationsClient.ListByJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, &buildkite.AnnotationListOptions{
+				ListOptions: paginationParams,
+			})
+		} else {
+			annotations, resp, err = deps.AnnotationsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
+				ListOptions: paginationParams,
+			})
+		}
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+
+		result := PaginatedResult[buildkite.Annotation]{
+			Items: annotations,
+			Headers: map[string]string{
+				"Link": resp.Header.Get("Link"),
 			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListAnnotationsArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ListAnnotations")
-			defer span.End()
+		}
 
-			scope, scopeErr := normalizeAnnotationScope(args.Scope, args.JobID)
-			if scopeErr != nil {
-				return utils.NewToolResultError(scopeErr.Error()), nil, nil
-			}
+		span.SetAttributes(
+			attribute.Int("item_count", len(annotations)),
+		)
 
-			paginationParams := paginationFromArgs(args.Page, args.PerPage)
-
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("build_number", args.BuildNumber),
-				attribute.String("scope", scope),
-				attribute.String("job_id", args.JobID),
-				attribute.Int("page", paginationParams.Page),
-				attribute.Int("per_page", paginationParams.PerPage),
-			)
-
-			deps := DepsFromContext(ctx)
-
-			var (
-				annotations []buildkite.Annotation
-				resp        *buildkite.Response
-				err         error
-			)
-
-			if scope == annotationScopeJob {
-				annotations, resp, err = deps.AnnotationsClient.ListByJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, &buildkite.AnnotationListOptions{
-					ListOptions: paginationParams,
-				})
-			} else {
-				annotations, resp, err = deps.AnnotationsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
-					ListOptions: paginationParams,
-				})
-			}
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
-
-			result := PaginatedResult[buildkite.Annotation]{
-				Items: annotations,
-				Headers: map[string]string{
-					"Link": resp.Header.Get("Link"),
-				},
-			}
-
-			span.SetAttributes(
-				attribute.Int("item_count", len(annotations)),
-			)
-
-			return mcpTextResult(span, &result)
-		}, []string{"read_builds"}
+		return mcpTextResult(span, &result)
+	}, []string{"read_builds"}
 }
 
 // CreateAnnotation returns an MCP tool + handler pair that creates an annotation on a build or job.
 func CreateAnnotation() (mcp.Tool, mcp.ToolHandlerFor[CreateAnnotationArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "create_annotation",
-			Description: "Create an annotation on a build or specific job. Use scope='build' (default) or scope='job' with job_id",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Create Annotation",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args CreateAnnotationArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.CreateAnnotation")
-			defer span.End()
+		Name:        "create_annotation",
+		Description: "Create an annotation on a build or specific job. Use scope='build' (default) or scope='job' with job_id",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Annotation",
+			DestructiveHint: boolPtr(true),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args CreateAnnotationArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.CreateAnnotation")
+		defer span.End()
 
-			scope, scopeErr := normalizeAnnotationScope(args.Scope, args.JobID)
-			if scopeErr != nil {
-				return utils.NewToolResultError(scopeErr.Error()), nil, nil
-			}
+		scope, scopeErr := normalizeAnnotationScope(args.Scope, args.JobID)
+		if scopeErr != nil {
+			return utils.NewToolResultError(scopeErr.Error()), nil, nil
+		}
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("build_number", args.BuildNumber),
-				attribute.String("scope", scope),
-				attribute.String("job_id", args.JobID),
-				attribute.String("context", args.Context),
-				attribute.String("style", args.Style),
-				attribute.Int("priority", args.Priority),
-				attribute.Bool("append", args.Append),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("build_number", args.BuildNumber),
+			attribute.String("scope", scope),
+			attribute.String("job_id", args.JobID),
+			attribute.String("context", args.Context),
+			attribute.String("style", args.Style),
+			attribute.Int("priority", args.Priority),
+			attribute.Bool("append", args.Append),
+		)
 
-			create := buildkite.AnnotationCreate{
-				Body:     args.Body,
-				Context:  args.Context,
-				Style:    args.Style,
-				Priority: args.Priority,
-				Append:   args.Append,
-			}
+		create := buildkite.AnnotationCreate{
+			Body:     args.Body,
+			Context:  args.Context,
+			Style:    args.Style,
+			Priority: args.Priority,
+			Append:   args.Append,
+		}
 
-			deps := DepsFromContext(ctx)
+		deps := DepsFromContext(ctx)
 
-			var (
-				annotation buildkite.Annotation
-				err        error
-			)
+		var (
+			annotation buildkite.Annotation
+			err        error
+		)
 
-			if scope == annotationScopeJob {
-				annotation, _, err = deps.AnnotationsClient.CreateForJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, create)
-			} else {
-				annotation, _, err = deps.AnnotationsClient.Create(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, create)
-			}
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		if scope == annotationScopeJob {
+			annotation, _, err = deps.AnnotationsClient.CreateForJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, create)
+		} else {
+			annotation, _, err = deps.AnnotationsClient.Create(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, create)
+		}
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &annotation)
-		}, []string{"write_builds"}
+		return mcpTextResult(span, &annotation)
+	}, []string{"write_builds"}
 }
