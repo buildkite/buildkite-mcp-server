@@ -41,10 +41,10 @@ func TestGetClusterSecret(t *testing.T) {
 			require.Equal(t, "secret-id", secretID)
 
 			return buildkite.ClusterSecret{
-				ID: "secret-id",
-				Key: "DATABASE_PASSWORD",
+				ID:          "secret-id",
+				Key:         "DATABASE_PASSWORD",
 				Description: "Database password",
-				Policy: "- pipeline_slug: example",
+				Policy:      "- pipeline_slug: example",
 			}, nil, nil
 		},
 	}
@@ -62,9 +62,9 @@ func TestGetClusterSecret(t *testing.T) {
 
 	request := createMCPRequest(t, map[string]any{})
 	result, _, err := handler(ctx, request, GetClusterSecretArgs{
-		OrgSlug: "org",
+		OrgSlug:   "org",
 		ClusterID: "cluster-id",
-		SecretID: "secret-id",
+		SecretID:  "secret-id",
 	})
 	require.NoError(t, err)
 
