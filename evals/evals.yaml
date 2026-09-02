@@ -106,6 +106,7 @@ matrix:
         echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
     mcp_version: source
     # compare_target defaults to this run.
+    compare_base: build:266
 
   # The same scenario driven by the Cursor CLI instead of Claude Code — lets a
   # build compare how two different agents fare against the same MCP server.
