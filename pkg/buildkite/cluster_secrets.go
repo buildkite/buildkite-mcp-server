@@ -10,7 +10,7 @@ import (
 )
 
 type ClusterSecretsClient interface {
-	Get(ctx context.Context, org, clusterId, secretID string) (buildkite.ClusterSecret, *buildkite.Response, error)
+	Get(ctx context.Context, org, clusterID, secretID string) (buildkite.ClusterSecret, *buildkite.Response, error)
 }
 
 type GetClusterSecretArgs struct {
@@ -23,7 +23,7 @@ type GetClusterSecretArgs struct {
 func GetClusterSecret() (mcp.Tool, mcp.ToolHandlerFor[GetClusterSecretArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_cluster_secret",
-			Description: "Get cluster secret value",
+			Description: "Get cluster secret information",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Cluster Secret",
 				ReadOnlyHint: true,
@@ -35,6 +35,7 @@ func GetClusterSecret() (mcp.Tool, mcp.ToolHandlerFor[GetClusterSecretArgs, any]
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("cluster_id", args.ClusterID),
+				attribute.String("secret_id", args.SecretID),
 			)
 
 			deps := DepsFromContext(ctx)
