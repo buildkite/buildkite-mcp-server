@@ -740,7 +740,6 @@ func TestClusterSecretsToolset(t *testing.T) {
 	clusterSecrets, exists := registry.Get(ToolsetClusterSecrets)
 	assert.True(exists)
 
-	// The toolset contains the Get and List cluster secret tools.
 	assert.Len(clusterSecrets.Tools, 2)
 	assert.Equal(
 		"get_cluster_secret",
@@ -751,13 +750,11 @@ func TestClusterSecretsToolset(t *testing.T) {
 		clusterSecrets.Tools[1].Tool.Name,
 	)
 
-	// The toolset requires only read_secrets_details.
 	assert.Equal(
 		[]string{"read_secrets_details"},
 		clusterSecrets.GetRequiredScopes(),
 	)
 
-	// Read-only filtering retains get_cluster_secret.
 	readOnlyTools := registry.GetEnabledTools(
 		[]string{ToolsetClusterSecrets},
 		true,
@@ -773,7 +770,6 @@ func TestClusterSecretsToolset(t *testing.T) {
 		readOnlyTools[1].Tool.Name,
 	)
 
-	// Read-only OAuth authorization requests the correct scope.
 	assert.Equal(
 		[]string{"read_secrets_details"},
 		registry.GetRequiredScopes(
