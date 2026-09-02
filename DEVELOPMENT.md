@@ -214,7 +214,10 @@ development.
 
 1. Draft a [new GitHub release](https://github.com/buildkite/buildkite-mcp-server/releases/new).
 2. Select a new tag, incrementing the minor or patch version as appropriate.
-3. Generate the release notes.
+3. Generate and review the release notes. Codex users can invoke the repository's
+   `$release-notes` skill with the target version. Use a recent curated release
+   as the layout reference, verify every pull request in the comparison range is
+   represented, and review the complete Markdown before updating GitHub.
 4. Save the release as a draft and notify internal contributors before publishing.
 5. Publish the release.
 
