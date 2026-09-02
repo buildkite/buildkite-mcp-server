@@ -9,4 +9,24 @@ go = "1.26.6"
 golangci-lint = "2.12.2"
 goreleaser = "2.17.1"
 ko = "0.19.1"
-lefthook = "latest"
+lefthook = "2.1.11"
+node = "22.22.3"
+
+[tasks.setup]
+description = "Install repository dependencies and Git hooks"
+run = [
+  "go mod download",
+  "lefthook install",
+]
+
+[tasks.check]
+description = "Run all local validation checks"
+run = "make check"
+
+[tasks.build]
+description = "Build the server binary"
+run = "make build"
+
+[tasks.run]
+description = "Run the server over stdio"
+run = "make run"
