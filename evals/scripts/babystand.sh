@@ -69,17 +69,17 @@ fi
 # agent (possibly with bypassed permissions), and on Linux the key would stay
 # readable in /proc/<pid>/environ for the whole run even after `unset` —
 # environ is the exec-time snapshot, and any same-UID process the agent
-# spawns (or leaves behind) can read it. So publishing is fully out-of-band
-# in BOTH modes: entries record their identity/outcome as <run>.dd.json and
-# the key only ever exists in a separate dd-publish.sh process — the
-# dd-publish pipeline step in CI, a manual invocation AFTER this script has
-# exited for local runs (see evals/README.md). The unset below is defense in
-# depth for an operator who exported the key anyway, not a substitute:
-# children stop inheriting it, but this process's environ still exposes it.
+# spawns (or leaves behind) can read it. Datadog publishing is therefore
+# CI-only and fully out-of-band: entries record their identity/outcome as
+# <run>.dd.json in the bundle, and the key only ever exists in the separate
+# dd-publish pipeline step. Local runs are for debugging prompts/scenarios
+# and never publish. The unset below is defense in depth for an operator who
+# exported the key anyway, not a substitute: children stop inheriting it,
+# but this process's environ still exposes it.
 if [[ -n "${DD_API_KEY:-}" ]]; then
     echo "WARNING: DD_API_KEY is set in babystand.sh's environment; the agent under test" >&2
     echo "WARNING: may be able to recover it (/proc/<pid>/environ survives unset). Do not" >&2
-    echo "WARNING: export it for eval runs — publish afterwards: dd-publish.sh <runs-dir>." >&2
+    echo "WARNING: export it for eval runs — Datadog publishing is CI-only." >&2
     unset DD_API_KEY
 fi
 
@@ -563,13 +563,12 @@ run_entry() {
     fi
 
     # --- Datadog run metadata ------------------------------------------------
-    # SECURITY: publishing is out-of-band in BOTH modes — DD_API_KEY must
-    # never exist in this process or any of its children while the evaluated
-    # agent runs (see the header note). This section only RECORDS the entry's
-    # identity + outcome as <run>.dd.json in the bundle; dd-publish.sh
-    # submits it later from a separate process: the dd-publish pipeline step
-    # in CI, a manual `dd-publish.sh <runs-dir>` after this script exits for
-    # local runs. Klaren's own runtime is deliberately excluded:
+    # SECURITY: DD_API_KEY must never exist in this process or any of its
+    # children while the evaluated agent runs (see the header note). This
+    # section only RECORDS the entry's identity + outcome as <run>.dd.json in
+    # the bundle; CI's dd-publish pipeline step submits it later from a
+    # separate process. Local runs never publish — they are for debugging
+    # prompts/scenarios. Klaren's own runtime is deliberately excluded:
     # EVAL_DURATION_SECONDS measures the agent under test, not the judge.
     echo "--- :datadog: [$ENTRY_ID] datadog metrics"
     # NOTE: $end_ts, not $end — `end` is a jq reserved keyword and jq 1.6
@@ -590,13 +589,7 @@ run_entry() {
         > "$PREFIX.dd.json"; then
         echo "WARNING: [$ENTRY_ID] failed to write $PREFIX.dd.json; Datadog publish will skip this entry" >&2
     fi
-    if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
-        echo "*** [$ENTRY_ID] run metadata recorded for the dd-publish step: $PREFIX.dd.json"
-    else
-        echo "*** [$ENTRY_ID] run metadata recorded: $PREFIX.dd.json"
-        echo "*** [$ENTRY_ID] to publish to Datadog, run AFTER this eval exits:"
-        echo "***     DD_API_KEY=... $SCRIPT_DIR/dd-publish.sh $RUNS_ROOT"
-    fi
+    echo "*** [$ENTRY_ID] run metadata recorded: $PREFIX.dd.json (published by CI's dd-publish step; local runs never publish)"
 
     # --- Klaren review (best-effort) ---------------------------------------
     # Klaren always runs on claude regardless of the entry's agent: it is the

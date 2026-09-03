@@ -9,12 +9,12 @@
 # a build, and a missing DD_API_KEY is a loud SKIP (exit 0) so local runs and
 # forks without Datadog wiring keep working unchanged.
 #
-# SECURITY: this script must run strictly OUTSIDE the eval-agent run in
-# both modes — the agent has unrestricted Bash, and a key present anywhere
-# during the run stays readable to same-UID processes via
-# /proc/<pid>/environ even after `unset`. Only dd-publish.sh drives it:
-# the CI dd-publish step (from the run-bundle artifacts, key scoped to
-# that step) or a manual dd-publish.sh <runs-dir> after a local run exits.
+# SECURITY: this script must run strictly OUTSIDE the eval-agent run — the
+# agent has unrestricted Bash, and a key present anywhere during the run
+# stays readable to same-UID processes via /proc/<pid>/environ even after
+# `unset`. Only the CI dd-publish step drives it (via dd-publish.sh, from
+# the run-bundle artifacts, key scoped to that step). Local eval runs never
+# publish; use DD_DRY_RUN=true to exercise this script by hand.
 #
 # Env contract (dd-publish.sh provides these):
 #   DD_API_KEY              Datadog API key. Unset/empty = skip (exit 0).

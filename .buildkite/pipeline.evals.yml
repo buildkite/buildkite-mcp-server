@@ -116,8 +116,8 @@ steps:
   # snapshot readable to same-UID processes. babystand.sh records each
   # entry's identity + outcome as a runs/<id>/<run-key>.dd.json artifact in
   # the run bundle; this step downloads those and drives
-  # evals/scripts/dd-metrics.sh once per entry. (Local runs publish the same
-  # way, manually, after the eval exits: dd-publish.sh <runs-dir>.)
+  # evals/scripts/dd-metrics.sh once per entry. (Local runs never publish —
+  # Datadog metrics are CI-only.)
   - label: ":datadog: Publish eval metrics"
     key: dd-publish
     command: ./evals/scripts/dd-publish.sh
