@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -131,6 +132,71 @@ func TestRecordingTransportPostBody(t *testing.T) {
 	r.Equal(body1, har.Log.Entries[0].Request.PostData.Text)
 	r.NotNil(har.Log.Entries[1].Request.PostData)
 	r.Equal(body2, har.Log.Entries[1].Request.PostData.Text)
+}
+
+func TestRecordingTransportDoesNotRecordClusterSecretValue(t *testing.T) {
+	for name, url := range map[string]string{
+		"standard base URL":      "https://api.buildkite.com/v2/organizations/my-org/clusters/cluster-id/secrets",
+		"base URL with a prefix": "https://api.buildkite.com/rest/v2/organizations/my-org/clusters/cluster-id/secrets",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := require.New(t)
+
+			harPath := filepath.Join(t.TempDir(), "cluster-secret.har")
+			mock := &mockTransport{responses: []*http.Response{
+				newMockResponse(201, "{\"id\":\"secret-id\"}", "application/json"),
+			}}
+
+			transport, err := recording.NewRecordingTransport(mock, harPath, "test")
+			r.NoError(err)
+
+			secretValue := strings.Join([]string{"plaintext", "cluster", "secret", "value"}, "-")
+			body := fmt.Sprintf("{\"key\":\"registry-password\",\"value\":%q,\"description\":\"Registry password\"}", secretValue)
+			req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+			r.NoError(err)
+			req.Header.Set("Content-Type", "application/json")
+
+			_, err = transport.RoundTrip(req)
+			r.NoError(err)
+
+			recorded, err := os.ReadFile(harPath)
+			r.NoError(err)
+			r.NotContains(string(recorded), secretValue)
+		})
+	}
+}
+
+func TestReplayTransportMatchesRedactedClusterSecretValue(t *testing.T) {
+	r := require.New(t)
+
+	harPath := filepath.Join(t.TempDir(), "cluster-secret.har")
+	mock := &mockTransport{responses: []*http.Response{
+		newMockResponse(201, "{\"id\":\"secret-id\"}", "application/json"),
+	}}
+
+	transport, err := recording.NewRecordingTransport(mock, harPath, "test")
+	r.NoError(err)
+
+	url := "https://api.buildkite.com/v2/organizations/my-org/clusters/cluster-id/secrets"
+	secretValue := strings.Join([]string{"plaintext", "cluster", "secret", "value"}, "-")
+	body := fmt.Sprintf("{\"key\":\"registry-password\",\"value\":%q}", secretValue)
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	r.NoError(err)
+	req.Header.Set("Content-Type", "application/json")
+	_, err = transport.RoundTrip(req)
+	r.NoError(err)
+
+	replay, err := recording.NewReplayTransport(harPath)
+	r.NoError(err)
+	replayReq, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	r.NoError(err)
+	replayReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := replay.RoundTrip(replayReq)
+	r.NoError(err)
+	responseBody, err := io.ReadAll(resp.Body)
+	r.NoError(err)
+	r.JSONEq("{\"id\":\"secret-id\"}", string(responseBody))
 }
 
 func TestRecordingTransportBinaryResponse(t *testing.T) {

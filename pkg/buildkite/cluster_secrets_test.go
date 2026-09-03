@@ -24,6 +24,12 @@ type mockClusterSecretsClient struct {
 		clusterID string,
 		secretID string,
 	) (buildkite.ClusterSecret, *buildkite.Response, error)
+	CreateFunc func(
+		ctx context.Context,
+		org string,
+		clusterID string,
+		input buildkite.ClusterSecretCreate,
+	) (buildkite.ClusterSecret, *buildkite.Response, error)
 }
 
 func (m *mockClusterSecretsClient) List(
@@ -44,6 +50,15 @@ func (m *mockClusterSecretsClient) Get(
 	return m.GetFunc(ctx, org, clusterID, secretID)
 }
 
+func (m *mockClusterSecretsClient) Create(
+	ctx context.Context,
+	org string,
+	clusterID string,
+	input buildkite.ClusterSecretCreate,
+) (buildkite.ClusterSecret, *buildkite.Response, error) {
+	return m.CreateFunc(ctx, org, clusterID, input)
+}
+
 var _ ClusterSecretsClient = (*mockClusterSecretsClient)(nil)
 
 func TestListClusterSecrets(t *testing.T) {
@@ -60,20 +75,20 @@ func TestListClusterSecrets(t *testing.T) {
 			require.Equal(t, 100, opt.PerPage)
 
 			return []buildkite.ClusterSecret{
-					{
-						ID:          "secret-id",
-						Key:         "DATABASE_PASSWORD",
-						Description: "Database password",
-						Policy:      "- pipeline_slug: example",
+				{
+					ID:          "secret-id",
+					Key:         "DATABASE_PASSWORD",
+					Description: "Database password",
+					Policy:      "- pipeline_slug: example",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: http.StatusOK,
+					Header: http.Header{
+						"Link": {`<https://api.buildkite.com/v2/organizations/org/clusters/cluster-id/secrets?page=2>; rel="next"`},
 					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: http.StatusOK,
-						Header: http.Header{
-							"Link": {`<https://api.buildkite.com/v2/organizations/org/clusters/cluster-id/secrets?page=2>; rel="next"`},
-						},
-					},
-				}, nil
+				},
+			}, nil
 		},
 	}
 
@@ -206,6 +221,94 @@ func TestGetClusterSecretWithError(t *testing.T) {
 	_, handler, _ := GetClusterSecret()
 	request := createMCPRequest(t, map[string]any{})
 	result, _, err := handler(ctx, request, GetClusterSecretArgs{OrgSlug: "org", ClusterID: "cluster-id", SecretID: "secret-id"})
+	assert.NoError(err)
+	assert.True(result.IsError)
+	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")
+}
+
+func TestCreateClusterSecret(t *testing.T) {
+	client := &mockClusterSecretsClient{
+		CreateFunc: func(
+			ctx context.Context,
+			org string,
+			clusterID string,
+			input buildkite.ClusterSecretCreate,
+		) (buildkite.ClusterSecret, *buildkite.Response, error) {
+			require.Equal(t, "org", org)
+			require.Equal(t, "cluster-id", clusterID)
+			require.Equal(t, "DATABASE_PASSWORD", input.Key)
+			require.Equal(t, "not-returned", input.Value)
+			require.Equal(t, "Database password", input.Description)
+			require.Equal(t, "- pipeline_slug: example", input.Policy)
+
+			return buildkite.ClusterSecret{
+				ID:          "new-secret-id",
+				Key:         input.Key,
+				Description: input.Description,
+				Policy:      input.Policy,
+			}, &buildkite.Response{
+				Response: &http.Response{StatusCode: http.StatusCreated},
+			}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		ClusterSecretsClient: client,
+	})
+
+	tool, handler, scopes := CreateClusterSecret()
+	require.Equal(t, "create_cluster_secret", tool.Name)
+	require.NotNil(t, tool.Annotations)
+	require.Equal(t, boolPtr(false), tool.Annotations.DestructiveHint)
+	require.Equal(t, []string{"write_secrets"}, scopes)
+
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, CreateClusterSecretArgs{
+		OrgSlug:     "org",
+		ClusterID:   "cluster-id",
+		Key:         "DATABASE_PASSWORD",
+		Value:       "not-returned",
+		Description: "Database password",
+		Policy:      "- pipeline_slug: example",
+	})
+	require.NoError(t, err)
+
+	textContent := getTextResult(t, result)
+	require.JSONEq(t, `{
+		"id": "new-secret-id",
+		"key": "DATABASE_PASSWORD",
+		"description": "Database password",
+		"policy": "- pipeline_slug: example",
+		"created_by": {},
+		"organization": {}
+	}`, textContent.Text)
+	require.NotContains(t, textContent.Text, "not-returned")
+}
+
+func TestCreateClusterSecretWithError(t *testing.T) {
+	assert := require.New(t)
+
+	client := &mockClusterSecretsClient{
+		CreateFunc: func(
+			ctx context.Context,
+			org string,
+			clusterID string,
+			input buildkite.ClusterSecretCreate,
+		) (buildkite.ClusterSecret, *buildkite.Response, error) {
+			return buildkite.ClusterSecret{}, &buildkite.Response{}, fmt.Errorf("API error")
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ClusterSecretsClient: client})
+
+	_, handler, _ := CreateClusterSecret()
+	request := createMCPRequest(t, map[string]any{})
+	result, _, err := handler(ctx, request, CreateClusterSecretArgs{
+		OrgSlug:   "org",
+		ClusterID: "cluster-id",
+		Key:       "DATABASE_PASSWORD",
+		Value:     "not-returned",
+	})
 	assert.NoError(err)
 	assert.True(result.IsError)
 	assert.Contains(result.Content[0].(*mcp.TextContent).Text, "API error")

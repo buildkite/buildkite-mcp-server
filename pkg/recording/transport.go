@@ -3,6 +3,7 @@ package recording
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -104,10 +105,7 @@ func (t *ReplayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if err == nil {
 			req.Body = io.NopCloser(bytes.NewReader(body))
 			if len(body) > 0 {
-				postData = &HARPostData{
-					MimeType: req.Header.Get("Content-Type"),
-					Text:     string(body),
-				}
+				postData = postDataForRequest(req, body)
 			}
 		}
 	}
@@ -169,10 +167,7 @@ func buildHAREntry(req *http.Request, reqBody []byte, resp *http.Response, respB
 
 	var postData *HARPostData
 	if len(reqBody) > 0 {
-		postData = &HARPostData{
-			MimeType: req.Header.Get("Content-Type"),
-			Text:     string(reqBody),
-		}
+		postData = postDataForRequest(req, reqBody)
 	}
 
 	mimeType := resp.Header.Get("Content-Type")
@@ -258,4 +253,47 @@ func decodeHARContent(content HARContent) *bytes.Reader {
 		}
 	}
 	return bytes.NewReader([]byte(content.Text))
+}
+
+func postDataForRequest(req *http.Request, body []byte) *HARPostData {
+	if len(body) == 0 {
+		return nil
+	}
+
+	text := string(body)
+
+	if isCreateClusterSecretRequest(req) {
+		text = "{\"value\":\"[REDACTED]\"}"
+
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal(body, &payload); err == nil {
+			payload["value"] = json.RawMessage("\"[REDACTED]\"")
+
+			if redacted, err := json.Marshal(payload); err == nil {
+				text = string(redacted)
+			}
+		}
+	}
+
+	return &HARPostData{
+		MimeType: req.Header.Get("Content-Type"),
+		Text:     text,
+	}
+}
+
+func isCreateClusterSecretRequest(req *http.Request) bool {
+	if req.Method != http.MethodPost {
+		return false
+	}
+
+	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	if len(parts) < 6 {
+		return false
+	}
+	parts = parts[len(parts)-6:]
+
+	return parts[0] == "v2" &&
+		parts[1] == "organizations" &&
+		parts[3] == "clusters" &&
+		parts[5] == "secrets"
 }
