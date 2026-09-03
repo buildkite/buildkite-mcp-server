@@ -47,11 +47,12 @@ compatibility constraint, or operational risk. Do not use em dashes.
 
 ## Review and update
 
-Always show the complete Markdown draft before changing GitHub. If the user asked
-only for a draft or review, stop after presenting it.
-
-Editing or creating a GitHub release requires explicit user approval. Approval to
-draft notes is not approval to update or publish a release. After approval:
+Always show the complete Markdown draft and stop. Wait for a new user response
+that explicitly approves that exact body before changing GitHub, even when the
+initial request asks to draft and update the release in one step. Approval to
+draft notes or general permission to update a release is not approval of the
+generated body. If the draft changes, present the complete revised Markdown and
+wait for approval again. After approval:
 
 1. Write the approved Markdown to a temporary notes file.
 2. Update the specified existing release using `gh release edit` with
