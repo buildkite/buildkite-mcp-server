@@ -657,7 +657,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered
-	expectedToolsets := []string{"clusters", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
+	expectedToolsets := []string{"clusters", "cluster_secrets", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
 	for _, name := range expectedToolsets {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
@@ -729,4 +729,52 @@ func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
 		require.Equal(t, contextDescription, contextProperty["description"], "%s has the wrong telemetry.context description", tool.Name)
 		require.InDelta(t, float64(trace.TelemetryContextMaxLength), contextProperty["maxLength"], 0, "%s has the wrong telemetry.context maxLength", tool.Name)
 	}
+}
+
+func TestClusterSecretsToolset(t *testing.T) {
+	assert := require.New(t)
+
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+
+	clusterSecrets, exists := registry.Get(ToolsetClusterSecrets)
+	assert.True(exists)
+
+	assert.Len(clusterSecrets.Tools, 2)
+	assert.Equal(
+		"get_cluster_secret",
+		clusterSecrets.Tools[0].Tool.Name,
+	)
+	assert.Equal(
+		"list_cluster_secrets",
+		clusterSecrets.Tools[1].Tool.Name,
+	)
+
+	assert.Equal(
+		[]string{"read_secrets_details"},
+		clusterSecrets.GetRequiredScopes(),
+	)
+
+	readOnlyTools := registry.GetEnabledTools(
+		[]string{ToolsetClusterSecrets},
+		true,
+	)
+	assert.Len(readOnlyTools, 2)
+	assert.Equal(
+		"get_cluster_secret",
+		readOnlyTools[0].Tool.Name,
+	)
+
+	assert.Equal(
+		"list_cluster_secrets",
+		readOnlyTools[1].Tool.Name,
+	)
+
+	assert.Equal(
+		[]string{"read_secrets_details"},
+		registry.GetRequiredScopes(
+			[]string{ToolsetClusterSecrets},
+			true,
+		),
+	)
 }
