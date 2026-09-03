@@ -175,6 +175,9 @@ func TestReadLogsParamsSchema(t *testing.T) {
 	for _, opt := range []string{"cache_ttl", "force_refresh", "seek", "limit"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+
+	require.Contains(t, s.Properties["seek"].Description, "Zero-based row")
+	require.Contains(t, s.Properties["limit"].Description, "0 reads all remaining entries")
 }
 
 func TestSearchLogsParamsSchema(t *testing.T) {
@@ -185,6 +188,13 @@ func TestSearchLogsParamsSchema(t *testing.T) {
 	for _, opt := range []string{"cache_ttl", "force_refresh", "context", "before_context", "after_context", "case_sensitive", "invert_match", "reverse", "seek_start", "limit"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+
+	require.Contains(t, s.Properties["build_number"].Description, "not the build UUID")
+	require.Contains(t, s.Properties["job_id"].Description, "UUID")
+	require.Contains(t, s.Properties["cache_ttl"].Description, "30s")
+	require.Contains(t, s.Properties["pattern"].Description, "regular expression")
+	require.Contains(t, s.Properties["seek_start"].Description, "Zero-based row")
+	require.Contains(t, s.Properties["limit"].Description, "0 returns all")
 }
 
 func TestTailLogsParamsSchema(t *testing.T) {
@@ -195,6 +205,8 @@ func TestTailLogsParamsSchema(t *testing.T) {
 	for _, opt := range []string{"cache_ttl", "force_refresh", "tail"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+
+	require.Contains(t, s.Properties["tail"].Description, "defaults to 10")
 }
 
 func TestListArtifactsForBuildArgsSchema(t *testing.T) {

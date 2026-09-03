@@ -119,6 +119,14 @@ docker run -i --rm -e BUILDKITE_API_TOKEN="your-token" buildkite/buildkite-mcp-s
 4. Update the tool documentation.
 5. Run `mise run check`.
 
+### Tool parameter descriptions
+
+When adding or reviewing tool parameters, use the repository skill at
+[`tool-parameter-descriptions`](.agents/skills/tool-parameter-descriptions/SKILL.md).
+It defines when a description adds useful information, when to omit one, and
+how to validate description changes. Apply it to the parameter schema and the
+corresponding handler behavior.
+
 ## Validating tools with MCP Inspector
 
 [MCP Inspector](https://github.com/modelcontextprotocol/inspector) is useful for exercising tools and verifying their schemas. Node.js is included in the mise toolchain for this optional workflow.
