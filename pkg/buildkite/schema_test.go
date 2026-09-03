@@ -189,12 +189,22 @@ func TestSearchLogsParamsSchema(t *testing.T) {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
 
-	require.Contains(t, s.Properties["build_number"].Description, "not the build UUID")
-	require.Contains(t, s.Properties["job_id"].Description, "UUID")
-	require.Contains(t, s.Properties["cache_ttl"].Description, "30s")
-	require.Contains(t, s.Properties["pattern"].Description, "regular expression")
-	require.Contains(t, s.Properties["seek_start"].Description, "Zero-based row")
-	require.Contains(t, s.Properties["limit"].Description, "0 returns all")
+	expectedDescriptions := map[string]string{
+		"build_number":   "Sequential build number, not the build UUID",
+		"job_id":         "Buildkite job UUID",
+		"cache_ttl":      "Go duration; defaults to 30s",
+		"force_refresh":  "Bypass cached log data",
+		"pattern":        "Go regular expression",
+		"context":        "Lines before and after each match; overrides before_context and after_context when nonzero",
+		"before_context": "Lines before each match; ignored when context is nonzero",
+		"after_context":  "Lines after each match; ignored when context is nonzero",
+		"reverse":        "Search from the end of the log",
+		"seek_start":     "Zero-based starting row; 0 uses the default (log end when reverse)",
+		"limit":          "Maximum matches to return; 0 returns all",
+	}
+	for property, description := range expectedDescriptions {
+		require.Equal(t, description, s.Properties[property].Description, "%s has the wrong description", property)
+	}
 }
 
 func TestTailLogsParamsSchema(t *testing.T) {

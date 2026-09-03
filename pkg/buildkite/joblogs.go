@@ -36,13 +36,13 @@ type JobLogsBaseParams struct {
 type SearchLogsParams struct {
 	JobLogsBaseParams
 	Pattern       string `json:"pattern" jsonschema:"Go regular expression"`
-	Context       int    `json:"context,omitempty" jsonschema:"Lines before and after each match"`
-	BeforeContext int    `json:"before_context,omitempty" jsonschema:"Lines before each match"`
-	AfterContext  int    `json:"after_context,omitempty" jsonschema:"Lines after each match"`
+	Context       int    `json:"context,omitempty" jsonschema:"Lines before and after each match; overrides before_context and after_context when nonzero"`
+	BeforeContext int    `json:"before_context,omitempty" jsonschema:"Lines before each match; ignored when context is nonzero"`
+	AfterContext  int    `json:"after_context,omitempty" jsonschema:"Lines after each match; ignored when context is nonzero"`
 	CaseSensitive bool   `json:"case_sensitive,omitempty"`
 	InvertMatch   bool   `json:"invert_match,omitempty"`
 	Reverse       bool   `json:"reverse,omitempty" jsonschema:"Search from the end of the log"`
-	SeekStart     int    `json:"seek_start,omitempty" jsonschema:"Zero-based row at which to begin searching"`
+	SeekStart     int    `json:"seek_start,omitempty" jsonschema:"Zero-based starting row; 0 uses the default (log end when reverse)"`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Maximum matches to return; 0 returns all"`
 }
 
