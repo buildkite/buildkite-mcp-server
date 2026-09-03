@@ -111,10 +111,13 @@ steps:
 
   # Publish per-entry run metrics to Datadog, OUTSIDE the agent container.
   # SECURITY: the eval step above runs the evaluated agent with unrestricted
-  # Bash, so DD_API_KEY must never enter that container's environment.
-  # babystand.sh records each entry's identity + outcome as a
-  # runs/<id>/<run-key>.dd.json artifact in the run bundle; this step
-  # downloads those and drives evals/scripts/dd-metrics.sh once per entry.
+  # Bash, so DD_API_KEY must never exist anywhere in that step — not even
+  # captured-then-unset, since /proc/<pid>/environ keeps the exec-time
+  # snapshot readable to same-UID processes. babystand.sh records each
+  # entry's identity + outcome as a runs/<id>/<run-key>.dd.json artifact in
+  # the run bundle; this step downloads those and drives
+  # evals/scripts/dd-metrics.sh once per entry. (Local runs publish the same
+  # way, manually, after the eval exits: dd-publish.sh <runs-dir>.)
   - label: ":datadog: Publish eval metrics"
     key: dd-publish
     command: ./evals/scripts/dd-publish.sh

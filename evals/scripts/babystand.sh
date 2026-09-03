@@ -65,16 +65,23 @@ if [[ "${RUN_IN_CI:-false}" != "true" && "$LOCAL_BYPASS_PERMISSION" != "true" ]]
     fi
 fi
 
-# SECURITY: scrub DD_API_KEY from the environment before any child process
-# spawns. Local runs export it for direct publishing, but every subprocess —
-# the evaluated agent (possibly with bypassed permissions), Klaren, scenario
-# setup shells — inherits this script's environment and must never see the
-# key. It is handed back explicitly to the dd-metrics.sh invocation alone;
-# an unexported shell variable does not reach children. (In CI the variable
-# is never mapped into this container at all — see the SECURITY note in
-# .buildkite/pipeline.evals.yml.)
-_DD_API_KEY="${DD_API_KEY:-}"
-unset DD_API_KEY
+# SECURITY: this script must NEVER hold DD_API_KEY. It runs the evaluated
+# agent (possibly with bypassed permissions), and on Linux the key would stay
+# readable in /proc/<pid>/environ for the whole run even after `unset` —
+# environ is the exec-time snapshot, and any same-UID process the agent
+# spawns (or leaves behind) can read it. So publishing is fully out-of-band
+# in BOTH modes: entries record their identity/outcome as <run>.dd.json and
+# the key only ever exists in a separate dd-publish.sh process — the
+# dd-publish pipeline step in CI, a manual invocation AFTER this script has
+# exited for local runs (see evals/README.md). The unset below is defense in
+# depth for an operator who exported the key anyway, not a substitute:
+# children stop inheriting it, but this process's environ still exposes it.
+if [[ -n "${DD_API_KEY:-}" ]]; then
+    echo "WARNING: DD_API_KEY is set in babystand.sh's environment; the agent under test" >&2
+    echo "WARNING: may be able to recover it (/proc/<pid>/environ survives unset). Do not" >&2
+    echo "WARNING: export it for eval runs — publish afterwards: dd-publish.sh <runs-dir>." >&2
+    unset DD_API_KEY
+fi
 
 # One timestamp for the whole build; entries are disambiguated by ENTRY_ID.
 DATETIME=$(date +%Y-%m-%d-%H%M%S)
@@ -555,17 +562,15 @@ run_entry() {
         echo "*** [$ENTRY_ID] scenario branch '$SCENARIO_BRANCH_VAL' latest build state: $FINAL_BUILD_STATE (goal_achieved: $GOAL_ACHIEVED)"
     fi
 
-    # --- Datadog run metrics (best-effort) -----------------------------------
-    # SECURITY: in CI, DD_API_KEY never enters this container — the evaluated
-    # agent runs here with unrestricted Bash and would inherit it. Record the
-    # entry's identity + outcome as <run>.dd.json in the bundle instead; the
-    # dd-publish pipeline step (outside this container) downloads the bundles
-    # and submits them with the key scoped to that step alone. Local runs have
-    # no post-step, so they publish directly — from _DD_API_KEY, captured and
-    # scrubbed from the environment at startup so no agent subprocess ever
-    # inherits it; dd-metrics.sh skips loudly when it is empty. Klaren's own
-    # runtime is deliberately excluded either way: EVAL_DURATION_SECONDS
-    # measures the agent under test, not the judge.
+    # --- Datadog run metadata ------------------------------------------------
+    # SECURITY: publishing is out-of-band in BOTH modes — DD_API_KEY must
+    # never exist in this process or any of its children while the evaluated
+    # agent runs (see the header note). This section only RECORDS the entry's
+    # identity + outcome as <run>.dd.json in the bundle; dd-publish.sh
+    # submits it later from a separate process: the dd-publish pipeline step
+    # in CI, a manual `dd-publish.sh <runs-dir>` after this script exits for
+    # local runs. Klaren's own runtime is deliberately excluded:
+    # EVAL_DURATION_SECONDS measures the agent under test, not the judge.
     echo "--- :datadog: [$ENTRY_ID] datadog metrics"
     # NOTE: $end_ts, not $end — `end` is a jq reserved keyword and jq 1.6
     # (this container's Ubuntu jq) rejects it as a variable name; a compile
@@ -588,12 +593,9 @@ run_entry() {
     if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
         echo "*** [$ENTRY_ID] run metadata recorded for the dd-publish step: $PREFIX.dd.json"
     else
-        DD_API_KEY="$_DD_API_KEY" \
-        ENTRY_ID="$ENTRY_ID" PROMPT_NAME="$PROMPT_NAME" AGENT="$AGENT" MODEL="${MODEL:-default}" \
-        GOAL_ACHIEVED="$GOAL_ACHIEVED" EVAL_DURATION_SECONDS="$EVAL_ELAPSED_SECS" \
-        METRICS_FILE="$AUDIT_METRICS_FILE" \
-            "$SCRIPT_DIR/dd-metrics.sh" \
-            || echo "WARNING: datadog publish failed for '$ENTRY_ID'" >&2
+        echo "*** [$ENTRY_ID] run metadata recorded: $PREFIX.dd.json"
+        echo "*** [$ENTRY_ID] to publish to Datadog, run AFTER this eval exits:"
+        echo "***     DD_API_KEY=... $SCRIPT_DIR/dd-publish.sh $RUNS_ROOT"
     fi
 
     # --- Klaren review (best-effort) ---------------------------------------

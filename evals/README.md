@@ -125,22 +125,32 @@ All new code are mostly in `evals/` folder
       `mcp_eval`), `DD_TIMESTAMP` the point timestamp (the run's end; clamped
       to Datadog's ~1h ingest window), `DD_DRY_RUN=true` prints the payload
       instead of submitting
-    * SECURITY: in CI this never runs inside the eval container — the agent
-      under test has unrestricted Bash there and would inherit `DD_API_KEY`.
-      babystand.sh calls it directly only for local runs; CI publishing goes
-      through dd-publish.sh (below)
+    * SECURITY: this never runs while the eval agent does — in either mode.
+      The agent under test has unrestricted Bash, and a key present anywhere
+      in the run (even captured-then-`unset`) stays readable to same-UID
+      processes via `/proc/<pid>/environ`. babystand.sh only records
+      metadata; dd-publish.sh (below) is the single place the key exists
     * Goal detection (in babystand.sh): entries whose setup pushed a
       `SCENARIO_BRANCH` count as achieved when that branch's latest build in
       the eval org is `passed`; entries without one (e.g. analyze-build)
       report `unknown` — tagged, but no `goal_achieved` series, so gaps in
       Datadog never miscount as misses
   * dd-publish.sh
-    * CI post-step entry point (the `dd-publish` step in
-      .buildkite/pipeline.evals.yml): downloads each entry's
-      `runs/<id>/<run-key>.dd.json` (identity + outcome, written by
-      babystand.sh) and `.metrics.json` artifacts, then drives dd-metrics.sh
-      once per entry — so `DD_API_KEY` stays scoped to that step and out of
-      the agent's environment
+    * The single Datadog publish entry point, and the only process that may
+      hold `DD_API_KEY`. Reads each entry's `runs/<id>/<run-key>.dd.json`
+      (identity + outcome, written by babystand.sh) plus `.metrics.json`,
+      then drives dd-metrics.sh once per entry
+    * CI mode (no argument): the `dd-publish` pipeline step — downloads the
+      run-bundle artifacts; the key is scoped to that step via `secrets`
+    * Local mode (`dd-publish.sh <runs-dir>`): run it AFTER babystand.sh has
+      exited, in a fresh shell — never export `DD_API_KEY` into the eval run
+      itself:
+      ```bash
+      DD_API_KEY=... ./evals/scripts/dd-publish.sh evals/runs
+      ```
+      (Points keep each run's recorded end time, clamped to Datadog's ~1h
+      ingest window — publish soon after the run or old points snap to the
+      window edge)
     * CI wiring: the `MCP_EVAL_FRAMEWORK_DATADOG_API_KEY` secret must exist in
       the cluster (see .buildkite/pipeline.evals.yml) — create it before that
       mapping ships, or the step fails at secret resolution

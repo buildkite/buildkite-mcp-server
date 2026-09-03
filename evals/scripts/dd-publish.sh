@@ -1,43 +1,60 @@
 #!/usr/bin/env bash
 #
-# dd-publish.sh — CI post-step: publish every entry's run metrics to Datadog.
+# dd-publish.sh — publish every entry's recorded run metrics to Datadog.
 #
-# Runs OUTSIDE the eval agent's container (the dd-publish step in
-# .buildkite/pipeline.evals.yml): the evaluated agent runs with unrestricted
-# Bash, so DD_API_KEY must never enter its environment. babystand.sh records
-# each entry's identity + outcome as runs/<id>/<run-key>.dd.json (next to
-# <run-key>.metrics.json) in the run-bundle artifacts; this script downloads
-# those and drives dd-metrics.sh once per entry, with the key scoped to this
-# step alone.
+# SECURITY: this is the ONLY process that may hold DD_API_KEY, and it must
+# run strictly OUTSIDE the eval-agent run. The evaluated agent has
+# unrestricted Bash, and on Linux a key present anywhere in the run —
+# even `unset` after capture — stays readable to same-UID processes via
+# /proc/<pid>/environ (the exec-time snapshot). So babystand.sh never
+# touches the key in either mode; it records each entry's identity +
+# outcome as runs/<id>/<run-key>.dd.json (next to <run-key>.metrics.json)
+# and this script submits them via dd-metrics.sh afterwards.
+#
+# Modes:
+#   CI (no argument):    the dd-publish pipeline step — downloads the
+#                        run-bundle artifacts the eval step uploaded, with
+#                        the key scoped to that step alone.
+#   Local (<runs-dir>):  run manually AFTER babystand.sh has exited, in a
+#                        fresh shell:
+#                            DD_API_KEY=... ./dd-publish.sh evals/runs
+#                        Scans the directory instead of downloading.
 #
 # Best-effort like dd-metrics.sh: no DD_API_KEY -> loud skip (exit 0); no
-# .dd.json artifacts (eval step died before any entry finished) -> loud skip
-# (exit 0); a failed entry logs a warning and the script exits 1 at the end
-# (the step is soft_fail, so the build stays green either way).
+# .dd.json files -> loud skip (exit 0 in CI; the eval step may have died
+# before any entry finished); a failed entry logs a warning and the script
+# exits 1 at the end (the CI step is soft_fail, so the build stays green).
 #
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNS_DIR="${1:-}"
 
 if [[ -z "${DD_API_KEY:-}" ]]; then
     echo "dd-publish: DD_API_KEY is unset; skipping Datadog publish (see .buildkite/pipeline.evals.yml)." >&2
     exit 0
 fi
-command -v jq >/dev/null              || { echo "dd-publish: jq is required" >&2; exit 1; }
-command -v buildkite-agent >/dev/null || { echo "dd-publish: buildkite-agent is required" >&2; exit 1; }
+command -v jq >/dev/null || { echo "dd-publish: jq is required" >&2; exit 1; }
 
-WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "$WORK_DIR"' EXIT
-
-# Metadata drives the loop; metrics files can be missing for entries whose
-# audit failed (dd-metrics.sh then publishes identity/duration series only),
-# hence the separate best-effort download.
-if ! buildkite-agent artifact download "runs/*/*.dd.json" "$WORK_DIR/"; then
-    echo "dd-publish: no run metadata artifacts found; nothing to publish." >&2
-    exit 0
+if [[ -n "$RUNS_DIR" ]]; then
+    # Local mode: publish from an existing runs directory.
+    [[ -d "$RUNS_DIR" ]] || { echo "dd-publish: runs directory not found: $RUNS_DIR" >&2; exit 1; }
+    WORK_DIR="$RUNS_DIR"
+else
+    # CI mode: pull the run-bundle artifacts the eval step uploaded.
+    command -v buildkite-agent >/dev/null || { echo "dd-publish: buildkite-agent is required (or pass a runs directory)" >&2; exit 1; }
+    WORK_DIR="$(mktemp -d)"
+    trap 'rm -rf "$WORK_DIR"' EXIT
+    # Metadata drives the loop; metrics files can be missing for entries whose
+    # audit failed (dd-metrics.sh then publishes identity/duration series
+    # only), hence the separate best-effort download.
+    if ! buildkite-agent artifact download "runs/*/*.dd.json" "$WORK_DIR/"; then
+        echo "dd-publish: no run metadata artifacts found; nothing to publish." >&2
+        exit 0
+    fi
+    buildkite-agent artifact download "runs/*/*.metrics.json" "$WORK_DIR/" \
+        || echo "dd-publish: no metrics artifacts; publishing identity/duration series only." >&2
 fi
-buildkite-agent artifact download "runs/*/*.metrics.json" "$WORK_DIR/" \
-    || echo "dd-publish: no metrics artifacts; publishing identity/duration series only." >&2
 
 PUBLISHED=0 FAILED=0
 while IFS= read -r META; do
@@ -66,5 +83,9 @@ while IFS= read -r META; do
     fi
 done < <(find "$WORK_DIR" -name '*.dd.json' | sort)
 
+if [[ "$PUBLISHED" -eq 0 && "$FAILED" -eq 0 && -n "$RUNS_DIR" ]]; then
+    echo "dd-publish: no *.dd.json files under $RUNS_DIR; nothing to publish." >&2
+    exit 1
+fi
 echo "dd-publish: $PUBLISHED entry(ies) published, $FAILED failed."
 [[ "$FAILED" -eq 0 ]]

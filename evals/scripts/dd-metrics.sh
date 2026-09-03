@@ -5,17 +5,18 @@
 # Reads the bk-tool-audit-v2.sh metrics JSON plus run metadata from the
 # environment and submits gauge series to the Datadog metrics v2 API
 # (POST https://api.<site>/api/v2/series). Deliberately BEST-EFFORT:
-# babystand.sh invokes it with `|| warning` so a Datadog outage never fails an
-# entry, and a missing DD_API_KEY is a loud SKIP (exit 0) so local runs and
+# dd-publish.sh tolerates per-entry failures so a Datadog outage never fails
+# a build, and a missing DD_API_KEY is a loud SKIP (exit 0) so local runs and
 # forks without Datadog wiring keep working unchanged.
 #
-# SECURITY: in CI this script must run OUTSIDE the eval agent's container
-# (the agent has unrestricted Bash and inherits its environment, so it could
-# read DD_API_KEY). babystand.sh only invokes it directly for local runs;
-# the dd-publish.sh pipeline step drives it for CI, from the run-bundle
-# artifacts, with the key scoped to that step alone.
+# SECURITY: this script must run strictly OUTSIDE the eval-agent run in
+# both modes — the agent has unrestricted Bash, and a key present anywhere
+# during the run stays readable to same-UID processes via
+# /proc/<pid>/environ even after `unset`. Only dd-publish.sh drives it:
+# the CI dd-publish step (from the run-bundle artifacts, key scoped to
+# that step) or a manual dd-publish.sh <runs-dir> after a local run exits.
 #
-# Env contract (babystand.sh locally / dd-publish.sh in CI provides these):
+# Env contract (dd-publish.sh provides these):
 #   DD_API_KEY              Datadog API key. Unset/empty = skip (exit 0).
 #   DD_SITE                 Datadog site (default: datadoghq.com).
 #   DD_METRIC_PREFIX        Metric namespace (default: mcp_eval).
