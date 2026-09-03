@@ -14,7 +14,8 @@ env:
   # token (this org, used by bk-eval-compare.sh).
   EVAL_ORG_SLUG: "anothertest"
   EVAL_PIPELINE_SLUG: "buildkite-mcp-server"
-  # Datadog site for dd-metrics.sh (the API key comes from secrets below).
+  # Datadog site for dd-metrics.sh. The API key is scoped to the dd-publish
+  # step only — never the eval step (see the SECURITY note there).
   DD_SITE: "datadoghq.com"
 
 # PR CI (lint/test) and the generator step run here. The bork PR builds the eval
@@ -65,11 +66,13 @@ steps:
             # to the commit under review (mcp_version: source). Interpolated
             # at pipeline-upload time, when BUILDKITE_COMMIT is this commit.
             - MCP_SRC_SHA=${BUILDKITE_COMMIT}
-            # Per-entry run metrics -> Datadog (evals/scripts/dd-metrics.sh).
-            # Publishing skips loudly when DD_API_KEY is empty; the build
-            # number becomes a buildkite_build tag on every series.
-            - DD_API_KEY
-            - DD_SITE
+            # SECURITY: DD_API_KEY is deliberately NOT mapped here. The
+            # evaluated agent runs in this container with unrestricted Bash
+            # and inherits its environment, so any credential mapped in is
+            # readable (and exfiltratable) by the agent under test. Datadog
+            # publishing happens in the dd-publish step below instead, from
+            # the run-bundle artifacts babystand.sh uploads.
+            # bk-eval-compare.sh keys the current run by build number.
             - BUILDKITE_BUILD_NUMBER
             - BUILDKITE_ORGANIZATION_SLUG
             - BUILDKITE_PIPELINE_SLUG
@@ -105,7 +108,29 @@ steps:
       # Cursor CLI API key (generate in the Cursor Dashboard). Maps into
       # the CURSOR_API_KEY env line above.
       CURSOR_API_KEY: MCP_EVAL_FRAMEWORK_CURSOR_API_KEY
-      # Datadog API key for dd-metrics.sh. NOTE: the secret must exist in the
-      # cluster before this mapping ships, or the step fails at secret
-      # resolution (create it even with an empty value to disable publishing).
+
+  # Publish per-entry run metrics to Datadog, OUTSIDE the agent container.
+  # SECURITY: the eval step above runs the evaluated agent with unrestricted
+  # Bash, so DD_API_KEY must never enter that container's environment.
+  # babystand.sh records each entry's identity + outcome as a
+  # runs/<id>/<run-key>.dd.json artifact in the run bundle; this step
+  # downloads those and drives evals/scripts/dd-metrics.sh once per entry.
+  - label: ":datadog: Publish eval metrics"
+    key: dd-publish
+    command: ./evals/scripts/dd-publish.sh
+    # Publish whatever bundles were uploaded even when the eval step fails —
+    # partial results are exactly what a failure investigation needs.
+    depends_on:
+      - step: agent
+        allow_failure: true
+    # Best-effort, like the in-step publish it replaces: a Datadog outage
+    # must never fail the build.
+    soft_fail: true
+    agents:
+      queue: hosted
+    # Scoped to this step only: it runs only harness scripts from the repo,
+    # never the evaluated agent. NOTE: the secret must exist in the cluster
+    # before this mapping ships, or the step fails at secret resolution
+    # (create it even with an empty value to disable publishing).
+    secrets:
       DD_API_KEY: MCP_EVAL_FRAMEWORK_DATADOG_API_KEY

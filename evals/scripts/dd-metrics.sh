@@ -9,10 +9,21 @@
 # entry, and a missing DD_API_KEY is a loud SKIP (exit 0) so local runs and
 # forks without Datadog wiring keep working unchanged.
 #
-# Env contract (babystand.sh run_entry provides all of these):
+# SECURITY: in CI this script must run OUTSIDE the eval agent's container
+# (the agent has unrestricted Bash and inherits its environment, so it could
+# read DD_API_KEY). babystand.sh only invokes it directly for local runs;
+# the dd-publish.sh pipeline step drives it for CI, from the run-bundle
+# artifacts, with the key scoped to that step alone.
+#
+# Env contract (babystand.sh locally / dd-publish.sh in CI provides these):
 #   DD_API_KEY              Datadog API key. Unset/empty = skip (exit 0).
 #   DD_SITE                 Datadog site (default: datadoghq.com).
 #   DD_METRIC_PREFIX        Metric namespace (default: mcp_eval).
+#   DD_TIMESTAMP            optional point timestamp (epoch secs, the run's
+#                           end). Default: now. Clamped to Datadog's ingest
+#                           window (points older than ~1h are dropped
+#                           server-side, which would lose early entries of a
+#                           long matrix when publishing happens post-build).
 #   ENTRY_ID                evals.yaml entry id            -> tag entry:
 #   PROMPT_NAME             prompt template name           -> tag prompt:
 #   AGENT                   claude | cursor | cursor-cloud -> tag agent:
@@ -25,8 +36,9 @@
 #                           Datadog mean "not measured", never zero.
 #   BUILDKITE_BUILD_NUMBER  optional                       -> tag buildkite_build:
 #
-# Submitted series (all gauges; the point timestamp is the submission time,
-# which is the run's end — that carries the "datetime" dimension):
+# Submitted series (all gauges; the point timestamp is DD_TIMESTAMP — the
+# run's end — falling back to submission time; that carries the "datetime"
+# dimension):
 #   <prefix>.run                        always 1 — count runs / slice by tags
 #   <prefix>.goal_achieved              1/0; omitted when goal is unknown
 #   <prefix>.duration_seconds           agent wall-clock
@@ -60,6 +72,19 @@ if [[ -n "${METRICS_FILE:-}" && -s "${METRICS_FILE:-}" ]]; then
     fi
 fi
 
+# Point timestamp: prefer the recorded run end (CI publishes after the whole
+# matrix finishes). Clamp into Datadog's accepted window — points older than
+# ~1h are silently dropped, and a clamped-but-present point beats a lost one.
+NOW="$(date +%s)"
+TS="${DD_TIMESTAMP:-$NOW}"
+[[ "$TS" =~ ^[0-9]+$ ]] || TS="$NOW"
+MIN_TS=$(( NOW - 3300 ))
+if (( TS < MIN_TS )); then
+    echo "dd-metrics: DD_TIMESTAMP $TS is outside the Datadog ingest window; clamping to $MIN_TS." >&2
+    TS="$MIN_TS"
+fi
+(( TS > NOW )) && TS="$NOW"
+
 PAYLOAD="$(jq -n \
     --arg prefix   "$DD_METRIC_PREFIX" \
     --arg entry    "${ENTRY_ID:-unknown}" \
@@ -69,7 +94,7 @@ PAYLOAD="$(jq -n \
     --arg goal     "${GOAL_ACHIEVED:-unknown}" \
     --arg duration "${EVAL_DURATION_SECONDS:-}" \
     --arg build    "${BUILDKITE_BUILD_NUMBER:-}" \
-    --argjson now  "$(date +%s)" \
+    --argjson now  "$TS" \
     --argjson m    "$METRICS_JSON" '
     # type 3 = gauge in the v2 series API. A null value emits nothing: absent
     # in Datadog must mean "not measured" (cursor tokens), never zero.

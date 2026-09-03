@@ -544,16 +544,37 @@ run_entry() {
         echo "*** [$ENTRY_ID] scenario branch '$SCENARIO_BRANCH_VAL' latest build state: $FINAL_BUILD_STATE (goal_achieved: $GOAL_ACHIEVED)"
     fi
 
-    # --- Publish run metrics to Datadog (best-effort) ------------------------
-    # Skips loudly when DD_API_KEY is unset (local runs, forks). Klaren's own
-    # runtime is deliberately excluded: EVAL_DURATION_SECONDS measures the
-    # agent under test, not the judge.
+    # --- Datadog run metrics (best-effort) -----------------------------------
+    # SECURITY: in CI, DD_API_KEY never enters this container — the evaluated
+    # agent runs here with unrestricted Bash and would inherit it. Record the
+    # entry's identity + outcome as <run>.dd.json in the bundle instead; the
+    # dd-publish pipeline step (outside this container) downloads the bundles
+    # and submits them with the key scoped to that step alone. Local runs have
+    # no post-step, so they publish directly — dd-metrics.sh skips loudly when
+    # DD_API_KEY is unset. Klaren's own runtime is deliberately excluded
+    # either way: EVAL_DURATION_SECONDS measures the agent under test, not
+    # the judge.
     echo "--- :datadog: [$ENTRY_ID] datadog metrics"
-    ENTRY_ID="$ENTRY_ID" PROMPT_NAME="$PROMPT_NAME" AGENT="$AGENT" MODEL="${MODEL:-default}" \
-    GOAL_ACHIEVED="$GOAL_ACHIEVED" EVAL_DURATION_SECONDS="$EVAL_ELAPSED_SECS" \
-    METRICS_FILE="$AUDIT_METRICS_FILE" \
-        "$SCRIPT_DIR/dd-metrics.sh" \
-        || echo "WARNING: datadog publish failed for '$ENTRY_ID'" >&2
+    jq -n \
+        --arg entry    "$ENTRY_ID" \
+        --arg prompt   "$PROMPT_NAME" \
+        --arg agent    "$AGENT" \
+        --arg model    "${MODEL:-default}" \
+        --arg goal     "$GOAL_ACHIEVED" \
+        --arg duration "$EVAL_ELAPSED_SECS" \
+        --argjson end  "$(date +%s)" \
+        '{entry: $entry, prompt: $prompt, agent: $agent, model: $model,
+          goal: $goal, duration_seconds: $duration, end_ts: $end}' \
+        > "$PREFIX.dd.json"
+    if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+        echo "*** [$ENTRY_ID] run metadata recorded for the dd-publish step: $PREFIX.dd.json"
+    else
+        ENTRY_ID="$ENTRY_ID" PROMPT_NAME="$PROMPT_NAME" AGENT="$AGENT" MODEL="${MODEL:-default}" \
+        GOAL_ACHIEVED="$GOAL_ACHIEVED" EVAL_DURATION_SECONDS="$EVAL_ELAPSED_SECS" \
+        METRICS_FILE="$AUDIT_METRICS_FILE" \
+            "$SCRIPT_DIR/dd-metrics.sh" \
+            || echo "WARNING: datadog publish failed for '$ENTRY_ID'" >&2
+    fi
 
     # --- Klaren review (best-effort) ---------------------------------------
     # Klaren always runs on claude regardless of the entry's agent: it is the
