@@ -567,17 +567,24 @@ run_entry() {
     # runtime is deliberately excluded either way: EVAL_DURATION_SECONDS
     # measures the agent under test, not the judge.
     echo "--- :datadog: [$ENTRY_ID] datadog metrics"
-    jq -n \
+    # NOTE: $end_ts, not $end — `end` is a jq reserved keyword and jq 1.6
+    # (this container's Ubuntu jq) rejects it as a variable name; a compile
+    # error here would leave a 0-byte dd.json and the entry would publish as
+    # entry:unknown. Fail loudly instead of trusting errexit: run_entry is
+    # called in a conditional context, where set -e is suspended.
+    if ! jq -n \
         --arg entry    "$ENTRY_ID" \
         --arg prompt   "$PROMPT_NAME" \
         --arg agent    "$AGENT" \
         --arg model    "${MODEL:-default}" \
         --arg goal     "$GOAL_ACHIEVED" \
         --arg duration "$EVAL_ELAPSED_SECS" \
-        --argjson end  "$(date +%s)" \
+        --argjson end_ts "$(date +%s)" \
         '{entry: $entry, prompt: $prompt, agent: $agent, model: $model,
-          goal: $goal, duration_seconds: $duration, end_ts: $end}' \
-        > "$PREFIX.dd.json"
+          goal: $goal, duration_seconds: $duration, end_ts: $end_ts}' \
+        > "$PREFIX.dd.json"; then
+        echo "WARNING: [$ENTRY_ID] failed to write $PREFIX.dd.json; Datadog publish will skip this entry" >&2
+    fi
     if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
         echo "*** [$ENTRY_ID] run metadata recorded for the dd-publish step: $PREFIX.dd.json"
     else

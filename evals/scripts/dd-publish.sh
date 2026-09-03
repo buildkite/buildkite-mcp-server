@@ -41,6 +41,13 @@ buildkite-agent artifact download "runs/*/*.metrics.json" "$WORK_DIR/" \
 
 PUBLISHED=0 FAILED=0
 while IFS= read -r META; do
+    # An empty or corrupt metadata file would publish every series with
+    # entry:unknown tags — noise in Datadog. Skip it loudly instead.
+    if ! jq -e . "$META" >/dev/null 2>&1; then
+        echo "WARNING: dd-publish: $META is empty or not valid JSON; skipping this entry." >&2
+        FAILED=$(( FAILED + 1 ))
+        continue
+    fi
     ENTRY="$(jq -r '.entry // "unknown"' "$META")"
     echo "--- :datadog: [$ENTRY] publishing run metrics"
     if ENTRY_ID="$ENTRY" \
