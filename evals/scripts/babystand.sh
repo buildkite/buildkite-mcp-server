@@ -65,6 +65,17 @@ if [[ "${RUN_IN_CI:-false}" != "true" && "$LOCAL_BYPASS_PERMISSION" != "true" ]]
     fi
 fi
 
+# SECURITY: scrub DD_API_KEY from the environment before any child process
+# spawns. Local runs export it for direct publishing, but every subprocess —
+# the evaluated agent (possibly with bypassed permissions), Klaren, scenario
+# setup shells — inherits this script's environment and must never see the
+# key. It is handed back explicitly to the dd-metrics.sh invocation alone;
+# an unexported shell variable does not reach children. (In CI the variable
+# is never mapped into this container at all — see the SECURITY note in
+# .buildkite/pipeline.evals.yml.)
+_DD_API_KEY="${DD_API_KEY:-}"
+unset DD_API_KEY
+
 # One timestamp for the whole build; entries are disambiguated by ENTRY_ID.
 DATETIME=$(date +%Y-%m-%d-%H%M%S)
 
@@ -550,10 +561,11 @@ run_entry() {
     # entry's identity + outcome as <run>.dd.json in the bundle instead; the
     # dd-publish pipeline step (outside this container) downloads the bundles
     # and submits them with the key scoped to that step alone. Local runs have
-    # no post-step, so they publish directly — dd-metrics.sh skips loudly when
-    # DD_API_KEY is unset. Klaren's own runtime is deliberately excluded
-    # either way: EVAL_DURATION_SECONDS measures the agent under test, not
-    # the judge.
+    # no post-step, so they publish directly — from _DD_API_KEY, captured and
+    # scrubbed from the environment at startup so no agent subprocess ever
+    # inherits it; dd-metrics.sh skips loudly when it is empty. Klaren's own
+    # runtime is deliberately excluded either way: EVAL_DURATION_SECONDS
+    # measures the agent under test, not the judge.
     echo "--- :datadog: [$ENTRY_ID] datadog metrics"
     jq -n \
         --arg entry    "$ENTRY_ID" \
@@ -569,6 +581,7 @@ run_entry() {
     if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
         echo "*** [$ENTRY_ID] run metadata recorded for the dd-publish step: $PREFIX.dd.json"
     else
+        DD_API_KEY="$_DD_API_KEY" \
         ENTRY_ID="$ENTRY_ID" PROMPT_NAME="$PROMPT_NAME" AGENT="$AGENT" MODEL="${MODEL:-default}" \
         GOAL_ACHIEVED="$GOAL_ACHIEVED" EVAL_DURATION_SECONDS="$EVAL_ELAPSED_SECS" \
         METRICS_FILE="$AUDIT_METRICS_FILE" \
