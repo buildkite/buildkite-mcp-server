@@ -175,6 +175,9 @@ func TestReadLogsParamsSchema(t *testing.T) {
 	for _, opt := range []string{"cache_ttl", "force_refresh", "seek", "limit"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+
+	require.Contains(t, s.Properties["seek"].Description, "Zero-based row")
+	require.Contains(t, s.Properties["limit"].Description, "0 reads all remaining entries")
 }
 
 func TestSearchLogsParamsSchema(t *testing.T) {
@@ -184,6 +187,23 @@ func TestSearchLogsParamsSchema(t *testing.T) {
 
 	for _, opt := range []string{"cache_ttl", "force_refresh", "context", "before_context", "after_context", "case_sensitive", "invert_match", "reverse", "seek_start", "limit"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+
+	expectedDescriptions := map[string]string{
+		"build_number":   "Sequential build number, not the build UUID",
+		"job_id":         "Buildkite job UUID",
+		"cache_ttl":      "Go duration; defaults to 30s",
+		"force_refresh":  "Bypass cached log data",
+		"pattern":        "Go regular expression",
+		"context":        "Lines before and after each match; overrides before_context and after_context when nonzero",
+		"before_context": "Lines before each match; ignored when context is nonzero",
+		"after_context":  "Lines after each match; ignored when context is nonzero",
+		"reverse":        "Search from the end of the log",
+		"seek_start":     "Zero-based starting row; 0 uses the default (log end when reverse)",
+		"limit":          "Maximum matches to return; 0 returns all",
+	}
+	for property, description := range expectedDescriptions {
+		require.Equal(t, description, s.Properties[property].Description, "%s has the wrong description", property)
 	}
 }
 
@@ -195,6 +215,8 @@ func TestTailLogsParamsSchema(t *testing.T) {
 	for _, opt := range []string{"cache_ttl", "force_refresh", "tail"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+
+	require.Contains(t, s.Properties["tail"].Description, "defaults to 10")
 }
 
 func TestListArtifactsForBuildArgsSchema(t *testing.T) {

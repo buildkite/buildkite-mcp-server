@@ -60,20 +60,20 @@ func TestListClusterSecrets(t *testing.T) {
 			require.Equal(t, 100, opt.PerPage)
 
 			return []buildkite.ClusterSecret{
-					{
-						ID:          "secret-id",
-						Key:         "DATABASE_PASSWORD",
-						Description: "Database password",
-						Policy:      "- pipeline_slug: example",
+				{
+					ID:          "secret-id",
+					Key:         "DATABASE_PASSWORD",
+					Description: "Database password",
+					Policy:      "- pipeline_slug: example",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: http.StatusOK,
+					Header: http.Header{
+						"Link": {`<https://api.buildkite.com/v2/organizations/org/clusters/cluster-id/secrets?page=2>; rel="next"`},
 					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: http.StatusOK,
-						Header: http.Header{
-							"Link": {`<https://api.buildkite.com/v2/organizations/org/clusters/cluster-id/secrets?page=2>; rel="next"`},
-						},
-					},
-				}, nil
+				},
+			}, nil
 		},
 	}
 
