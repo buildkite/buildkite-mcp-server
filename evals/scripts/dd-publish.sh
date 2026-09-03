@@ -18,7 +18,12 @@
 #   Local (<runs-dir>):  run manually AFTER babystand.sh has exited, in a
 #                        fresh shell:
 #                            DD_API_KEY=... ./dd-publish.sh evals/runs
-#                        Scans the directory instead of downloading.
+#                        Scans the directory instead of downloading, and
+#                        publishes ONLY the latest run (the newest
+#                        babystand DATETIME stamp): the runs tree is
+#                        persistent, and republishing older bundles would
+#                        clamp their timestamps into Datadog's ~1h ingest
+#                        window, making stale results look recent.
 #
 # Best-effort like dd-metrics.sh: no DD_API_KEY -> loud skip (exit 0); no
 # .dd.json files -> loud skip (exit 0 in CI; the eval step may have died
@@ -36,10 +41,21 @@ if [[ -z "${DD_API_KEY:-}" ]]; then
 fi
 command -v jq >/dev/null || { echo "dd-publish: jq is required" >&2; exit 1; }
 
+NAME_GLOB="*.dd.json"
 if [[ -n "$RUNS_DIR" ]]; then
-    # Local mode: publish from an existing runs directory.
+    # Local mode: publish only the LATEST run from the persistent runs tree.
+    # Bundle files are <entry-id>-<YYYY-MM-DD-HHMMSS>.dd.json and the stamp
+    # is shared by every entry of one babystand invocation, so the newest
+    # stamp (the format sorts chronologically) selects exactly the
+    # just-completed run.
     [[ -d "$RUNS_DIR" ]] || { echo "dd-publish: runs directory not found: $RUNS_DIR" >&2; exit 1; }
     WORK_DIR="$RUNS_DIR"
+    LATEST="$(find "$RUNS_DIR" -name '*.dd.json' \
+        | sed -nE 's/.*-([0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{6})\.dd\.json$/\1/p' \
+        | sort | tail -n1)"
+    [[ -n "$LATEST" ]] || { echo "dd-publish: no run bundles (*.dd.json) under $RUNS_DIR; nothing to publish." >&2; exit 1; }
+    NAME_GLOB="*-${LATEST}.dd.json"
+    echo "dd-publish: publishing latest run ($LATEST) from $RUNS_DIR"
 else
     # CI mode: pull the run-bundle artifacts the eval step uploaded.
     command -v buildkite-agent >/dev/null || { echo "dd-publish: buildkite-agent is required (or pass a runs directory)" >&2; exit 1; }
@@ -81,11 +97,6 @@ while IFS= read -r META; do
         echo "WARNING: dd-publish: publish failed for '$ENTRY' ($META)" >&2
         FAILED=$(( FAILED + 1 ))
     fi
-done < <(find "$WORK_DIR" -name '*.dd.json' | sort)
-
-if [[ "$PUBLISHED" -eq 0 && "$FAILED" -eq 0 && -n "$RUNS_DIR" ]]; then
-    echo "dd-publish: no *.dd.json files under $RUNS_DIR; nothing to publish." >&2
-    exit 1
-fi
+done < <(find "$WORK_DIR" -name "$NAME_GLOB" | sort)
 echo "dd-publish: $PUBLISHED entry(ies) published, $FAILED failed."
 [[ "$FAILED" -eq 0 ]]

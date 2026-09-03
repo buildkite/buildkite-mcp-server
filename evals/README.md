@@ -148,9 +148,10 @@ All new code are mostly in `evals/` folder
       ```bash
       DD_API_KEY=... ./evals/scripts/dd-publish.sh evals/runs
       ```
-      (Points keep each run's recorded end time, clamped to Datadog's ~1h
-      ingest window — publish soon after the run or old points snap to the
-      window edge)
+      Publishes only the LATEST run (newest babystand DATETIME stamp) — the
+      runs tree is persistent, and republishing older bundles would clamp
+      their timestamps into Datadog's ~1h ingest window, making stale
+      results look recent. Publish soon after the run for accurate points
     * CI wiring: the `MCP_EVAL_FRAMEWORK_DATADOG_API_KEY` secret must exist in
       the cluster (see .buildkite/pipeline.evals.yml) — create it before that
       mapping ships, or the step fails at secret resolution
