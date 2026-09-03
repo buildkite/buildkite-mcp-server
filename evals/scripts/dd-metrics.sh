@@ -52,7 +52,10 @@
 #
 set -euo pipefail
 
-if [[ -z "${DD_API_KEY:-}" ]]; then
+# Dry runs build and print the payload without submitting, so they need no
+# key — otherwise the documented DD_DRY_RUN=true payload test would exit
+# here with just the skip message.
+if [[ -z "${DD_API_KEY:-}" && "${DD_DRY_RUN:-false}" != "true" ]]; then
     echo "dd-metrics: DD_API_KEY is unset; skipping Datadog publish (see .buildkite/pipeline.evals.yml)." >&2
     exit 0
 fi
