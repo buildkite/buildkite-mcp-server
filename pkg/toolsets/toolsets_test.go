@@ -740,7 +740,7 @@ func TestClusterSecretsToolset(t *testing.T) {
 	clusterSecrets, exists := registry.Get(ToolsetClusterSecrets)
 	assert.True(exists)
 
-	assert.Len(clusterSecrets.Tools, 2)
+	assert.Len(clusterSecrets.Tools, 3)
 	assert.Equal(
 		"get_cluster_secret",
 		clusterSecrets.Tools[0].Tool.Name,
@@ -749,9 +749,13 @@ func TestClusterSecretsToolset(t *testing.T) {
 		"list_cluster_secrets",
 		clusterSecrets.Tools[1].Tool.Name,
 	)
+	assert.Equal(
+		"create_cluster_secret",
+		clusterSecrets.Tools[2].Tool.Name,
+	)
 
 	assert.Equal(
-		[]string{"read_secrets_details"},
+		[]string{"read_secrets_details", "write_secrets"},
 		clusterSecrets.GetRequiredScopes(),
 	)
 

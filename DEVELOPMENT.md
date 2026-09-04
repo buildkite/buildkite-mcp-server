@@ -146,7 +146,8 @@ BUILDKITE_API_TOKEN=bkua_xxx buildkite-mcp-server stdio --record ./testdata/my-s
 Drive the server with your MCP client or an LLM as normal. When the session ends the HAR file contains every request/response pair.
 
 A few things to note about the recorded file:
-- `Authorization` headers are stripped before writing, so the file is safe to commit.
+- `Authorization` headers are stripped before writing, but HAR files may still contain sensitive request and response data.
+- Only commit HAR files containing secret values when they are required as test fixtures. Replace every real secret with a synthetic test value first; never commit real credentials or secret values.
 - Binary responses (gzip logs, artifacts) are stored as base64 with `"encoding": "base64"`.
 - POST/PUT request bodies are stored in `postData` so distinct writes to the same endpoint are matched correctly on replay.
 
