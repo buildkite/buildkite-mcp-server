@@ -111,8 +111,8 @@ type CreateClusterSecretArgs struct {
 	ToolInput
 	OrgSlug     string `json:"org_slug"`
 	ClusterID   string `json:"cluster_id"`
-	Key         string `json:"key" jsonschema:"Secret key; must start with a letter and contain only letters, numbers, and underscores"`
-	Value       string `json:"value" jsonschema:"Required write-only secret value; it is never returned by the API"`
+	Key         string `json:"key" jsonschema:"Secret key; must start with a letter, contain only letters, numbers, and underscores, be at most 255 characters, and not start with buildkite or bk (case-insensitive)"`
+	Value       string `json:"value" jsonschema:"Required non-blank write-only secret value under 8 KiB; it is never returned by the API"`
 	Description string `json:"description,omitempty" jsonschema:"Optional description of the secret"`
 	Policy      string `json:"policy,omitempty" jsonschema:"Access policy as a YAML list of rules; omitting it allows access from all agents in the cluster"`
 }
