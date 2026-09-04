@@ -106,7 +106,8 @@ matrix:
         # Hand the generated branch name to the prompt template.
         echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
     mcp_version: source
-    # compare_target defaults to this run.
+    # compare_base/compare_target take their defaults: the entry's bundle from
+    # the last successful main build vs this run.
 
   # The same scenario driven by the Cursor CLI instead of Claude Code — lets a
   # build compare how two different agents fare against the same MCP server.

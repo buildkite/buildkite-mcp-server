@@ -65,6 +65,24 @@ if [[ "${RUN_IN_CI:-false}" != "true" && "$LOCAL_BYPASS_PERMISSION" != "true" ]]
     fi
 fi
 
+# SECURITY: this script must NEVER hold DD_API_KEY. It runs the evaluated
+# agent (possibly with bypassed permissions), and on Linux the key would stay
+# readable in /proc/<pid>/environ for the whole run even after `unset` —
+# environ is the exec-time snapshot, and any same-UID process the agent
+# spawns (or leaves behind) can read it. Datadog publishing is therefore
+# CI-only and fully out-of-band: entries record their identity/outcome as
+# <run>.dd.json in the bundle, and the key only ever exists in the separate
+# dd-publish pipeline step. Local runs are for debugging prompts/scenarios
+# and never publish. The unset below is defense in depth for an operator who
+# exported the key anyway, not a substitute: children stop inheriting it,
+# but this process's environ still exposes it.
+if [[ -n "${DD_API_KEY:-}" ]]; then
+    echo "WARNING: DD_API_KEY is set in babystand.sh's environment; the agent under test" >&2
+    echo "WARNING: may be able to recover it (/proc/<pid>/environ survives unset). Do not" >&2
+    echo "WARNING: export it for eval runs — Datadog publishing is CI-only." >&2
+    unset DD_API_KEY
+fi
+
 # One timestamp for the whole build; entries are disambiguated by ENTRY_ID.
 DATETIME=$(date +%Y-%m-%d-%H%M%S)
 
@@ -505,7 +523,8 @@ run_entry() {
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
     fi
-    local EVAL_ELAPSED; EVAL_ELAPSED=$(fmt_elapsed $(( $(date +%s) - EVAL_START )))
+    local EVAL_ELAPSED_SECS=$(( $(date +%s) - EVAL_START ))
+    local EVAL_ELAPSED; EVAL_ELAPSED=$(fmt_elapsed "$EVAL_ELAPSED_SECS")
     echo "*** [$ENTRY_ID] EVAL ELAPSED: $EVAL_ELAPSED  SESSION_ID: $SESSION_ID"
     echo "*** [$ENTRY_ID] TRANSCRIPT: $TRANSCRIPT"
 
@@ -519,6 +538,58 @@ run_entry() {
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE" || true
     echo "--- :bar_chart: [$ENTRY_ID] session metrics"
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE" || true
+
+    # --- Goal outcome ---------------------------------------------------------
+    # Scenario-shaped: entries whose setup pushed a scenario branch
+    # (SCENARIO_BRANCH in the vars file; last value wins, matching
+    # render_prompt) achieved their goal when that branch's LATEST build in the
+    # eval org is green — the red->green contract. Entries without a branch
+    # (e.g. analyze-build) have no machine-checkable goal and stay "unknown";
+    # so does an API failure or a branch with no builds, so a Datadog gap
+    # never miscounts as a miss.
+    local GOAL_ACHIEVED="unknown" SCENARIO_BRANCH_VAL="" FINAL_BUILD_STATE=""
+    SCENARIO_BRANCH_VAL="$(awk -F= '$1 == "SCENARIO_BRANCH" { v = substr($0, index($0, "=") + 1) } END { print v }' "$VARS_FILE")"
+    if [[ -n "$SCENARIO_BRANCH_VAL" ]]; then
+        FINAL_BUILD_STATE="$(curl -fsS --max-time 30 \
+            -H "Authorization: Bearer $ENTRY_TOKEN" \
+            "https://api.buildkite.com/v2/organizations/$ORG_SLUG/pipelines/$PIPELINE_SLUG/builds?branch=$SCENARIO_BRANCH_VAL&per_page=1" \
+            | jq -r '.[0].state // "none"' || echo "unknown")"
+        case "$FINAL_BUILD_STATE" in
+            passed)       GOAL_ACHIEVED="true" ;;
+            unknown|none) GOAL_ACHIEVED="unknown" ;;
+            *)            GOAL_ACHIEVED="false" ;;
+        esac
+        echo "*** [$ENTRY_ID] scenario branch '$SCENARIO_BRANCH_VAL' latest build state: $FINAL_BUILD_STATE (goal_achieved: $GOAL_ACHIEVED)"
+    fi
+
+    # --- Datadog run metadata ------------------------------------------------
+    # SECURITY: DD_API_KEY must never exist in this process or any of its
+    # children while the evaluated agent runs (see the header note). This
+    # section only RECORDS the entry's identity + outcome as <run>.dd.json in
+    # the bundle; CI's dd-publish pipeline step submits it later from a
+    # separate process. Local runs never publish — they are for debugging
+    # prompts/scenarios. Klaren's own runtime is deliberately excluded:
+    # EVAL_DURATION_SECONDS measures the agent under test, not the judge.
+    echo "--- :datadog: [$ENTRY_ID] datadog metrics"
+    # NOTE: $end_ts, not $end — `end` is a jq reserved keyword and jq 1.6
+    # (this container's Ubuntu jq) rejects it as a variable name; a compile
+    # error here would leave a 0-byte dd.json and the entry would publish as
+    # entry:unknown. Fail loudly instead of trusting errexit: run_entry is
+    # called in a conditional context, where set -e is suspended.
+    if ! jq -n \
+        --arg entry    "$ENTRY_ID" \
+        --arg prompt   "$PROMPT_NAME" \
+        --arg agent    "$AGENT" \
+        --arg model    "${MODEL:-default}" \
+        --arg goal     "$GOAL_ACHIEVED" \
+        --arg duration "$EVAL_ELAPSED_SECS" \
+        --argjson end_ts "$(date +%s)" \
+        '{entry: $entry, prompt: $prompt, agent: $agent, model: $model,
+          goal: $goal, duration_seconds: $duration, end_ts: $end_ts}' \
+        > "$PREFIX.dd.json"; then
+        echo "WARNING: [$ENTRY_ID] failed to write $PREFIX.dd.json; Datadog publish will skip this entry" >&2
+    fi
+    echo "*** [$ENTRY_ID] run metadata recorded: $PREFIX.dd.json (published by CI's dd-publish step; local runs never publish)"
 
     # --- Klaren review (best-effort) ---------------------------------------
     # Klaren always runs on claude regardless of the entry's agent: it is the

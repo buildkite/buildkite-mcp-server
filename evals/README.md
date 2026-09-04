@@ -105,6 +105,51 @@ All new code are mostly in `evals/` folder
       successful `main` build, the default target is the current run
   * bk-tool-audit-v2.sh
     * Retrieve stats about tool calls, input/output token/cache usage from LLM session logs
+    * For claude runs it also breaks execution time down: `duration_seconds`
+      (wall-clock), `tool_time_seconds` (inside tool calls), and `wait`
+      (inside *waiting* tool calls — `wait_for_build` plus Bash commands that
+      `sleep`-poll), computed by pairing each `tool_use` with its
+      `tool_result` via the transcript's per-line timestamps. cursor /
+      cursor-cloud streams carry no per-event timestamps, so `wait` /
+      `tool_time_seconds` are null there (their result event still reports
+      total duration)
+  * dd-metrics.sh
+    * Publish one entry's run metrics to Datadog (metrics v2 series API) as
+      `mcp_eval.*` gauges — run count, goal_achieved (1/0), duration /
+      tool-time / wait seconds, tool call counts (total + `mcp__`-prefixed),
+      and token usage (input / output / cache read / cache write) — tagged
+      `entry:`, `prompt:`, `agent:`, `model:`, `goal:`, `buildkite_build:`
+    * Best-effort by design: skips loudly when `DD_API_KEY` is unset (local
+      runs, forks), and a publish failure never fails the entry. `DD_SITE`
+      picks the Datadog site, `DD_METRIC_PREFIX` the namespace (default
+      `mcp_eval`), `DD_TIMESTAMP` the point timestamp (the run's end; clamped
+      to Datadog's ~1h ingest window), `DD_DRY_RUN=true` prints the payload
+      instead of submitting
+    * SECURITY: this never runs while the eval agent does — in either mode.
+      The agent under test has unrestricted Bash, and a key present anywhere
+      in the run (even captured-then-`unset`) stays readable to same-UID
+      processes via `/proc/<pid>/environ`. babystand.sh only records
+      metadata; dd-publish.sh (below) is the single place the key exists
+    * Goal detection (in babystand.sh): entries whose setup pushed a
+      `SCENARIO_BRANCH` count as achieved when that branch's latest build in
+      the eval org is `passed`; entries without one (e.g. analyze-build)
+      report `unknown` — tagged, but no `goal_achieved` series, so gaps in
+      Datadog never miscount as misses
+  * dd-publish.sh
+    * The single Datadog publish entry point, and the only process that may
+      hold `DD_API_KEY` — the `dd-publish` pipeline step. Downloads each
+      entry's `runs/<id>/<run-key>.dd.json` (identity + outcome, written by
+      babystand.sh) plus `.metrics.json` run-bundle artifacts, then drives
+      dd-metrics.sh once per entry; the key is scoped to that step via
+      `secrets`
+    * Datadog publishing is CI-only. Local runs are for debugging prompts
+      and scenarios: they record the same `dd.json` in the bundle but never
+      publish (and babystand.sh warns + unsets if `DD_API_KEY` is exported
+      into a run). To test the payload by hand, use
+      `DD_DRY_RUN=true dd-metrics.sh`
+    * CI wiring: the `MCP_EVAL_FRAMEWORK_DATADOG_API_KEY` secret must exist in
+      the cluster (see .buildkite/pipeline.evals.yml) — create it before that
+      mapping ships, or the step fails at secret resolution
   * parser.ts
     * Parse LLM agent assistant/user convo into bk annotation
   * Dockerfile

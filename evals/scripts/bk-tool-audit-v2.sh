@@ -254,6 +254,11 @@ print_session() {
 }
 
 # Token totals, cost, tool counts, model mix, and duration for one session.
+# The claude dialect also reports a waiting-time breakdown (the `wait` key):
+# wall-clock spent inside wait_for_build calls and Bash `sleep` polls, computed
+# by pairing each tool_use with its tool_result via the per-line timestamps.
+# cursor / cursor-cloud streams carry no per-event timestamps, so their
+# `wait` / `tool_time_seconds` are null.
 # Dedupes usage by message.id (content blocks are split one-per-line, each
 # repeating the message-level usage) and reads from a stable snapshot copy to
 # avoid racing the live append of the current session.
@@ -285,13 +290,19 @@ metrics() {
           user_messages: null,
           assistant_responses: null,
           duration_min: (if ($res.durationMs // null) != null then ($res.durationMs/60000|floor) else null end),
+          duration_seconds: (if ($res.durationMs // null) != null then (($res.durationMs/1000)|round) else null end),
           models: {(($meta.model // "unknown") | tostring): 1},
           tokens: (if $u != null then
                      {input: ($u.inputTokens // 0), output: ($u.outputTokens // 0),
                       cache_write: ($u.cacheWriteTokens // 0), cache_read: ($u.cacheReadTokens // 0)}
                    else null end),
           tool_calls_total: ($tools | length),
+          tool_calls_mcp: ($tools | map(cloud_tool_name(.)) | map(select(startswith("mcp__"))) | length),
           tool_calls_by_name: ($tools | map(cloud_tool_name(.)) | group_by(.) | map("\(length) \(.[0])") | sort | reverse),
+          # SSE events carry no per-event timestamps, so in-tool / waiting time
+          # cannot be reconstructed for cloud runs.
+          tool_time_seconds: null,
+          wait: null,
           est_cost_usd: null
         }
     ' "$snap"
@@ -318,10 +329,16 @@ metrics() {
           user_messages: ($all | map(select(.type=="user")) | length),
           assistant_responses: ($all | map(select(.type=="assistant")) | length),
           duration_min: (if ($res.duration_ms? // null) != null then ($res.duration_ms/60000|floor) else null end),
+          duration_seconds: (if ($res.duration_ms? // null) != null then (($res.duration_ms/1000)|round) else null end),
           models: {(($init.model? // "unknown")): 1},
           tokens: null,
           tool_calls_total: ($tools | length),
+          tool_calls_mcp: ($tools | map(select(startswith("mcp__"))) | length),
           tool_calls_by_name: ($tools | group_by(.) | map("\(length) \(.[0])") | sort | reverse),
+          # cursor stream-json has no per-event timestamps, so in-tool /
+          # waiting time cannot be reconstructed.
+          tool_time_seconds: null,
+          wait: null,
           est_cost_usd: null
         }
     ' "$snap"
@@ -339,13 +356,28 @@ metrics() {
   echo "# session: $f" >&2
   jq -nr --argjson p "$prices" '
     def n: . // 0;
+    def tsec: sub("\\.[0-9]+";"") | fromdateiso8601;
     [inputs] as $all
     | ($all | map(select(.type=="assistant")) | group_by(.message.id) | map(.[0])) as $resp
     | ($resp | map(.message.usage)) as $u
-    | ($all | [ .[] | (.message.content? // []) | select(type=="array") | .[]
-                | select(.type=="tool_use") | {id, name} ] | unique_by(.id)) as $tools
+    | ($all | [ .[] | . as $l | (.message.content? // []) | select(type=="array") | .[]
+                | select(.type=="tool_use")
+                | {id, name, input, ts: $l.timestamp} ] | unique_by(.id)) as $tools
     | ($all | map(.timestamp) | map(select(type=="string"))
-            | map(sub("\\.[0-9]+";"") | fromdateiso8601)) as $secs
+            | map(tsec)) as $secs
+    # Wall-clock spent INSIDE each tool call: pair every tool_use with its
+    # tool_result (by tool_use_id) and diff the line timestamps. The subset in
+    # $waits is time the agent spent WAITING on external state rather than
+    # working: wait_for_build calls, plus Bash commands that shell out to
+    # `sleep` (the poll-and-sleep loop agents fall back to). Heuristic on
+    # purpose — a get_build poll with no sleep is NOT counted as waiting.
+    | ($all | [ .[] | . as $l | (.message.content? // []) | select(type=="array") | .[]
+                | select(.type=="tool_result" and .tool_use_id != null)
+                | {key: .tool_use_id, value: $l.timestamp} ] | from_entries) as $rts
+    | ($tools | map(select((.ts|type)=="string" and (($rts[.id] // null)|type)=="string")
+                    | {name, input, dur: (($rts[.id]|tsec) - (.ts|tsec))})) as $timed
+    | ($timed | map(select((.name | test("^mcp__.*__wait_for_build$"))
+                    or (.name == "Bash" and ((.input.command? // "") | test("\\bsleep\\b")))))) as $waits
     # token sums
     | ($u | map(.input_tokens|n)            | add | n) as $tin
     | ($u | map(.output_tokens|n)           | add | n) as $tout
@@ -360,10 +392,20 @@ metrics() {
         user_messages: ($all|map(select(.type=="user"))|length),
         assistant_responses: ($resp|length),
         duration_min: (if ($secs|length) > 0 then ((($secs|max)-($secs|min))/60|floor) else null end),
+        duration_seconds: (if ($secs|length) > 0 then (($secs|max)-($secs|min)) else null end),
         models: ($resp | map(.message.model // "unknown") | group_by(.) | map({(.[0]): length}) | add),
         tokens: {input: $tin, output: $tout, cache_write_5m: $c5, cache_write_1h: $c1h, cache_read: $tread},
         tool_calls_total: ($tools|length),
+        tool_calls_mcp: ($tools | map(select(.name | startswith("mcp__"))) | length),
         tool_calls_by_name: ($tools | group_by(.name) | map("\(length) \(.[0].name)") | sort | reverse),
+        tool_time_seconds: (($timed | map(.dur) | add) // 0),
+        wait: {
+          seconds: (($waits | map(.dur) | add) // 0),
+          calls: ($waits | length),
+          by_tool: (($waits | group_by(.name)
+                     | map({key: .[0].name, value: {calls: length, seconds: (map(.dur) | add)}})
+                     | from_entries) // {})
+        },
         est_cost_usd: (($cost*100|round)/100)
       }
   ' "$snap"
