@@ -680,7 +680,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Contains(toolNames, "list_test_suites_for_pipeline")
 }
 
-func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
+func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
 	const contextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
@@ -709,9 +709,11 @@ func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
 		inputSchema, ok := tool.InputSchema.(map[string]any)
 		require.True(t, ok, "%s input schema has type %T", tool.Name, tool.InputSchema)
 
-		required, ok := inputSchema["required"].([]any)
-		require.True(t, ok, "%s input schema has no required fields", tool.Name)
-		require.Contains(t, required, "telemetry", "%s must require telemetry", tool.Name)
+		// telemetry stays optional at the top level so clients that cached a
+		// pre-telemetry schema do not fail argument validation by omitting it.
+		if required, ok := inputSchema["required"].([]any); ok {
+			require.NotContains(t, required, "telemetry", "%s must not require telemetry", tool.Name)
+		}
 
 		properties, ok := inputSchema["properties"].(map[string]any)
 		require.True(t, ok, "%s input schema has no properties", tool.Name)
