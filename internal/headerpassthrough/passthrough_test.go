@@ -229,9 +229,7 @@ func TestConcurrentRequestHeadersRemainIsolated(t *testing.T) {
 	errors := make(chan error, requestCount)
 	var wg sync.WaitGroup
 	for i := range requestCount {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			identity := fmt.Sprintf("user-%02d", i)
 			req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 			req.Header.Set("X-Identity", identity)
@@ -240,7 +238,7 @@ func TestConcurrentRequestHeadersRemainIsolated(t *testing.T) {
 			if recorder.Body.String() != identity {
 				errors <- fmt.Errorf("wanted %q, got %q", identity, recorder.Body.String())
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errors)

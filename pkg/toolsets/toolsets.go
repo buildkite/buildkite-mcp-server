@@ -5,6 +5,8 @@ import (
 	"slices"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
+	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -237,6 +239,7 @@ func NewTool(tool mcp.Tool, register func(s *mcp.Server), scopes []string) ToolD
 const (
 	ToolsetAll            = "all" // Special name to enable all toolsets
 	ToolsetClusters       = "clusters"
+	ToolsetClusterSecrets = "cluster_secrets"
 	ToolsetAgents         = "agents"
 	ToolsetPipelines      = "pipelines"
 	ToolsetBuilds         = "builds"
@@ -252,6 +255,7 @@ const (
 var ValidToolsets = []string{
 	ToolsetAll,
 	ToolsetClusters,
+	ToolsetClusterSecrets,
 	ToolsetAgents,
 	ToolsetPipelines,
 	ToolsetBuilds,
@@ -294,6 +298,21 @@ func ValidateToolsets(names []string) error {
 // The generic parameters In and Out match the typed handler signature.
 func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, Out], []string)) ToolDefinition {
 	tool, handler, scopes := toolFunc()
+	inputSchema, err := jsonschema.For[In](nil)
+	if err != nil {
+		panic(fmt.Sprintf("generate input schema for tool %q: %v", tool.Name, err))
+	}
+	telemetrySchema, ok := inputSchema.Properties["telemetry"]
+	if !ok {
+		panic(fmt.Sprintf("tool %q input schema is missing telemetry", tool.Name))
+	}
+	contextSchema, ok := telemetrySchema.Properties["context"]
+	if !ok {
+		panic(fmt.Sprintf("tool %q input schema is missing telemetry.context", tool.Name))
+	}
+	contextSchema.MaxLength = jsonschema.Ptr(trace.TelemetryContextMaxLength)
+	tool.InputSchema = inputSchema
+
 	return ToolDefinition{
 		Tool: tool,
 		Register: func(s *mcp.Server) {
@@ -321,6 +340,15 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.UpdateClusterQueue),
 				newToolDef(buildkite.PauseClusterQueueDispatch),
 				newToolDef(buildkite.ResumeClusterQueueDispatch),
+			},
+		},
+		ToolsetClusterSecrets: {
+			Name:        "Cluster Secret Management",
+			Description: "Tools for managing Buildkite cluster secrets",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.GetClusterSecret),
+				newToolDef(buildkite.ListClusterSecrets),
+				newToolDef(buildkite.CreateClusterSecret),
 			},
 		},
 		ToolsetAgents: {
@@ -353,6 +381,9 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.ListBuilds),
 				newToolDef(buildkite.GetBuild),
 				newToolDef(buildkite.GetBuildTestEngineRuns),
+				newToolDef(buildkite.ListStepUploads),
+				newToolDef(buildkite.GetStepUpload),
+				newToolDef(buildkite.WaitForBuild),
 				newToolDef(buildkite.CreateBuild),
 				newToolDef(buildkite.CancelBuild),
 				newToolDef(buildkite.RebuildBuild),
@@ -376,10 +407,13 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Name:        "Test Engine",
 			Description: "Tools for managing test runs and test results",
 			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListTests),
+				newToolDef(buildkite.ListTestsForBuild),
 				newToolDef(buildkite.ListTestRuns),
 				newToolDef(buildkite.GetTestRun),
 				newToolDef(buildkite.GetFailedTestExecutions),
 				newToolDef(buildkite.GetTest),
+				newToolDef(buildkite.ListTestSuitesForPipeline),
 			},
 		},
 		ToolsetLogs: {

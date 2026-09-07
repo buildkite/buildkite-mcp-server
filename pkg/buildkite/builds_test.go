@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/stretchr/testify/require"
@@ -84,25 +85,25 @@ func TestGetBuild(t *testing.T) {
 				assert.Equal("pipeline", pipeline)
 				assert.Equal("1", id)
 				return buildkite.Build{
-						ID:     "123",
-						Number: 1,
-						State:  "passed",
-						Branch: "main",
-						Env: map[string]any{
-							"SECRET_TOKEN": "redacted",
-						},
-						Jobs: []buildkite.Job{{
-							ID: "job-1",
-						}},
-						Pipeline: &buildkite.Pipeline{
-							ID:            "pipeline-1",
-							Configuration: "steps:\n  - command: echo secret",
-							Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
-						},
-						CreatedAt: &buildkite.Timestamp{},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					ID:     "123",
+					Number: 1,
+					State:  "passed",
+					Branch: "main",
+					Env: map[string]any{
+						"SECRET_TOKEN": "redacted",
+					},
+					Jobs: []buildkite.Job{{
+						ID: "job-1",
+					}},
+					Pipeline: &buildkite.Pipeline{
+						ID:            "pipeline-1",
+						Configuration: "steps:\n  - command: echo secret",
+						Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
+					},
+					CreatedAt: &buildkite.Timestamp{},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 		}
 
@@ -113,12 +114,12 @@ func TestGetBuild(t *testing.T) {
 				assert.Equal("pipeline", pipelineSlug)
 				assert.Equal("1", buildNumber)
 				return []buildkite.Annotation{
-						{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, BodyHTML: "<p>large body</p>"},
-						{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, BodyHTML: "<p>another large body</p>"},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-						NextPage: 2,
-					}, nil
+					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, BodyHTML: "<p>large body</p>"},
+					{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, BodyHTML: "<p>another large body</p>"},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+					NextPage: 2,
+				}, nil
 			},
 		}
 
@@ -133,9 +134,9 @@ func TestGetBuild(t *testing.T) {
 		assert.NoError(err)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"id":"123"`)
-		assert.Contains(text, `"number":1`)
-		assert.Contains(text, `"state":"passed"`)
+		requireJSONPathEqual(t, text, "123", "id")
+		requireJSONPathEqual(t, text, 1, "number")
+		requireJSONPathEqual(t, text, "passed", "state")
 		// Job detail lives in list_jobs/get_job, not here.
 		assert.NotContains(text, `"jobs":`)
 		// Build env and pipeline config are intentionally omitted from read_builds.
@@ -144,10 +145,10 @@ func TestGetBuild(t *testing.T) {
 		assert.NotContains(text, "SECRET_TOKEN")
 		assert.NotContains(text, "PIPELINE_SECRET")
 		assert.NotContains(text, "steps:")
-		assert.Contains(text, `"annotations":[{`)
-		assert.Contains(text, `{"context":"test-results","id":"annotation-1","priority":5,"scope":"build","style":"error"}`)
-		assert.Contains(text, `{"context":"lint","id":"annotation-2","job_id":"job-2","priority":3,"scope":"job","style":"warning"}`)
-		assert.Contains(text, `"annotations_truncated":true`)
+		requireJSONPathEqual(t, text, "test-results", "annotations", 0, "context")
+		requireJSONPathEqual(t, text, "lint", "annotations", 1, "context")
+		requireJSONPathEqual(t, text, "job-2", "annotations", 1, "job_id")
+		requireJSONPathEqual(t, text, true, "annotations_truncated")
 		assert.NotContains(text, "large body")
 		assert.NotContains(text, "body_html")
 
@@ -188,7 +189,7 @@ func TestGetBuild(t *testing.T) {
 			BuildNumber:  "1",
 		})
 		assert.NoError(err)
-		assert.Contains(getTextResult(t, result).Text, `"annotations":[]`)
+		requireJSONPathEqual(t, getTextResult(t, result).Text, []any{}, "annotations")
 		assert.NotContains(getTextResult(t, result).Text, `"annotations_truncated"`)
 	})
 
@@ -265,10 +266,10 @@ func TestListBuilds(t *testing.T) {
 			ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
 				capturedOptions = opt
 				return []buildkite.Build{
-						{ID: "123", Number: 1, State: "running", CreatedAt: &buildkite.Timestamp{}},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					{ID: "123", Number: 1, State: "running", CreatedAt: &buildkite.Timestamp{}},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 		}
 
@@ -282,10 +283,9 @@ func TestListBuilds(t *testing.T) {
 		assert.NoError(err)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(text, `"headers":{"Link":""}`)
-		assert.Contains(text, `"items":[`)
-		assert.Contains(text, `"id":"123"`)
-		assert.Contains(text, `"state":"running"`)
+		requireJSONPathEqual(t, text, "", "headers", "Link")
+		requireJSONPathEqual(t, text, "123", "items", 0, "id")
+		requireJSONPathEqual(t, text, "running", "items", 0, "state")
 		assert.NotContains(text, `"job_summary"`)
 		assert.NotContains(text, `"jobs":`)
 
@@ -343,10 +343,10 @@ func TestListBuilds(t *testing.T) {
 				called = true
 				assert.Equal("org", org)
 				return []buildkite.Build{
-						{ID: "123", Number: 1, State: "passed", CreatedAt: &buildkite.Timestamp{}},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					{ID: "123", Number: 1, State: "passed", CreatedAt: &buildkite.Timestamp{}},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 			ListByPipelineFunc: func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
 				t.Fatal("ListByPipeline should not be called when pipeline_slug is omitted")
@@ -362,7 +362,7 @@ func TestListBuilds(t *testing.T) {
 		})
 		assert.NoError(err)
 		assert.True(called)
-		assert.Contains(getTextResult(t, result).Text, `"id":"123"`)
+		requireJSONPathEqual(t, getTextResult(t, result).Text, "123", "items", 0, "id")
 	})
 
 	t.Run("APIError", func(t *testing.T) {
@@ -398,31 +398,31 @@ func TestGetBuildTestEngineRuns(t *testing.T) {
 			capturedOptions = opt
 			// Return build with test engine data
 			return buildkite.Build{
-					ID:     "123",
-					Number: 1,
-					TestEngine: &buildkite.TestEngineProperty{
-						Runs: []buildkite.TestEngineRun{
-							{
-								ID: "run-1",
-								Suite: buildkite.TestEngineSuite{
-									ID:   "suite-1",
-									Slug: "my-test-suite",
-								},
+				ID:     "123",
+				Number: 1,
+				TestEngine: &buildkite.TestEngineProperty{
+					Runs: []buildkite.TestEngineRun{
+						{
+							ID: "run-1",
+							Suite: buildkite.TestEngineSuite{
+								ID:   "suite-1",
+								Slug: "my-test-suite",
 							},
-							{
-								ID: "run-2",
-								Suite: buildkite.TestEngineSuite{
-									ID:   "suite-2",
-									Slug: "another-test-suite",
-								},
+						},
+						{
+							ID: "run-2",
+							Suite: buildkite.TestEngineSuite{
+								ID:   "suite-2",
+								Slug: "another-test-suite",
 							},
 						},
 					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -464,14 +464,14 @@ func TestGetBuildTestEngineRunsNoBuildTestEngine(t *testing.T) {
 		GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 			// Return build without test engine data
 			return buildkite.Build{
-					ID:         "123",
-					Number:     1,
-					TestEngine: nil,
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:         "123",
+				Number:     1,
+				TestEngine: nil,
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -506,21 +506,21 @@ func TestCreateBuild(t *testing.T) {
 
 			// Return created build
 			return buildkite.Build{
-					ID:        "123",
-					Number:    1,
-					State:     "created",
-					CreatedAt: &buildkite.Timestamp{},
-					Env: map[string]any{
-						"ENV_VAR": "value",
-					},
-					MetaData: map[string]string{
-						"meta_key": "meta_value",
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 201,
-					},
-				}, nil
+				ID:        "123",
+				Number:    1,
+				State:     "created",
+				CreatedAt: &buildkite.Timestamp{},
+				Env: map[string]any{
+					"ENV_VAR": "value",
+				},
+				MetaData: map[string]string{
+					"meta_key": "meta_value",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 201,
+				},
+			}, nil
 		},
 	}
 
@@ -588,8 +588,8 @@ func TestCancelBuild(t *testing.T) {
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"id":"123"`)
-		assert.Contains(textContent.Text, `"state":"canceling"`)
+		requireJSONPathEqual(t, textContent.Text, "123", "id")
+		requireJSONPathEqual(t, textContent.Text, "canceling", "state")
 	})
 
 	t.Run("Error", func(t *testing.T) {
@@ -652,8 +652,8 @@ func TestRebuildBuild(t *testing.T) {
 		assert.NoError(err)
 
 		textContent := getTextResult(t, result)
-		assert.Contains(textContent.Text, `"id":"456"`)
-		assert.Contains(textContent.Text, `"state":"scheduled"`)
+		requireJSONPathEqual(t, textContent.Text, "456", "id")
+		requireJSONPathEqual(t, textContent.Text, "scheduled", "state")
 	})
 
 	t.Run("Error", func(t *testing.T) {
@@ -679,4 +679,426 @@ func TestRebuildBuild(t *testing.T) {
 		textContent := getTextResult(t, result)
 		assert.Contains(textContent.Text, "build not found")
 	})
+}
+
+// shortenBuildWait shrinks the wait window and poll interval so wait_for_build
+// tests exercise the polling loop without sleeping for real build durations.
+func shortenBuildWait(t *testing.T, maxDuration, pollInterval time.Duration) {
+	t.Helper()
+	origMax, origPoll := waitForBuildMaxDuration, waitForBuildPollInterval
+	waitForBuildMaxDuration, waitForBuildPollInterval = maxDuration, pollInterval
+	t.Cleanup(func() {
+		waitForBuildMaxDuration, waitForBuildPollInterval = origMax, origPoll
+	})
+}
+
+func TestWaitForBuild(t *testing.T) {
+	t.Run("ToolDefinition", func(t *testing.T) {
+		tool, handler, scopes := WaitForBuild()
+		require.Equal(t, "wait_for_build", tool.Name)
+		require.True(t, tool.Annotations.ReadOnlyHint)
+		require.Equal(t, []string{"read_builds"}, scopes)
+		require.NotNil(t, handler)
+	})
+
+	t.Run("ReturnsImmediatelyWhenBuildAlreadyTerminal", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 45*time.Second, 5*time.Second)
+
+		var getCalls int
+		var capturedOptions *buildkite.BuildGetOptions
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				getCalls++
+				capturedOptions = opt
+				return buildkite.Build{ID: "123", Number: 1, State: "passed"}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		started := time.Now()
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		elapsed := time.Since(started)
+		assert.NoError(err)
+
+		// A settled build must not pay for a poll interval it does not need.
+		assert.Equal(1, getCalls)
+		assert.Less(elapsed, waitForBuildPollInterval)
+
+		text := getTextResult(t, result).Text
+		requireJSONPathEqual(t, text, true, "finished")
+		requireJSONPathEqual(t, text, "passed", "state")
+		requireJSONPathEqual(t, text, "123", "build", "id")
+
+		// Jobs stay excluded; list_jobs/get_job own that detail.
+		assert.True(capturedOptions.ExcludeJobs)
+		assert.True(capturedOptions.ExcludePipeline)
+	})
+
+	t.Run("PollsUntilBuildReachesTerminalState", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		var getCalls int
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				getCalls++
+				state := "running"
+				if getCalls >= 3 {
+					state = "failed"
+				}
+				return buildkite.Build{ID: "123", Number: 1, State: state}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+		assert.Equal(3, getCalls)
+
+		text := getTextResult(t, result).Text
+		requireJSONPathEqual(t, text, true, "finished")
+		requireJSONPathEqual(t, text, "failed", "state")
+	})
+
+	t.Run("ReturnsUnfinishedWhenWaitWindowCloses", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 50*time.Millisecond, time.Millisecond)
+
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{ID: "123", Number: 1, State: "running"}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+
+		var annotationCalls int
+		annotationsClient := &MockAnnotationsClient{
+			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+				annotationCalls++
+				return nil, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: annotationsClient,
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+
+		// A build that is merely still running is a normal result, not an error.
+		assert.False(result.IsError)
+
+		// No annotation fetch is worth paying for until the build settles.
+		assert.Zero(annotationCalls)
+
+		text := getTextResult(t, result).Text
+		requireJSONPathEqual(t, text, false, "finished")
+		requireJSONPathEqual(t, text, "running", "state")
+		assert.Contains(text, `"waited_seconds":`)
+
+		// Interim responses stay lean: a caller polling a long build repeats this
+		// payload, and the build detail is identical every time.
+		assert.NotContains(text, `"build":`)
+		assert.NotContains(text, `"author":`)
+		assert.NotContains(text, `"annotations":`)
+		assert.Less(len(text), 100)
+	})
+
+	t.Run("ReturnsErrorWhenFirstPollFails", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{}, nil, errors.New("boom")
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+		assert.True(result.IsError)
+		assert.Contains(getTextResult(t, result).Text, "boom")
+	})
+
+	t.Run("IncludesAnnotationSummariesOnce", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		var getCalls, annotationCalls int
+		client := &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				getCalls++
+				state := "running"
+				if getCalls >= 3 {
+					state = "passed"
+				}
+				return buildkite.Build{ID: "123", Number: 1, State: state}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+		annotationsClient := &MockAnnotationsClient{
+			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+				annotationCalls++
+				return []buildkite.Annotation{
+					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", BodyHTML: "<p>large body</p>"},
+				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: annotationsClient,
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+
+		// Annotations are fetched on the way out, not once per poll.
+		assert.Equal(3, getCalls)
+		assert.Equal(1, annotationCalls)
+
+		text := getTextResult(t, result).Text
+		requireJSONPathEqual(t, text, "annotation-1", "build", "annotations", 0, "id")
+		assert.NotContains(text, "large body")
+	})
+}
+
+func TestIsTerminalBuildState(t *testing.T) {
+	terminal := []string{"passed", "failed", "canceled", "skipped", "not_run", "blocked"}
+	for _, state := range terminal {
+		t.Run(state, func(t *testing.T) {
+			require.True(t, isTerminalBuildState(state))
+		})
+	}
+
+	// "failing" and "canceling" are transitional: the build is still moving.
+	inProgress := []string{"creating", "scheduled", "running", "failing", "canceling", ""}
+	for _, state := range inProgress {
+		t.Run("not_terminal_"+state, func(t *testing.T) {
+			require.False(t, isTerminalBuildState(state))
+		})
+	}
+}
+
+func TestBuildElapsedSeconds(t *testing.T) {
+	ts := func(d time.Duration) *buildkite.Timestamp {
+		return &buildkite.Timestamp{Time: time.Now().Add(d)}
+	}
+
+	t.Run("OmittedWhenBuildHasNotStarted", func(t *testing.T) {
+		require.Zero(t, buildElapsedSeconds(buildkite.Build{}))
+	})
+
+	t.Run("CountsFromStartWhileRunning", func(t *testing.T) {
+		// Independent of how long any single wait call ran.
+		require.InDelta(t, 600, buildElapsedSeconds(buildkite.Build{
+			State: "running", StartedAt: ts(-10 * time.Minute),
+		}), 2)
+	})
+
+	t.Run("UsesFinishedAtOnceSettled", func(t *testing.T) {
+		// A build that finished an hour ago still reports its own duration,
+		// not the time since it finished.
+		start := time.Now().Add(-2 * time.Hour)
+		require.Equal(t, 900, buildElapsedSeconds(buildkite.Build{
+			State:      "passed",
+			StartedAt:  &buildkite.Timestamp{Time: start},
+			FinishedAt: &buildkite.Timestamp{Time: start.Add(15 * time.Minute)},
+		}))
+	})
+
+	t.Run("ClampsNegativeSkew", func(t *testing.T) {
+		start := time.Now()
+		require.Zero(t, buildElapsedSeconds(buildkite.Build{
+			StartedAt:  &buildkite.Timestamp{Time: start},
+			FinishedAt: &buildkite.Timestamp{Time: start.Add(-time.Minute)},
+		}))
+	})
+}
+
+func TestWaitForBuildReportsBuildElapsed(t *testing.T) {
+	assert := require.New(t)
+	shortenBuildWait(t, 50*time.Millisecond, time.Millisecond)
+
+	client := &MockBuildsClient{
+		GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+				ID: "123", Number: 1, State: "running",
+				StartedAt: &buildkite.Timestamp{Time: time.Now().Add(-9 * time.Minute)},
+			}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient:      client,
+		AnnotationsClient: &MockAnnotationsClient{},
+	})
+	_, handler, _ := WaitForBuild()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+	})
+	assert.NoError(err)
+
+	// The caller can tell a 9-minute build from a 9-second one without a
+	// separate get_build, and without counting its own retries.
+	text := getTextResult(t, result).Text
+	requireJSONPathEqual(t, text, 540, "build_elapsed_seconds")
+	requireJSONPathEqual(t, text, false, "finished")
+
+	// Still lean.
+	assert.Less(len(text), 120)
+}
+
+func TestWaitForBuildPollErrorHandling(t *testing.T) {
+	runningThenError := func(failAfter int, failWith error) (*MockBuildsClient, *int) {
+		calls := 0
+		return &MockBuildsClient{
+			GetFunc: func(ctx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				calls++
+				if calls > failAfter {
+					return buildkite.Build{}, nil, failWith
+				}
+				return buildkite.Build{ID: "123", Number: 1, State: "running"}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}, &calls
+	}
+
+	t.Run("TransientErrorReturnsLastKnownState", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		client, _ := runningThenError(2, errors.New("500 internal server error"))
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		assert.NoError(err)
+
+		// One blip must not discard a build we saw running moments ago; the
+		// caller retries exactly as it would after a window timeout.
+		assert.False(result.IsError)
+		text := getTextResult(t, result).Text
+		requireJSONPathEqual(t, text, false, "finished")
+		requireJSONPathEqual(t, text, "running", "state")
+	})
+
+	t.Run("UnauthorizedPropagatesRatherThanLookingLikeProgress", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		client, _ := runningThenError(2, &buildkite.ErrorResponse{
+			Response: &http.Response{StatusCode: http.StatusUnauthorized},
+		})
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{
+			BuildsClient:      client,
+			AnnotationsClient: &MockAnnotationsClient{},
+		})
+		_, handler, _ := WaitForBuild()
+
+		_, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+
+		// A revoked token never fixes itself, so it must not be reported as
+		// "still running" and retried forever.
+		assert.ErrorIs(err, ErrUnauthorized)
+	})
+
+	t.Run("ClientAbortSkipsTheAnnotationFetch", func(t *testing.T) {
+		assert := require.New(t)
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		var annotationCalls, calls int
+		client := &MockBuildsClient{
+			GetFunc: func(reqCtx context.Context, org, pipeline, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				calls++
+				if calls > 2 {
+					// Caller hangs up mid-wait.
+					cancel()
+					return buildkite.Build{}, nil, context.Canceled
+				}
+				// Stay non-terminal so the loop keeps polling until the abort.
+				return buildkite.Build{ID: "123", Number: 1, State: "running"}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
+			},
+		}
+
+		deps := ToolDependencies{
+			BuildsClient: client,
+			AnnotationsClient: &MockAnnotationsClient{
+				ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+					annotationCalls++
+					return nil, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+				},
+			},
+		}
+		_, handler, _ := WaitForBuild()
+
+		_, _, _ = handler(ContextWithDeps(ctx, deps), createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+
+		// Nobody is listening, so we must not pay for more API calls.
+		assert.Zero(annotationCalls)
+	})
+}
+
+// TestWaitForBuildBudgetFitsClientTimeout pins the constraint the whole design
+// exists to satisfy. Only a comment enforced it before.
+func TestWaitForBuildBudgetFitsClientTimeout(t *testing.T) {
+	// MCP clients commonly enforce a 60s request timeout that progress
+	// notifications do not reset, see
+	// https://github.com/modelcontextprotocol/typescript-sdk/issues/245
+	const clientRequestTimeout = 60 * time.Second
+
+	require.Less(t, MaxWaitForBuildBudget(), clientRequestTimeout,
+		"a single wait_for_build call must return inside the client's request timeout")
 }

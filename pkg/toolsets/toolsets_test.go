@@ -1,8 +1,10 @@
 package toolsets
 
 import (
+	"context"
 	"testing"
 
+	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -655,7 +657,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered
-	expectedToolsets := []string{"clusters", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
+	expectedToolsets := []string{"clusters", "cluster_secrets", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
 	for _, name := range expectedToolsets {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
@@ -666,4 +668,117 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Len(investigations.Tools, 1)
 	assert.Equal("get_build_failure_summary", investigations.Tools[0].Tool.Name)
 	assert.Equal([]string{"read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
+
+	tests, exists := registry.Get(ToolsetTests)
+	assert.True(exists)
+	toolNames := make([]string, 0, len(tests.Tools))
+	for _, tool := range tests.Tools {
+		toolNames = append(toolNames, tool.Tool.Name)
+	}
+	assert.Contains(toolNames, "list_tests")
+	assert.Contains(toolNames, "list_tests_for_build")
+	assert.Contains(toolNames, "list_test_suites_for_pipeline")
+}
+
+func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
+	const contextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
+
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	for _, toolset := range CreateBuiltinToolsets() {
+		for _, tool := range toolset.Tools {
+			tool.Register(server)
+		}
+	}
+
+	ctx := context.Background()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = serverSession.Close() })
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	result, err := clientSession.ListTools(ctx, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Tools)
+
+	for _, tool := range result.Tools {
+		inputSchema, ok := tool.InputSchema.(map[string]any)
+		require.True(t, ok, "%s input schema has type %T", tool.Name, tool.InputSchema)
+
+		required, ok := inputSchema["required"].([]any)
+		require.True(t, ok, "%s input schema has no required fields", tool.Name)
+		require.Contains(t, required, "telemetry", "%s must require telemetry", tool.Name)
+
+		properties, ok := inputSchema["properties"].(map[string]any)
+		require.True(t, ok, "%s input schema has no properties", tool.Name)
+		telemetry, ok := properties["telemetry"].(map[string]any)
+		require.True(t, ok, "%s has no telemetry property", tool.Name)
+
+		telemetryRequired, ok := telemetry["required"].([]any)
+		require.True(t, ok, "%s telemetry schema has no required fields", tool.Name)
+		require.Contains(t, telemetryRequired, "context", "%s must require telemetry.context", tool.Name)
+
+		telemetryProperties, ok := telemetry["properties"].(map[string]any)
+		require.True(t, ok, "%s telemetry schema has no properties", tool.Name)
+		contextProperty, ok := telemetryProperties["context"].(map[string]any)
+		require.True(t, ok, "%s has no telemetry.context property", tool.Name)
+		require.Equal(t, contextDescription, contextProperty["description"], "%s has the wrong telemetry.context description", tool.Name)
+		require.InDelta(t, float64(trace.TelemetryContextMaxLength), contextProperty["maxLength"], 0, "%s has the wrong telemetry.context maxLength", tool.Name)
+	}
+}
+
+func TestClusterSecretsToolset(t *testing.T) {
+	assert := require.New(t)
+
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+
+	clusterSecrets, exists := registry.Get(ToolsetClusterSecrets)
+	assert.True(exists)
+
+	assert.Len(clusterSecrets.Tools, 3)
+	assert.Equal(
+		"get_cluster_secret",
+		clusterSecrets.Tools[0].Tool.Name,
+	)
+	assert.Equal(
+		"list_cluster_secrets",
+		clusterSecrets.Tools[1].Tool.Name,
+	)
+	assert.Equal(
+		"create_cluster_secret",
+		clusterSecrets.Tools[2].Tool.Name,
+	)
+
+	assert.Equal(
+		[]string{"read_secrets_details", "write_secrets"},
+		clusterSecrets.GetRequiredScopes(),
+	)
+
+	readOnlyTools := registry.GetEnabledTools(
+		[]string{ToolsetClusterSecrets},
+		true,
+	)
+	assert.Len(readOnlyTools, 2)
+	assert.Equal(
+		"get_cluster_secret",
+		readOnlyTools[0].Tool.Name,
+	)
+
+	assert.Equal(
+		"list_cluster_secrets",
+		readOnlyTools[1].Tool.Name,
+	)
+
+	assert.Equal(
+		[]string{"read_secrets_details"},
+		registry.GetRequiredScopes(
+			[]string{ToolsetClusterSecrets},
+			true,
+		),
+	)
 }

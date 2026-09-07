@@ -19,6 +19,16 @@ type PaginatedResult[T any] struct {
 	Items   []T               `json:"items"`
 }
 
+// ToolInput contains metadata common to every tool invocation.
+type ToolInput struct {
+	Telemetry ToolTelemetry `json:"telemetry" jsonschema:"Analytics metadata describing the tool call's purpose"`
+}
+
+// ToolTelemetry describes why a tool is being called.
+type ToolTelemetry struct {
+	Context string `json:"context" jsonschema:"Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."`
+}
+
 // PaginationParams is embedded in tool args structs to provide pagination fields.
 type PaginationParams struct {
 	Page    int `json:"page"`
@@ -75,7 +85,21 @@ func marshalSanitizedJSON(result any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to sanitize result: %v", err)
 	}
-	return sanitized, nil
+
+	formatted, err := marshalMultilineJSON(json.RawMessage(sanitized))
+	if err != nil {
+		return nil, fmt.Errorf("failed to format sanitized result: %v", err)
+	}
+	return formatted, nil
+}
+
+// marshalMultilineJSON encodes JSON with structural newlines but no leading
+// indentation. Remote MCP servers cannot recover a result after the host has
+// spilled it to a host-local file, so the text returned by the tool must be
+// line-oriented already. This lets the host or agent search and read bounded
+// line ranges without paying the byte cost of conventional indentation.
+func marshalMultilineJSON(value any) ([]byte, error) {
+	return json.MarshalIndent(value, "", "")
 }
 
 func mcpSanitizedTextResult(span trace.Span, sanitized []byte) (*mcp.CallToolResult, any, error) {
@@ -84,6 +108,35 @@ func mcpSanitizedTextResult(span trace.Span, sanitized []byte) (*mcp.CallToolRes
 	)
 
 	return utils.NewToolResultText(string(sanitized)), nil, nil
+}
+
+// payloadStructureBytes reports the serialized size of the payload with every
+// string emptied and the truncation metadata limitSanitizedJSONPayload would
+// add — the smallest size the generic limiter can reach without dropping
+// array items. When this floor exceeds the limit, the generic limiter fails,
+// so semantic item-count reduction is needed exactly then and only then.
+func payloadStructureBytes(payload []byte, limit int) (int, error) {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return 0, fmt.Errorf("decode sanitized JSON: %w", err)
+	}
+
+	root, ok := value.(map[string]any)
+	if !ok {
+		return 0, fmt.Errorf("expected a JSON object")
+	}
+	if _, ok := root["content_limit_bytes"]; ok {
+		root["content_limit_bytes"] = limit
+	}
+	root["content_truncated"] = true
+
+	structure, err := marshalLimitedJSON(root, 0)
+	if err != nil {
+		return 0, err
+	}
+	return len(structure), nil
 }
 
 func limitSanitizedJSONPayload(payload []byte, limit int) ([]byte, error) {
@@ -231,12 +284,18 @@ func maxJSONStringBytes(value any) int {
 
 func marshalJSONWithContentBytes(value map[string]any) ([]byte, error) {
 	if _, ok := value["content_bytes"]; !ok {
-		return json.Marshal(value)
+		payload, err := marshalMultilineJSON(value)
+		if err != nil {
+			return nil, fmt.Errorf("marshal limited JSON: %w", err)
+		}
+		return payload, nil
 	}
 
+	// content_bytes must equal the size of the delivered payload, so count the
+	// multiline form, not the compact form.
 	value["content_bytes"] = 0
 	for {
-		payload, err := json.Marshal(value)
+		payload, err := marshalMultilineJSON(value)
 		if err != nil {
 			return nil, fmt.Errorf("marshal limited JSON: %w", err)
 		}

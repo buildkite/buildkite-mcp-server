@@ -19,6 +19,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		forbiddenAccess  = "A 403 response means the credentials were accepted but access was denied"
 		buildNumber      = "build_number is a sequential"
 		jobStateBroken   = `Job state "broken"`
+		jobOutputLinks   = "Job output links:"
 		logInvestigation = "Log investigation order:"
 		annotationScope  = "Annotation scope:"
 		failureSummary   = "Build failure investigation:"
@@ -36,45 +37,45 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		{
 			name:    "all toolsets includes every section",
 			enabled: []string{"all"},
-			want:    append(append([]string{}, always...), startHere, skillDiscovery, failureSummary, jobStateBroken, logInvestigation, annotationScope),
+			want:    append(append([]string{}, always...), startHere, skillDiscovery, failureSummary, jobStateBroken, jobOutputLinks, logInvestigation, annotationScope),
 		},
 		{
 			name:    "builds alone",
 			enabled: []string{"builds"},
-			want:    append(append([]string{}, always...), jobStateBroken),
+			want:    append(append([]string{}, always...), jobStateBroken, jobOutputLinks),
 			notWant: []string{startHere, skillDiscovery, failureSummary, logInvestigation, annotationScope},
 		},
 		{
 			name:    "skills alone",
 			enabled: []string{"skills"},
 			want:    append(append([]string{}, always...), skillDiscovery),
-			notWant: []string{startHere, failureSummary, jobStateBroken, logInvestigation, annotationScope},
+			notWant: []string{startHere, failureSummary, jobStateBroken, jobOutputLinks, logInvestigation, annotationScope},
 		},
 		{
 			name:    "user alone",
 			enabled: []string{"user"},
 			want:    append(append([]string{}, always...), startHere),
-			notWant: []string{skillDiscovery, failureSummary, jobStateBroken, logInvestigation, annotationScope},
+			notWant: []string{skillDiscovery, failureSummary, jobStateBroken, jobOutputLinks, logInvestigation, annotationScope},
 		},
 		{
 			name:     "all toolsets, read-only, omits annotation scope",
 			enabled:  []string{"all"},
 			readOnly: true,
-			want:     append(append([]string{}, always...), startHere, skillDiscovery, failureSummary, jobStateBroken, logInvestigation),
+			want:     append(append([]string{}, always...), startHere, skillDiscovery, failureSummary, jobStateBroken, jobOutputLinks, logInvestigation),
 			notWant:  []string{annotationScope},
 		},
 		{
 			name:    "investigations alone",
 			enabled: []string{"investigations"},
 			want:    append(append([]string{}, always...), failureSummary),
-			notWant: []string{startHere, skillDiscovery, jobStateBroken, logInvestigation, annotationScope},
+			notWant: []string{startHere, skillDiscovery, jobStateBroken, jobOutputLinks, logInvestigation, annotationScope},
 		},
 		{
 			name:     "annotations toolset, read-only, omits annotation scope",
 			enabled:  []string{"annotations"},
 			readOnly: true,
 			want:     append([]string{}, always...),
-			notWant:  []string{annotationScope},
+			notWant:  []string{jobOutputLinks, annotationScope},
 		},
 	}
 

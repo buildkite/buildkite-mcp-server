@@ -1,0 +1,1 @@
+/goal make the CI for git branch '{{.SCENARIO_BRANCH}}' (Buildkite org '{{.ORG_SLUG}}', pipeline '{{.PIPELINE_SLUG}}') from red {{.WAIT_STATUS}} to green. Push your fixes to that same branch and confirm its build passes. Do NOT read/reverse-engineer babystand.sh.{{.DEBUG_STRING}}

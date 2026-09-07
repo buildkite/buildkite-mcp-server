@@ -44,6 +44,14 @@ lint: ## Run linter
 lint-fix: ## Run linter with auto-fix
 	golangci-lint run --fix ./...
 
+.PHONY: tidy-check
+tidy-check: ## Check that Go module files are tidy
+	go mod tidy -diff
+
+.PHONY: fix-check
+fix-check: ## Check for changes recommended by go fix
+	go fix -diff ./...
+
 .PHONY: clean
 clean: ## Clean build artifacts
 	rm -f $(BINARY_NAME) $(COVERAGE_FILE)
@@ -55,7 +63,7 @@ deps: ## Download and tidy dependencies
 	go mod tidy
 
 .PHONY: check
-check: lint test ## Run all checks (lint + test)
+check: lint tidy-check fix-check test ## Run all validation checks
 
 .PHONY: all
 all: clean deps check build ## Run full build pipeline

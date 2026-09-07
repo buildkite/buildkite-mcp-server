@@ -18,6 +18,7 @@ type PipelinesClient interface {
 }
 
 type ListPipelinesArgs struct {
+	ToolInput
 	OrgSlug     string `json:"org_slug"`
 	Name        string `json:"name,omitempty" jsonschema:"Filter pipelines by name"`
 	Repository  string `json:"repository,omitempty" jsonschema:"Filter pipelines by repository URL"`
@@ -39,70 +40,71 @@ type WebhookInfo struct {
 
 func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "list_pipelines",
-			Description: "List all pipelines in an organization with their basic details, build counts, and current status",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "List Pipelines",
-				ReadOnlyHint: true,
+		Name:        "list_pipelines",
+		Description: "List all pipelines in an organization with their basic details, build counts, and current status",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "List Pipelines",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListPipelinesArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListPipelines")
+		defer span.End()
+
+		// Set defaults
+		if args.DetailLevel == "" {
+			args.DetailLevel = "summary"
+		}
+		if args.Page == 0 {
+			args.Page = 1
+		}
+		if args.PerPage == 0 {
+			args.PerPage = 30
+		}
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("name_filter", args.Name),
+			attribute.String("repository_filter", args.Repository),
+			attribute.String("detail_level", args.DetailLevel),
+			attribute.Int("page", args.Page),
+			attribute.Int("per_page", args.PerPage),
+		)
+
+		deps := DepsFromContext(ctx)
+		pipelines, resp, err := deps.PipelinesClient.List(ctx, args.OrgSlug, &buildkite.PipelineListOptions{
+			ListOptions: buildkite.ListOptions{
+				Page:    args.Page,
+				PerPage: args.PerPage,
 			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListPipelinesArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ListPipelines")
-			defer span.End()
+			Name:       args.Name,
+			Repository: args.Repository,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			// Set defaults
-			if args.DetailLevel == "" {
-				args.DetailLevel = "summary"
-			}
-			if args.Page == 0 {
-				args.Page = 1
-			}
-			if args.PerPage == 0 {
-				args.PerPage = 30
-			}
+		headers := map[string]string{"Link": resp.Header.Get("Link")}
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("name_filter", args.Name),
-				attribute.String("repository_filter", args.Repository),
-				attribute.String("detail_level", args.DetailLevel),
-				attribute.Int("page", args.Page),
-				attribute.Int("per_page", args.PerPage),
-			)
+		var result any
+		switch args.DetailLevel {
+		case "summary":
+			result = createPaginatedResult(pipelines, summarizePipeline, headers)
+		case "detailed":
+			result = createPaginatedResult(pipelines, detailPipeline, headers)
+		default: // "full"
+			result = createPaginatedResult(pipelines, func(p buildkite.Pipeline) buildkite.Pipeline { return p }, headers)
+		}
 
-			deps := DepsFromContext(ctx)
-			pipelines, resp, err := deps.PipelinesClient.List(ctx, args.OrgSlug, &buildkite.PipelineListOptions{
-				ListOptions: buildkite.ListOptions{
-					Page:    args.Page,
-					PerPage: args.PerPage,
-				},
-				Name:       args.Name,
-				Repository: args.Repository,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		span.SetAttributes(
+			attribute.Int("item_count", len(pipelines)),
+		)
 
-			headers := map[string]string{"Link": resp.Header.Get("Link")}
-
-			var result any
-			switch args.DetailLevel {
-			case "summary":
-				result = createPaginatedResult(pipelines, summarizePipeline, headers)
-			case "detailed":
-				result = createPaginatedResult(pipelines, detailPipeline, headers)
-			default: // "full"
-				result = createPaginatedResult(pipelines, func(p buildkite.Pipeline) buildkite.Pipeline { return p }, headers)
-			}
-
-			span.SetAttributes(
-				attribute.Int("item_count", len(pipelines)),
-			)
-
-			return mcpTextResult(span, &result)
-		}, []string{"read_pipelines"}
+		return mcpTextResult(span, &result)
+	}, []string{"read_pipelines"}
 }
 
 type GetPipelineArgs struct {
+	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
 	DetailLevel  string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary', 'detailed', or 'full' (default)"`
@@ -238,17 +240,19 @@ func createPaginatedResult[T any](pipelines []buildkite.Pipeline, converter func
 }
 
 type CreatePipelineArgs struct {
-	OrgSlug                   string   `json:"org_slug"`
-	Name                      string   `json:"name"`
-	RepositoryURL             string   `json:"repository_url" jsonschema:"The Git repository URL"`
-	ClusterID                 string   `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
-	Description               string   `json:"description,omitempty"`
-	Configuration             string   `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
-	DefaultBranch             string   `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
-	SkipQueuedBranchBuilds    bool     `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
-	CancelRunningBranchBuilds bool     `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
-	Tags                      []string `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
-	CreateWebhook             bool     `json:"create_webhook,omitempty" jsonschema:"Create a GitHub webhook to trigger builds on pull-request and push events"`
+	ToolInput
+	OrgSlug                   string            `json:"org_slug"`
+	Name                      string            `json:"name"`
+	RepositoryURL             string            `json:"repository_url" jsonschema:"The Git repository URL"`
+	ClusterID                 string            `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
+	Description               string            `json:"description,omitempty"`
+	Configuration             string            `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
+	DefaultBranch             string            `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    bool              `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds bool              `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Tags                      []string          `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
+	Teams                     map[string]string `json:"teams,omitempty" jsonschema:"Team UUIDs mapped to their access level on the pipeline: read_only, build_and_read or manage_build_and_read. Organizations with teams enabled require at least one team, unless the user is an organization administrator"`
+	CreateWebhook             bool              `json:"create_webhook,omitempty" jsonschema:"Create a GitHub webhook to trigger builds on pull-request and push events"`
 }
 
 func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []string) {
@@ -279,6 +283,7 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 				SkipQueuedBranchBuilds:    args.SkipQueuedBranchBuilds,
 				Configuration:             args.Configuration,
 				Tags:                      args.Tags,
+				Teams:                     args.Teams,
 			}
 
 			if args.DefaultBranch != "" {
@@ -317,6 +322,7 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 }
 
 type UpdatePipelineArgs struct {
+	ToolInput
 	OrgSlug                   string   `json:"org_slug"`
 	PipelineSlug              string   `json:"pipeline_slug"`
 	Name                      *string  `json:"name,omitempty"`
@@ -332,57 +338,57 @@ type UpdatePipelineArgs struct {
 
 func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "update_pipeline",
-			Description: "Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata",
-			Annotations: &mcp.ToolAnnotations{
-				Title:           "Update Pipeline",
-				DestructiveHint: boolPtr(true),
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.UpdatePipeline")
-			defer span.End()
+		Name:        "update_pipeline",
+		Description: "Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Update Pipeline",
+			DestructiveHint: boolPtr(true),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdatePipelineArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.UpdatePipeline")
+		defer span.End()
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+		)
 
-			update := buildkite.UpdatePipeline{}
-			if args.Name != nil {
-				update.Name = buildkite.Some(*args.Name)
-			}
-			if args.RepositoryURL != nil {
-				span.SetAttributes(attribute.String("repository_url", *args.RepositoryURL))
-				update.Repository = buildkite.Some(*args.RepositoryURL)
-			}
-			if args.ClusterID != nil {
-				update.ClusterID = buildkite.Some(*args.ClusterID)
-			}
-			if args.Description != nil {
-				update.Description = buildkite.Some(*args.Description)
-			}
-			if args.Configuration != nil {
-				update.Configuration = buildkite.Some(*args.Configuration)
-			}
-			if args.DefaultBranch != nil {
-				update.DefaultBranch = buildkite.Some(*args.DefaultBranch)
-			}
-			if args.SkipQueuedBranchBuilds != nil {
-				update.SkipQueuedBranchBuilds = buildkite.Some(*args.SkipQueuedBranchBuilds)
-			}
-			if args.CancelRunningBranchBuilds != nil {
-				update.CancelRunningBranchBuilds = buildkite.Some(*args.CancelRunningBranchBuilds)
-			}
-			if args.Tags != nil {
-				update.Tags = buildkite.Some(args.Tags)
-			}
+		update := buildkite.UpdatePipeline{}
+		if args.Name != nil {
+			update.Name = buildkite.Some(*args.Name)
+		}
+		if args.RepositoryURL != nil {
+			span.SetAttributes(attribute.String("repository_url", *args.RepositoryURL))
+			update.Repository = buildkite.Some(*args.RepositoryURL)
+		}
+		if args.ClusterID != nil {
+			update.ClusterID = buildkite.Some(*args.ClusterID)
+		}
+		if args.Description != nil {
+			update.Description = buildkite.Some(*args.Description)
+		}
+		if args.Configuration != nil {
+			update.Configuration = buildkite.Some(*args.Configuration)
+		}
+		if args.DefaultBranch != nil {
+			update.DefaultBranch = buildkite.Some(*args.DefaultBranch)
+		}
+		if args.SkipQueuedBranchBuilds != nil {
+			update.SkipQueuedBranchBuilds = buildkite.Some(*args.SkipQueuedBranchBuilds)
+		}
+		if args.CancelRunningBranchBuilds != nil {
+			update.CancelRunningBranchBuilds = buildkite.Some(*args.CancelRunningBranchBuilds)
+		}
+		if args.Tags != nil {
+			update.Tags = buildkite.Some(args.Tags)
+		}
 
-			deps := DepsFromContext(ctx)
-			pipeline, _, err := deps.PipelinesClient.Update(ctx, args.OrgSlug, args.PipelineSlug, update)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		pipeline, _, err := deps.PipelinesClient.Update(ctx, args.OrgSlug, args.PipelineSlug, update)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			return mcpTextResult(span, &pipeline)
-		}, []string{"write_pipelines"}
+		return mcpTextResult(span, &pipeline)
+	}, []string{"write_pipelines"}
 }

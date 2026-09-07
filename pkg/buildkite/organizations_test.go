@@ -26,15 +26,15 @@ func TestUserTokenOrganization(t *testing.T) {
 	client := &MockOrganizationsClient{
 		ListFunc: func(ctx context.Context, options *buildkite.OrganizationListOptions) ([]buildkite.Organization, *buildkite.Response, error) {
 			return []buildkite.Organization{
-					{
-						Slug: "test-org",
-						Name: "Test Organization",
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				{
+					Slug: "test-org",
+					Name: "Test Organization",
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 

@@ -92,8 +92,7 @@ func TestGetFailedExecutions(t *testing.T) {
 	assert.Contains(textContent.Text, "Test Case 1")
 	assert.Contains(textContent.Text, "Assertion failed")
 	assert.Contains(textContent.Text, "Timeout")
-	assert.Contains(textContent.Text, `"headers":{"Link":"\u003c`)
-	assert.Contains(textContent.Text, `failed_executions?page=2\u003e; rel=\"next\"`)
+	requireJSONPathEqual(t, textContent.Text, `<https://api.buildkite.com/v2/analytics/organizations/org/suites/suite1/runs/run1/failed_executions?page=2>; rel="next"`, "headers", "Link")
 }
 
 func TestGetFailedExecutionsWithError(t *testing.T) {
@@ -207,8 +206,7 @@ func TestGetFailedExecutionsPagination(t *testing.T) {
 
 	textContent := result.Content[0].(*mcp.TextContent)
 	assert.Contains(textContent.Text, "exec-1")
-	assert.Contains(textContent.Text, `"headers":{"Link":"\u003c`)
-	assert.Contains(textContent.Text, `failed_executions?page=3\u003e; rel=\"next\"`)
+	requireJSONPathEqual(t, textContent.Text, `<https://api.buildkite.com/v2/analytics/organizations/org/suites/suite1/runs/run1/failed_executions?page=3>; rel="next"`, "headers", "Link")
 	assert.NotContains(textContent.Text, `"page":`)
 	assert.NotContains(textContent.Text, `"per_page":`)
 }

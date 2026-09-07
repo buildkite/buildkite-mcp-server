@@ -16,16 +16,19 @@ type AgentsClient interface {
 }
 
 type ListAgentsArgs struct {
-	OrgSlug     string `json:"org_slug"`
-	Name        string `json:"name,omitempty"`
-	Hostname    string `json:"hostname,omitempty"`
-	Version     string `json:"version,omitempty"`
-	Page        int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage     int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
-	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
+	ToolInput
+	OrgSlug        string `json:"org_slug"`
+	Name           string `json:"name,omitempty"`
+	Hostname       string `json:"hostname,omitempty"`
+	Version        string `json:"version,omitempty"`
+	ClusterQueueID string `json:"cluster_queue_id,omitempty" jsonschema:"Filter agents by cluster queue ID (UUID)"`
+	Page           int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage        int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
+	DetailLevel    string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary' (default), 'detailed', or 'full'"`
 }
 
 type GetAgentArgs struct {
+	ToolInput
 	OrgSlug     string `json:"org_slug"`
 	AgentID     string `json:"agent_id"`
 	DetailLevel string `json:"detail_level,omitempty" jsonschema:"Response detail level: 'summary', 'detailed', or 'full' (default)"`
@@ -135,113 +138,115 @@ func createPaginatedAgentResult[T any](agents []buildkite.Agent, converter func(
 
 func ListAgents() (mcp.Tool, mcp.ToolHandlerFor[ListAgentsArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "list_agents",
-			Description: "List agents in an organization with their connection state, host details, version, current job, and pause status",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "List Agents",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ListAgentsArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.ListAgents")
-			defer span.End()
+		Name:        "list_agents",
+		Description: "List agents in an organization with their connection state, host details, version, current job, and pause status",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "List Agents",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListAgentsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListAgents")
+		defer span.End()
 
-			if args.DetailLevel == "" {
-				args.DetailLevel = "summary"
-			}
+		if args.DetailLevel == "" {
+			args.DetailLevel = "summary"
+		}
 
-			switch args.DetailLevel {
-			case "summary", "detailed", "full":
-			default:
-				return utils.NewToolResultError("detail_level must be 'summary', 'detailed', or 'full'"), nil, nil
-			}
+		switch args.DetailLevel {
+		case "summary", "detailed", "full":
+		default:
+			return utils.NewToolResultError("detail_level must be 'summary', 'detailed', or 'full'"), nil, nil
+		}
 
-			paginationParams := paginationFromArgs(args.Page, args.PerPage)
+		paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("name_filter", args.Name),
-				attribute.String("hostname_filter", args.Hostname),
-				attribute.String("version_filter", args.Version),
-				attribute.String("detail_level", args.DetailLevel),
-				attribute.Int("page", paginationParams.Page),
-				attribute.Int("per_page", paginationParams.PerPage),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("name_filter", args.Name),
+			attribute.String("hostname_filter", args.Hostname),
+			attribute.String("version_filter", args.Version),
+			attribute.String("detail_level", args.DetailLevel),
+			attribute.String("cluster_queue_id_filter", args.ClusterQueueID),
+			attribute.Int("page", paginationParams.Page),
+			attribute.Int("per_page", paginationParams.PerPage),
+		)
 
-			deps := DepsFromContext(ctx)
-			agents, resp, err := deps.AgentsClient.List(ctx, args.OrgSlug, &buildkite.AgentListOptions{
-				ListOptions: paginationParams,
-				Name:        args.Name,
-				Hostname:    args.Hostname,
-				Version:     args.Version,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		agents, resp, err := deps.AgentsClient.List(ctx, args.OrgSlug, &buildkite.AgentListOptions{
+			ListOptions:    paginationParams,
+			Name:           args.Name,
+			Hostname:       args.Hostname,
+			Version:        args.Version,
+			ClusterQueueID: args.ClusterQueueID,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			headers := map[string]string{
-				"Link": resp.Header.Get("Link"),
-			}
+		headers := map[string]string{
+			"Link": resp.Header.Get("Link"),
+		}
 
-			var result any
-			switch args.DetailLevel {
-			case "summary":
-				result = createPaginatedAgentResult(agents, summarizeAgent, headers)
-			case "detailed":
-				result = createPaginatedAgentResult(agents, detailAgent, headers)
-			default: // full
-				result = createPaginatedAgentResult(agents, func(a buildkite.Agent) buildkite.Agent { return a }, headers)
-			}
+		var result any
+		switch args.DetailLevel {
+		case "summary":
+			result = createPaginatedAgentResult(agents, summarizeAgent, headers)
+		case "detailed":
+			result = createPaginatedAgentResult(agents, detailAgent, headers)
+		default: // full
+			result = createPaginatedAgentResult(agents, func(a buildkite.Agent) buildkite.Agent { return a }, headers)
+		}
 
-			span.SetAttributes(attribute.Int("item_count", len(agents)))
+		span.SetAttributes(attribute.Int("item_count", len(agents)))
 
-			return mcpTextResult(span, &result)
-		}, []string{"read_agents"}
+		return mcpTextResult(span, &result)
+	}, []string{"read_agents"}
 }
 
 func GetAgent() (mcp.Tool, mcp.ToolHandlerFor[GetAgentArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "get_agent",
-			Description: "Get detailed information about a specific agent including its connection state, host details, current job, metadata, and pause status",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Get Agent",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args GetAgentArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.GetAgent")
-			defer span.End()
+		Name:        "get_agent",
+		Description: "Get detailed information about a specific agent including its connection state, host details, current job, metadata, and pause status",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Agent",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetAgentArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetAgent")
+		defer span.End()
 
-			if args.DetailLevel == "" {
-				args.DetailLevel = "full"
-			}
+		if args.DetailLevel == "" {
+			args.DetailLevel = "full"
+		}
 
-			switch args.DetailLevel {
-			case "summary", "detailed", "full":
-			default:
-				return utils.NewToolResultError("detail_level must be 'summary', 'detailed', or 'full'"), nil, nil
-			}
+		switch args.DetailLevel {
+		case "summary", "detailed", "full":
+		default:
+			return utils.NewToolResultError("detail_level must be 'summary', 'detailed', or 'full'"), nil, nil
+		}
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("agent_id", args.AgentID),
-				attribute.String("detail_level", args.DetailLevel),
-			)
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("agent_id", args.AgentID),
+			attribute.String("detail_level", args.DetailLevel),
+		)
 
-			deps := DepsFromContext(ctx)
-			agent, _, err := deps.AgentsClient.Get(ctx, args.OrgSlug, args.AgentID)
-			if err != nil {
-				return handleBuildkiteError(err)
-			}
+		deps := DepsFromContext(ctx)
+		agent, _, err := deps.AgentsClient.Get(ctx, args.OrgSlug, args.AgentID)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			var result any
-			switch args.DetailLevel {
-			case "summary":
-				result = summarizeAgent(agent)
-			case "detailed":
-				result = detailAgent(agent)
-			default: // full
-				result = agent
-			}
+		var result any
+		switch args.DetailLevel {
+		case "summary":
+			result = summarizeAgent(agent)
+		case "detailed":
+			result = detailAgent(agent)
+		default: // full
+			result = agent
+		}
 
-			return mcpTextResult(span, &result)
-		}, []string{"read_agents"}
+		return mcpTextResult(span, &result)
+	}, []string{"read_agents"}
 }

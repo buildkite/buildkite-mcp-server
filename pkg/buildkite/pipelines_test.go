@@ -61,17 +61,17 @@ func TestListPipelines(t *testing.T) {
 	client := &MockPipelinesClient{
 		ListFunc: func(ctx context.Context, org string, opt *buildkite.PipelineListOptions) ([]buildkite.Pipeline, *buildkite.Response, error) {
 			return []buildkite.Pipeline{
-					{
-						ID:        "123",
-						Slug:      "test-pipeline",
-						Name:      "Test Pipeline",
-						CreatedAt: &buildkite.Timestamp{},
-					},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				{
+					ID:        "123",
+					Slug:      "test-pipeline",
+					Name:      "Test Pipeline",
+					CreatedAt: &buildkite.Timestamp{},
+				},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -101,15 +101,15 @@ func TestGetPipeline(t *testing.T) {
 	client := &MockPipelinesClient{
 		GetFunc: func(ctx context.Context, org string, pipeline string) (buildkite.Pipeline, *buildkite.Response, error) {
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					CreatedAt: &buildkite.Timestamp{},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				CreatedAt: &buildkite.Timestamp{},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -157,19 +157,20 @@ steps:
 			assert.Equal("Test Pipeline", p.Name)
 			assert.Equal("https://example.com/repo.git", p.Repository)
 			assert.Equal(testPipelineDefinition, p.Configuration)
+			assert.Equal(map[string]string{"team-uuid-1": "build_and_read"}, p.Teams)
 
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					ClusterID: "cluster-123",
-					CreatedAt: &buildkite.Timestamp{},
-					Tags:      []string{"tag1", "tag2"},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				ClusterID: "cluster-123",
+				CreatedAt: &buildkite.Timestamp{},
+				Tags:      []string{"tag1", "tag2"},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
 			assert.Equal("org", org)
@@ -199,6 +200,7 @@ steps:
 		Description:   "A test pipeline",
 		Configuration: testPipelineDefinition,
 		Tags:          []string{"tag1", "tag2"},
+		Teams:         map[string]string{"team-uuid-1": "build_and_read"},
 		CreateWebhook: true, // should create webhook by default
 	}
 
@@ -207,10 +209,11 @@ steps:
 	assert.True(webhookCalled, "AddWebhook should have been called when CreateWebhook is true")
 
 	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"webhook":{"created":true,"note":"Pipeline and webhook created successfully."}`)
-	assert.Contains(textContent.Text, `"id":"123"`)
-	assert.Contains(textContent.Text, `"name":"Test Pipeline"`)
-	assert.Contains(textContent.Text, `"slug":"test-pipeline"`)
+	requireJSONPathEqual(t, textContent.Text, true, "webhook", "created")
+	requireJSONPathEqual(t, textContent.Text, "Pipeline and webhook created successfully.", "webhook", "note")
+	requireJSONPathEqual(t, textContent.Text, "123", "pipeline", "id")
+	requireJSONPathEqual(t, textContent.Text, "Test Pipeline", "pipeline", "name")
+	requireJSONPathEqual(t, textContent.Text, "test-pipeline", "pipeline", "slug")
 }
 
 func TestCreatePipelineWithWebhook(t *testing.T) {
@@ -238,17 +241,17 @@ steps:
 			assert.Equal(testPipelineDefinition, p.Configuration)
 
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					ClusterID: "cluster-123",
-					CreatedAt: &buildkite.Timestamp{},
-					Tags:      []string{"tag1", "tag2"},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 201,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				ClusterID: "cluster-123",
+				CreatedAt: &buildkite.Timestamp{},
+				Tags:      []string{"tag1", "tag2"},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 201,
+				},
+			}, nil
 		},
 		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
 			// validate required fields
@@ -288,10 +291,11 @@ steps:
 	assert.True(webhookCalled, "AddWebhook should have been called")
 
 	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"webhook":{"created":true,"note":"Pipeline and webhook created successfully."}`)
-	assert.Contains(textContent.Text, `"id":"123"`)
-	assert.Contains(textContent.Text, `"name":"Test Pipeline"`)
-	assert.Contains(textContent.Text, `"slug":"test-pipeline"`)
+	requireJSONPathEqual(t, textContent.Text, true, "webhook", "created")
+	requireJSONPathEqual(t, textContent.Text, "Pipeline and webhook created successfully.", "webhook", "note")
+	requireJSONPathEqual(t, textContent.Text, "123", "pipeline", "id")
+	requireJSONPathEqual(t, textContent.Text, "Test Pipeline", "pipeline", "name")
+	requireJSONPathEqual(t, textContent.Text, "test-pipeline", "pipeline", "slug")
 }
 
 func TestCreatePipelineWithWebhookError(t *testing.T) {
@@ -319,17 +323,17 @@ steps:
 			assert.Equal(testPipelineDefinition, p.Configuration)
 
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					ClusterID: "cluster-123",
-					CreatedAt: &buildkite.Timestamp{},
-					Tags:      []string{"tag1", "tag2"},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 201,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				ClusterID: "cluster-123",
+				CreatedAt: &buildkite.Timestamp{},
+				Tags:      []string{"tag1", "tag2"},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 201,
+				},
+			}, nil
 		},
 		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
 			webhookCalled = true
@@ -361,9 +365,9 @@ steps:
 	assert.True(webhookCalled, "AddWebhook should have been called")
 
 	textContent := getTextResult(t, result)
-	assert.Contains(textContent.Text, `"webhook":{"created":false,`)
-	assert.Contains(textContent.Text, `"error":"Auto-creating webhooks is not supported for your repository."`)
-	assert.Contains(textContent.Text, `"note":"Pipeline created successfully, but webhook creation failed.`)
+	requireJSONPathEqual(t, textContent.Text, false, "webhook", "created")
+	requireJSONPathEqual(t, textContent.Text, "Auto-creating webhooks is not supported for your repository.", "webhook", "error")
+	requireJSONPathEqual(t, textContent.Text, "Pipeline created successfully, but webhook creation failed.", "webhook", "note")
 }
 
 func TestUpdatePipeline(t *testing.T) {
@@ -401,17 +405,17 @@ steps:
 			assert.Equal([]string{"tag1", "tag2"}, tags)
 
 			return buildkite.Pipeline{
-					ID:        "123",
-					Slug:      "test-pipeline",
-					Name:      "Test Pipeline",
-					ClusterID: "abc-123",
-					CreatedAt: &buildkite.Timestamp{},
-					Tags:      []string{"tag1", "tag2"},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:        "123",
+				Slug:      "test-pipeline",
+				Name:      "Test Pipeline",
+				ClusterID: "abc-123",
+				CreatedAt: &buildkite.Timestamp{},
+				Tags:      []string{"tag1", "tag2"},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -457,12 +461,12 @@ func TestUpdatePipelineOmittedFieldsAndEmptyTags(t *testing.T) {
 			assert.Empty(tags)
 
 			return buildkite.Pipeline{
-					ID: "123",
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID: "123",
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 
@@ -493,14 +497,14 @@ func TestUpdatePipelineSendsEmptyTags(t *testing.T) {
 			assert.Equal([]string{}, tags)
 
 			return buildkite.Pipeline{
-					ID:   "123",
-					Slug: "test-pipeline",
-					Tags: []string{},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:   "123",
+				Slug: "test-pipeline",
+				Tags: []string{},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 

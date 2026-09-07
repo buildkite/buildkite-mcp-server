@@ -2,6 +2,13 @@
 
 set -euo pipefail
 
+# Bash 5.2+ enables patsub_replacement by default: an unquoted '&' in a
+# ${var//pat/repl} replacement expands to the matched pattern, which would
+# corrupt substituted values like '?a=1&b=2' in the {{.KEY}} rendering below
+# (and eat backslashes). Disable it (guarded: the option doesn't exist before
+# 5.2, incl. bash 3.2 and the Ubuntu 22.04 image's 5.1).
+shopt -u patsub_replacement 2>/dev/null || true
+
 # Resolve the harness location from this script's own path, so the parser, MCP
 # config and system prompt keep resolving even when the caller has cd'd into a
 # separate git checkout (the subject under test) as the working directory.

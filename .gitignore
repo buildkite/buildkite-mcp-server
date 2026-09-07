@@ -14,6 +14,9 @@ vendor/
 /junit.xml
 /specs
 
+# eval run bundles produced by evals/scripts/babystand.sh
+/evals/runs/
+
 # debugger binaries
 __debug_bin*
 /*.json

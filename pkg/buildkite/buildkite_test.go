@@ -77,6 +77,63 @@ func getTextResult(t *testing.T, result *mcp.CallToolResult) *mcp.TextContent {
 	return textContent
 }
 
+// requireJSONPathEqual keeps handler tests focused on the response contract,
+// rather than the whitespace used to serialize it. Path elements are object
+// keys or array indexes.
+func requireJSONPathEqual(t *testing.T, document string, expected any, path ...any) {
+	t.Helper()
+
+	var current any
+	require.NoError(t, json.Unmarshal([]byte(document), &current))
+	for _, element := range path {
+		switch element := element.(type) {
+		case string:
+			object, ok := current.(map[string]any)
+			require.True(t, ok, "expected object before key %q in JSON path %v", element, path)
+			current, ok = object[element]
+			require.True(t, ok, "missing key %q in JSON path %v", element, path)
+		case int:
+			array, ok := current.([]any)
+			require.True(t, ok, "expected array before index %d in JSON path %v", element, path)
+			require.GreaterOrEqual(t, element, 0, "negative index %d in JSON path %v", element, path)
+			require.Less(t, element, len(array), "missing index %d in JSON path %v", element, path)
+			current = array[element]
+		default:
+			t.Fatalf("unsupported JSON path element %T", element)
+		}
+	}
+
+	require.EqualValues(t, expected, current, "unexpected value at JSON path %v", path)
+}
+
+func TestMarshalSanitizedJSONUsesMultilineJSONWithoutIndentation(t *testing.T) {
+	result, err := marshalSanitizedJSON(map[string]any{
+		"items": []any{
+			map[string]any{"id": 1},
+			map[string]any{"id": 2},
+		},
+		"tags": []string{"a", "b"},
+	})
+	require.NoError(t, err)
+	expected := strings.Join([]string{
+		"{",
+		`"items": [`,
+		"{",
+		`"id": 1`,
+		"},",
+		"{",
+		`"id": 2`,
+		"}",
+		"],",
+		`"tags": [`,
+		`"a",`,
+		`"b"`,
+		"]",
+		"}",
+	}, "\n")
+	require.Equal(t, expected, string(result))
+}
+
 func testPtr[T any](value T) *T {
 	return &value
 }

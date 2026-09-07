@@ -12,7 +12,9 @@ type UserClient interface {
 	CurrentUser(ctx context.Context) (buildkite.User, *buildkite.Response, error)
 }
 
-type CurrentUserArgs struct{}
+type CurrentUserArgs struct {
+	ToolInput
+}
 
 func CurrentUser() (mcp.Tool, mcp.ToolHandlerFor[CurrentUserArgs, any], []string) {
 	tool := mcp.Tool{

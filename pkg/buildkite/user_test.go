@@ -26,15 +26,15 @@ func TestCurrentUser(t *testing.T) {
 	client := &MockUserClient{
 		CurrentUserFunc: func(ctx context.Context) (buildkite.User, *buildkite.Response, error) {
 			return buildkite.User{
-					ID:        "123",
-					Name:      "Test User",
-					Email:     "user@example.com",
-					CreatedAt: &buildkite.Timestamp{},
-				}, &buildkite.Response{
-					Response: &http.Response{
-						StatusCode: 200,
-					},
-				}, nil
+				ID:        "123",
+				Name:      "Test User",
+				Email:     "user@example.com",
+				CreatedAt: &buildkite.Timestamp{},
+			}, &buildkite.Response{
+				Response: &http.Response{
+					StatusCode: 200,
+				},
+			}, nil
 		},
 	}
 

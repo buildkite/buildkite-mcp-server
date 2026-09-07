@@ -42,6 +42,7 @@ const (
 // by get_build_failure_summary. Pointer booleans let omitted values default to
 // true while still allowing callers to disable an optional section.
 type GetBuildFailureSummaryArgs struct {
+	ToolInput
 	OrgSlug                string `json:"org_slug"`
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`
@@ -51,6 +52,7 @@ type GetBuildFailureSummaryArgs struct {
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to inspect (default 5, max 20)"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed test executions to return across all Test Engine runs (default 100, max 200)"`
 	MaxFailedTestsPerRun   int    `json:"max_failed_tests_per_run,omitempty" jsonschema:"Maximum failed test executions to return per Test Engine run (default 20, max 100)"`
+	ContentLimitBytes      int    `json:"content_limit_bytes,omitempty" jsonschema:"Maximum bytes for the response payload (default and max 262144); lower it to fit clients with small tool-result limits, combining with log_tail and max_jobs for finer trimming"`
 	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed, timed-out, canceled, and promised-failing jobs (default true)"`
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include failed Test Engine executions when the build has Test Engine runs (default true)"`
@@ -59,10 +61,14 @@ type GetBuildFailureSummaryArgs struct {
 
 type BuildFailureSummaryBuild struct {
 	BuildSummary
-	Blocked     bool                 `json:"blocked"`
-	ScheduledAt *buildkite.Timestamp `json:"scheduled_at,omitempty"`
-	StartedAt   *buildkite.Timestamp `json:"started_at,omitempty"`
-	FinishedAt  *buildkite.Timestamp `json:"finished_at,omitempty"`
+	Blocked bool `json:"blocked"`
+	// JobStateCounts tallies every job in the build by state, so the jobs
+	// below can be confirmed as the build's only problems without listing
+	// jobs. Omitted when the API does not return it.
+	JobStateCounts *buildkite.JobStateCounts `json:"job_state_counts,omitempty"`
+	ScheduledAt    *buildkite.Timestamp      `json:"scheduled_at,omitempty"`
+	StartedAt      *buildkite.Timestamp      `json:"started_at,omitempty"`
+	FinishedAt     *buildkite.Timestamp      `json:"finished_at,omitempty"`
 }
 
 type FailureSummaryLogEntry struct {
@@ -140,11 +146,12 @@ func boundedFailureSummaryJobs(value, configuredMax int) int {
 
 func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
 	return BuildFailureSummaryBuild{
-		BuildSummary: summarizeBuild(build),
-		Blocked:      build.Blocked,
-		ScheduledAt:  build.ScheduledAt,
-		StartedAt:    build.StartedAt,
-		FinishedAt:   build.FinishedAt,
+		BuildSummary:   summarizeBuild(build),
+		Blocked:        build.Blocked,
+		JobStateCounts: build.JobStateCounts,
+		ScheduledAt:    build.ScheduledAt,
+		StartedAt:      build.StartedAt,
+		FinishedAt:     build.FinishedAt,
 	}
 }
 
@@ -238,7 +245,7 @@ func loadFailureAnnotations(ctx context.Context, client AnnotationsClient, args 
 	results := make([]FailureSummaryAnnotation, 0, limit)
 	page := 1
 
-	for pagesScanned := 0; pagesScanned < failureSummaryAnnotationScanPages; pagesScanned++ {
+	for pagesScanned := range failureSummaryAnnotationScanPages {
 		annotations, response, err := client.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
 			ListOptions: buildkite.ListOptions{Page: page, PerPage: failureSummaryAnnotationPageSize},
 			Scope:       "all",
@@ -675,33 +682,85 @@ func marshalFailureSummaryWithContentBytes(result *BuildFailureSummary) ([]byte,
 	}
 }
 
-func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) error {
-	payload, err := marshalFailureSummaryWithContentBytes(result)
-	if err != nil {
-		return err
+// failureSummaryWithExecutionLimit returns a copy of the summary where every
+// test run keeps at most its first perRunLimit failed executions.
+func failureSummaryWithExecutionLimit(result *BuildFailureSummary, perRunLimit int) BuildFailureSummary {
+	limited := *result
+	limited.TestRuns = append([]FailureSummaryTestRun(nil), result.TestRuns...)
+	for i := range limited.TestRuns {
+		executions := result.TestRuns[i].FailedExecutions
+		if len(executions) <= perRunLimit {
+			continue
+		}
+
+		limited.TestRuns[i].FailedExecutions = executions[:perRunLimit]
+		limited.TestRuns[i].Truncated = true
+		limited.FailedTestsTruncated = true
+		limited.ContentTruncated = true
 	}
-	if len(payload) <= limit {
-		return nil
+	return limited
+}
+
+// failureSummaryWithAnnotationLimit returns a copy of the summary keeping at
+// most the first maxAnnotations annotations (the API returns them in priority
+// order).
+func failureSummaryWithAnnotationLimit(result *BuildFailureSummary, maxAnnotations int) BuildFailureSummary {
+	limited := *result
+	if len(result.Annotations) <= maxAnnotations {
+		return limited
 	}
 
-	maxEntries := 0
-	for _, job := range result.Jobs {
-		maxEntries = max(maxEntries, len(job.LogTail))
+	limited.Annotations = append([]FailureSummaryAnnotation(nil), result.Annotations[:maxAnnotations]...)
+	limited.AnnotationsTruncated = true
+	limited.ContentTruncated = true
+	return limited
+}
+
+// failureSummaryPayloadBytes measures a candidate by its full serialized
+// size — the budget the per-job log trim targets.
+func failureSummaryPayloadBytes(result *BuildFailureSummary, _ int) (int, error) {
+	payload, err := marshalFailureSummaryWithContentBytes(result)
+	if err != nil {
+		return 0, err
 	}
+	return len(payload), nil
+}
+
+// failureSummaryStructureBytes measures a candidate by its strings-emptied
+// floor — the smallest size the generic limiter can reach without dropping
+// array items. Item-bearing collections only need reducing while this floor
+// exceeds the limit; string overage is the generic limiter's job, and
+// dropping items for it would discard diagnostics the limiter could keep.
+func failureSummaryStructureBytes(result *BuildFailureSummary, limit int) (int, error) {
+	payload, err := marshalFailureSummaryWithContentBytes(result)
+	if err != nil {
+		return 0, err
+	}
+	return payloadStructureBytes(payload, limit)
+}
+
+// shrinkFailureSummaryToFit binary-searches the largest per-collection entry
+// count whose measured size fits limit and replaces *result with that
+// candidate (or the zero-entry candidate when nothing fits, so later
+// reduction passes start from the smallest form). Entry counts map
+// monotonically to size but not arithmetically — JSON escaping, conditional
+// truncation metadata, and the self-referential content_bytes field all
+// shift it — so each candidate is marshaled and measured.
+func shrinkFailureSummaryToFit(result *BuildFailureSummary, limit, maxEntries int, withLimit func(*BuildFailureSummary, int) BuildFailureSummary, measure func(*BuildFailureSummary, int) (int, error)) error {
 	if maxEntries == 0 {
 		return nil
 	}
 
-	best := failureSummaryWithLogEntryLimit(result, 0)
+	best := withLimit(result, 0)
 	low, high := 0, maxEntries
 	for low <= high {
 		mid := low + (high-low)/2
-		candidate := failureSummaryWithLogEntryLimit(result, mid)
-		candidatePayload, candidateErr := marshalFailureSummaryWithContentBytes(&candidate)
-		if candidateErr != nil {
-			return candidateErr
+		candidate := withLimit(result, mid)
+		size, err := measure(&candidate, limit)
+		if err != nil {
+			return err
 		}
-		if len(candidatePayload) <= limit {
+		if size <= limit {
 			best = candidate
 			low = mid + 1
 		} else {
@@ -713,69 +772,153 @@ func limitFailureSummaryLogCollections(result *BuildFailureSummary, limit int) e
 	return nil
 }
 
+// limitFailureSummaryCollections reduces the summary's semantic collections
+// so the generic payload limiter that runs afterwards can fit the limit by
+// shortening strings alone — it never drops array items. Per-job log tails
+// are trimmed against the full serialized size (newest lines kept, the
+// long-standing behavior). Failed test executions and annotations are only
+// reduced while the strings-emptied structure floor exceeds the limit — the
+// exact condition under which the generic limiter would fail — so a payload
+// oversized by string content alone keeps its default collection membership.
+func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) error {
+	size, err := failureSummaryPayloadBytes(result, limit)
+	if err != nil {
+		return err
+	}
+	if size <= limit {
+		return nil
+	}
+
+	logEntries := 0
+	for _, job := range result.Jobs {
+		logEntries = max(logEntries, len(job.LogTail))
+	}
+	if err := shrinkFailureSummaryToFit(result, limit, logEntries, failureSummaryWithLogEntryLimit, failureSummaryPayloadBytes); err != nil {
+		return err
+	}
+
+	structureReductions := []struct {
+		maxEntries func(*BuildFailureSummary) int
+		withLimit  func(*BuildFailureSummary, int) BuildFailureSummary
+	}{
+		{
+			maxEntries: func(r *BuildFailureSummary) int {
+				entries := 0
+				for _, run := range r.TestRuns {
+					entries = max(entries, len(run.FailedExecutions))
+				}
+				return entries
+			},
+			withLimit: failureSummaryWithExecutionLimit,
+		},
+		{
+			maxEntries: func(r *BuildFailureSummary) int { return len(r.Annotations) },
+			withLimit:  failureSummaryWithAnnotationLimit,
+		},
+	}
+
+	for _, reduction := range structureReductions {
+		floor, err := failureSummaryStructureBytes(result, limit)
+		if err != nil {
+			return err
+		}
+		if floor <= limit {
+			return nil
+		}
+		if err := shrinkFailureSummaryToFit(result, limit, reduction.maxEntries(result), reduction.withLimit, failureSummaryStructureBytes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "get_build_failure_summary",
-			Description: "Diagnose a Buildkite build failure in one call. Returns build state, terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Start with this tool before calling individual job, log, annotation, or test tools.",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Get Build Failure Summary",
-				ReadOnlyHint: true,
+		Name:        "get_build_failure_summary",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Build Failure Summary",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetBuildFailureSummaryArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetBuildFailureSummary")
+		defer span.End()
+
+		deps := DepsFromContext(ctx)
+		logTail := boundedValue(args.LogTail, defaultFailureSummaryLogTail, maxFailureSummaryLogTail)
+		maxJobs := boundedFailureSummaryJobs(args.MaxJobs, deps.FailureSummary.MaxJobs)
+		maxAnnotations := boundedValue(args.MaxAnnotations, defaultFailureSummaryAnnotations, maxFailureSummaryAnnotations)
+		maxTestRuns := boundedValue(args.MaxTestRuns, defaultFailureSummaryTestRuns, maxFailureSummaryTestRuns)
+		maxFailedTestsPerRun := boundedValue(args.MaxFailedTestsPerRun, defaultFailureSummaryTestsPerRun, maxFailureSummaryTestsPerRun)
+		maxFailedTests := boundedValue(args.MaxFailedTests, defaultFailureSummaryFailedTests, maxFailureSummaryFailedTests)
+		contentLimit := boundedValue(args.ContentLimitBytes, failureSummaryContentByteLimit, failureSummaryContentByteLimit)
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+			attribute.String("build_number", args.BuildNumber),
+			attribute.Int("log_tail", logTail),
+			attribute.Int("max_jobs", maxJobs),
+			attribute.Int("max_test_runs", maxTestRuns),
+			attribute.Int("max_failed_tests", maxFailedTests),
+			attribute.Int("content_limit_bytes", contentLimit),
+			attribute.Bool("include_logs", defaultTrue(args.IncludeLogs)),
+			attribute.Bool("include_annotations", defaultTrue(args.IncludeAnnotations)),
+			attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
+		)
+
+		build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
+			BuildsListOptions: buildkite.BuildsListOptions{
+				ExcludeJobs:     true,
+				ExcludePipeline: true,
 			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args GetBuildFailureSummaryArgs) (*mcp.CallToolResult, any, error) {
-			ctx, span := trace.Start(ctx, "buildkite.GetBuildFailureSummary")
-			defer span.End()
+			IncludeTestEngine: true,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			deps := DepsFromContext(ctx)
-			logTail := boundedValue(args.LogTail, defaultFailureSummaryLogTail, maxFailureSummaryLogTail)
-			maxJobs := boundedFailureSummaryJobs(args.MaxJobs, deps.FailureSummary.MaxJobs)
-			maxAnnotations := boundedValue(args.MaxAnnotations, defaultFailureSummaryAnnotations, maxFailureSummaryAnnotations)
-			maxTestRuns := boundedValue(args.MaxTestRuns, defaultFailureSummaryTestRuns, maxFailureSummaryTestRuns)
-			maxFailedTestsPerRun := boundedValue(args.MaxFailedTestsPerRun, defaultFailureSummaryTestsPerRun, maxFailureSummaryTestsPerRun)
-			maxFailedTests := boundedValue(args.MaxFailedTests, defaultFailureSummaryFailedTests, maxFailureSummaryFailedTests)
+		result := BuildFailureSummary{Build: failureSummaryBuild(build), JobLimit: maxJobs}
 
-			span.SetAttributes(
-				attribute.String("org_slug", args.OrgSlug),
-				attribute.String("pipeline_slug", args.PipelineSlug),
-				attribute.String("build_number", args.BuildNumber),
-				attribute.Int("log_tail", logTail),
-				attribute.Int("max_jobs", maxJobs),
-				attribute.Int("max_test_runs", maxTestRuns),
-				attribute.Int("max_failed_tests", maxFailedTests),
-				attribute.Bool("include_logs", defaultTrue(args.IncludeLogs)),
-				attribute.Bool("include_annotations", defaultTrue(args.IncludeAnnotations)),
-				attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
-			)
+		includeRetriedJobs := false
+		primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+			// The API's failed filter includes running jobs with a hard promised
+			// failure. Querying running separately can include promises covered by
+			// soft-fail or retry rules that do not put the build into failing.
+			State:              []string{"failed", "timed_out", "expired"},
+			IncludeRetriedJobs: &includeRetriedJobs,
+			PerPage:            maxJobs + 1,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
 
-			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
-				BuildsListOptions: buildkite.BuildsListOptions{
-					ExcludeJobs:     true,
-					ExcludePipeline: true,
-				},
-				IncludeTestEngine: true,
-			})
-			if err != nil {
-				return handleBuildkiteError(err)
+		sourceJobs := make([]buildkite.Job, 0, maxJobs)
+		jobsTruncated := primaryJobsList.Links.Next != ""
+		for _, job := range primaryJobsList.Items {
+			if !isPrimaryFailureSummaryJob(job) {
+				continue
 			}
+			if len(sourceJobs) < maxJobs {
+				sourceJobs = append(sourceJobs, job)
+			} else {
+				jobsTruncated = true
+			}
+		}
 
-			result := BuildFailureSummary{Build: failureSummaryBuild(build), JobLimit: maxJobs}
-
-			includeRetriedJobs := false
-			primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				// The API's failed filter includes running jobs with a hard promised
-				// failure. Querying running separately can include promises covered by
-				// soft-fail or retry rules that do not put the build into failing.
-				State:              []string{"failed", "timed_out", "expired"},
+		remainingJobs := maxJobs - len(sourceJobs)
+		if remainingJobs > 0 || !jobsTruncated {
+			canceledJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              []string{"canceled"},
 				IncludeRetriedJobs: &includeRetriedJobs,
-				PerPage:            maxJobs + 1,
+				PerPage:            remainingJobs + 1,
 			})
-			if err != nil {
-				return handleBuildkiteError(err)
+			if listErr != nil {
+				return handleBuildkiteError(listErr)
 			}
-
-			sourceJobs := make([]buildkite.Job, 0, maxJobs)
-			jobsTruncated := primaryJobsList.Links.Next != ""
-			for _, job := range primaryJobsList.Items {
-				if !isPrimaryFailureSummaryJob(job) {
+			jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
+			for _, job := range canceledJobsList.Items {
+				if !isCanceledFailureSummaryJob(job) {
 					continue
 				}
 				if len(sourceJobs) < maxJobs {
@@ -784,100 +927,78 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 					jobsTruncated = true
 				}
 			}
+		}
 
-			remainingJobs := maxJobs - len(sourceJobs)
-			if remainingJobs > 0 || !jobsTruncated {
-				canceledJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-					State:              []string{"canceled"},
-					IncludeRetriedJobs: &includeRetriedJobs,
-					PerPage:            remainingJobs + 1,
-				})
-				if listErr != nil {
-					return handleBuildkiteError(listErr)
-				}
-				jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
-				for _, job := range canceledJobsList.Items {
-					if !isCanceledFailureSummaryJob(job) {
-						continue
-					}
-					if len(sourceJobs) < maxJobs {
-						sourceJobs = append(sourceJobs, job)
-					} else {
-						jobsTruncated = true
-					}
-				}
+		remainingJobs = maxJobs - len(sourceJobs)
+		if remainingJobs > 0 || !jobsTruncated {
+			downstreamJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
+				IncludeRetriedJobs: &includeRetriedJobs,
+				PerPage:            remainingJobs + 1,
+			})
+			if listErr != nil {
+				return handleBuildkiteError(listErr)
 			}
-
-			remainingJobs = maxJobs - len(sourceJobs)
-			if remainingJobs > 0 || !jobsTruncated {
-				downstreamJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-					State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
-					IncludeRetriedJobs: &includeRetriedJobs,
-					PerPage:            remainingJobs + 1,
-				})
-				if listErr != nil {
-					return handleBuildkiteError(listErr)
+			jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
+			for _, job := range downstreamJobsList.Items {
+				if !isDownstreamFailureSummaryJob(job) {
+					continue
 				}
-				jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
-				for _, job := range downstreamJobsList.Items {
-					if !isDownstreamFailureSummaryJob(job) {
-						continue
-					}
-					if len(sourceJobs) < maxJobs {
-						sourceJobs = append(sourceJobs, job)
-					} else {
-						jobsTruncated = true
-					}
+				if len(sourceJobs) < maxJobs {
+					sourceJobs = append(sourceJobs, job)
+				} else {
+					jobsTruncated = true
 				}
 			}
-			result.Jobs = make([]FailureSummaryJob, len(sourceJobs))
-			for i, job := range sourceJobs {
-				result.Jobs[i] = failureSummaryJob(job)
-			}
-			result.JobsTruncated = jobsTruncated
+		}
+		result.Jobs = make([]FailureSummaryJob, len(sourceJobs))
+		for i, job := range sourceJobs {
+			result.Jobs[i] = failureSummaryJob(job)
+		}
+		result.JobsTruncated = jobsTruncated
 
-			if defaultTrue(args.IncludeLogs) && deps.BuildkiteLogsClient != nil {
-				if err := loadFailureLogs(ctx, deps.BuildkiteLogsClient, args, sourceJobs, result.Jobs, logTail); err != nil {
-					return nil, nil, err
+		if defaultTrue(args.IncludeLogs) && deps.BuildkiteLogsClient != nil {
+			if err := loadFailureLogs(ctx, deps.BuildkiteLogsClient, args, sourceJobs, result.Jobs, logTail); err != nil {
+				return nil, nil, err
+			}
+		}
+
+		if defaultTrue(args.IncludeAnnotations) && deps.AnnotationsClient != nil {
+			result.Annotations, result.AnnotationsTruncated, err = loadFailureAnnotations(ctx, deps.AnnotationsClient, args, maxAnnotations)
+			if err != nil {
+				if isBuildkiteUnauthorized(err) {
+					return nil, nil, ErrUnauthorized
 				}
+				result.Warnings = append(result.Warnings, fmt.Sprintf("annotations unavailable after partial scan: %v", err))
 			}
+		}
 
-			if defaultTrue(args.IncludeAnnotations) && deps.AnnotationsClient != nil {
-				result.Annotations, result.AnnotationsTruncated, err = loadFailureAnnotations(ctx, deps.AnnotationsClient, args, maxAnnotations)
-				if err != nil {
-					if isBuildkiteUnauthorized(err) {
-						return nil, nil, ErrUnauthorized
-					}
-					result.Warnings = append(result.Warnings, fmt.Sprintf("annotations unavailable after partial scan: %v", err))
-				}
-			}
-
-			if defaultTrue(args.IncludeFailedTests) && deps.TestExecutionsClient != nil && build.TestEngine != nil {
-				result.TestRuns, result.TestRunsTruncated, result.FailedTestsTruncated, err = loadFailureTestRuns(
-					ctx,
-					deps.TestExecutionsClient,
-					args,
-					build.TestEngine.Runs,
-					maxTestRuns,
-					maxFailedTestsPerRun,
-					maxFailedTests,
-				)
-				if err != nil {
-					return nil, nil, err
-				}
-			}
-
-			applyFailureSummaryContentLimits(&result)
-			if err := limitFailureSummaryLogCollections(&result, failureSummaryContentByteLimit); err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("failed to limit failure summary logs: %v", err)), nil, nil
-			}
-
-			span.SetAttributes(
-				attribute.Int("failure_job_count", len(result.Jobs)),
-				attribute.Int("annotation_count", len(result.Annotations)),
-				attribute.Int("test_run_count", len(result.TestRuns)),
+		if defaultTrue(args.IncludeFailedTests) && deps.TestExecutionsClient != nil && build.TestEngine != nil {
+			result.TestRuns, result.TestRunsTruncated, result.FailedTestsTruncated, err = loadFailureTestRuns(
+				ctx,
+				deps.TestExecutionsClient,
+				args,
+				build.TestEngine.Runs,
+				maxTestRuns,
+				maxFailedTestsPerRun,
+				maxFailedTests,
 			)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 
-			return mcpTextResultWithByteLimit(span, &result, failureSummaryContentByteLimit)
-		}, []string{"read_builds", "read_build_logs", "read_suites"}
+		applyFailureSummaryContentLimits(&result)
+		if err := limitFailureSummaryCollections(&result, contentLimit); err != nil {
+			return utils.NewToolResultError(fmt.Sprintf("failed to limit failure summary logs: %v", err)), nil, nil
+		}
+
+		span.SetAttributes(
+			attribute.Int("failure_job_count", len(result.Jobs)),
+			attribute.Int("annotation_count", len(result.Annotations)),
+			attribute.Int("test_run_count", len(result.TestRuns)),
+		)
+
+		return mcpTextResultWithByteLimit(span, &result, contentLimit)
+	}, []string{"read_builds", "read_build_logs", "read_suites"}
 }

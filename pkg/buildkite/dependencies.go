@@ -17,6 +17,7 @@ type ToolDependencies struct {
 	PipelinesClient         PipelinesClient
 	PipelineSchedulesClient PipelineSchedulesClient
 	ClustersClient          ClustersClient
+	ClusterSecretsClient    ClusterSecretsClient
 	ClusterQueuesClient     ClusterQueuesClient
 	AgentsClient            AgentsClient
 	ArtifactsClient         ArtifactsClient
@@ -25,9 +26,12 @@ type ToolDependencies struct {
 	UserClient              UserClient
 	AccessTokensClient      AccessTokenClient
 	JobsClient              JobsClient
+	StepUploadsClient       StepUploadsClient
 	TestRunsClient          TestRunsClient
+	TestSuitesClient        TestSuitesClient
 	TestExecutionsClient    TestExecutionsClient
 	TestsClient             TestsClient
+	BuildTestsClient        BuildTestsClient
 	BuildkiteLogsClient     BuildkiteLogsClient
 	FailureSummary          FailureSummaryConfig
 }

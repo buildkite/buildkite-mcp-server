@@ -100,13 +100,13 @@ func TestUnblockJob(t *testing.T) {
 				assert.Equal(t, "job-123", jobID)
 
 				return buildkite.Job{
-						ID:    jobID,
-						State: "unblocked",
-					}, &buildkite.Response{
-						Response: &http.Response{
-							StatusCode: 200,
-						},
-					}, nil
+					ID:    jobID,
+					State: "unblocked",
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
 			},
 		}
 
@@ -125,8 +125,9 @@ func TestUnblockJob(t *testing.T) {
 		result, _, err := handler(ctx, req, args)
 		require.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"id":"job-123"`)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"state":"unblocked"`)
+		text := result.Content[0].(*mcp.TextContent).Text
+		requireJSONPathEqual(t, text, "job-123", "id")
+		requireJSONPathEqual(t, text, "unblocked", "state")
 	})
 
 	// Test with fields
@@ -139,13 +140,13 @@ func TestUnblockJob(t *testing.T) {
 				assert.Equal(t, "prod", opt.Fields["environment"])
 
 				return buildkite.Job{
-						ID:    jobID,
-						State: "unblocked",
-					}, &buildkite.Response{
-						Response: &http.Response{
-							StatusCode: 200,
-						},
-					}, nil
+					ID:    jobID,
+					State: "unblocked",
+				}, &buildkite.Response{
+					Response: &http.Response{
+						StatusCode: 200,
+					},
+				}, nil
 			},
 		}
 
@@ -210,11 +211,11 @@ func TestRetryJob(t *testing.T) {
 				assert.Equal(t, "job-456", jobID)
 
 				return buildkite.Job{
-						ID:    "job-789",
-						State: "scheduled",
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					ID:    "job-789",
+					State: "scheduled",
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 		}
 
@@ -229,8 +230,9 @@ func TestRetryJob(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"id":"job-789"`)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"state":"scheduled"`)
+		text := result.Content[0].(*mcp.TextContent).Text
+		requireJSONPathEqual(t, text, "job-789", "id")
+		requireJSONPathEqual(t, text, "scheduled", "state")
 	})
 
 	t.Run("Error", func(t *testing.T) {
@@ -270,13 +272,13 @@ func TestGetJobEnvironmentVariables(t *testing.T) {
 				assert.Equal(t, "job-456", jobID)
 
 				return buildkite.JobEnvs{
-						EnvironmentVariables: map[string]string{
-							"BUILDKITE_BRANCH": "main",
-							"CI":               "true",
-						},
-					}, &buildkite.Response{
-						Response: &http.Response{StatusCode: 200},
-					}, nil
+					EnvironmentVariables: map[string]string{
+						"BUILDKITE_BRANCH": "main",
+						"CI":               "true",
+					},
+				}, &buildkite.Response{
+					Response: &http.Response{StatusCode: 200},
+				}, nil
 			},
 		}
 
@@ -291,8 +293,9 @@ func TestGetJobEnvironmentVariables(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.NotNil(t, result)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"BUILDKITE_BRANCH":"main"`)
-		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, `"CI":"true"`)
+		text := result.Content[0].(*mcp.TextContent).Text
+		requireJSONPathEqual(t, text, "main", "env", "BUILDKITE_BRANCH")
+		requireJSONPathEqual(t, text, "true", "env", "CI")
 	})
 
 	t.Run("Error", func(t *testing.T) {
@@ -358,11 +361,10 @@ func TestListJobs(t *testing.T) {
 		require.NoError(t, err)
 
 		text := getTextResult(t, result).Text
-		assert.Contains(t, text, `"items":[`)
-		assert.Contains(t, text, `"name":"test"`)
-		assert.Contains(t, text, `"command":"go test ./..."`)
-		assert.Contains(t, text, `"id":"job-1"`)
-		assert.Contains(t, text, `"next":"https://api.buildkite.com`)
+		requireJSONPathEqual(t, text, "test", "items", 0, "name")
+		requireJSONPathEqual(t, text, "go test ./...", "items", 0, "command")
+		requireJSONPathEqual(t, text, "job-1", "items", 0, "id")
+		requireJSONPathEqual(t, text, "https://api.buildkite.com/v2/...?after=cursor2", "links", "next")
 
 		require.NotNil(t, captured)
 		assert.Equal(t, []string{"passed", "failed"}, captured.State)
@@ -386,6 +388,7 @@ func TestListJobs(t *testing.T) {
 					SoftFailed:      true,
 					SignalReason:    "agent_stop",
 					StepKey:         "test",
+					Step:            &buildkite.StepInfo{ID: "step-1"},
 					RetriesCount:    1,
 					RetrySource:     &buildkite.JobRetrySource{JobID: "job-0", RetryType: "manual"},
 					BuildURL:        "https://api.buildkite.com/v2/builds/123",
@@ -409,7 +412,7 @@ func TestListJobs(t *testing.T) {
 		require.Len(t, response.Items, 1)
 		assert.Equal(t, map[string]any{
 			"id": "job-1", "name": "test", "state": "failed", "command": "go test ./...", "exit_status": float64(1),
-			"soft_failed": true, "signal_reason": "agent_stop", "step_key": "test",
+			"soft_failed": true, "signal_reason": "agent_stop", "step_key": "test", "step_id": "step-1",
 			"retries_count": float64(1), "retry_source": map[string]any{"job_id": "job-0", "retry_type": "manual"},
 		}, response.Items[0])
 	})
@@ -422,7 +425,7 @@ func TestListJobs(t *testing.T) {
 					Items: []buildkite.Job{{
 						ID: "job-1", Name: "test", State: "failed", Command: "go test ./...",
 						CreatedAt: timestamp, StartedAt: timestamp, FinishedAt: timestamp,
-						Signal: intPtr(9), SignalReason: "agent_stop", Retried: true,
+						Signal: "SIGKILL", SignalReason: "agent_stop", Retried: true,
 						RetriedInJobID: "job-2", RetriesCount: 1,
 						RetrySource:        &buildkite.JobRetrySource{JobID: "job-0", RetryType: "manual"},
 						SoftFailed:         true,
@@ -452,7 +455,7 @@ func TestListJobs(t *testing.T) {
 		assert.Equal(t, timestamp, job.CreatedAt)
 		assert.Equal(t, timestamp, job.StartedAt)
 		assert.Equal(t, timestamp, job.FinishedAt)
-		assert.Equal(t, intPtr(9), job.Signal)
+		assert.Equal(t, "SIGKILL", job.Signal)
 		assert.Equal(t, "agent_stop", job.SignalReason)
 		assert.True(t, job.Retried)
 		assert.Equal(t, "job-2", job.RetriedInJobID)
@@ -673,7 +676,7 @@ func TestGetJob(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.True(t, called)
-		assert.Contains(t, getTextResult(t, result).Text, `"id":"job-456"`)
+		requireJSONPathEqual(t, getTextResult(t, result).Text, "job-456", "id")
 	})
 
 	t.Run("RedactsUnusedJobFields", func(t *testing.T) {
@@ -791,7 +794,7 @@ func TestGetJob(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.True(t, called)
-		assert.Contains(t, getTextResult(t, result).Text, `"state":"running"`)
+		requireJSONPathEqual(t, getTextResult(t, result).Text, "running", "state")
 	})
 
 	t.Run("PartialBuildScopeIsRejected", func(t *testing.T) {
@@ -806,4 +809,52 @@ func TestGetJob(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, getTextResult(t, result).Text, "provide both")
 	})
+}
+
+// TestJobSignalDecodesFromWire guards against the Signal field drifting back to a
+// numeric type. The REST API sends the symbolic signal name (the agent sets it via
+// process.SignalString), so a *int typed field fails the whole response with
+// "cannot unmarshal string into Go struct field Job.items.signal of type int" —
+// one signal-killed job in a large build takes out every other job with it.
+//
+// The other tests in this file build buildkite.Job values directly through the
+// mock, which never exercises JSON decoding; this one starts from wire bytes.
+func TestJobSignalDecodesFromWire(t *testing.T) {
+	t.Parallel()
+
+	const payload = `{"items":[
+		{"id":"job-1","state":"timed_out","signal":"SIGKILL","signal_reason":"timed_out"},
+		{"id":"job-2","state":"failed","signal":"SIGTERM","signal_reason":"agent_stop"},
+		{"id":"job-3","state":"passed","signal":null},
+		{"id":"job-4","state":"passed"}
+	]}`
+
+	var list buildkite.JobsList
+	require.NoError(t, json.Unmarshal([]byte(payload), &list))
+	require.Len(t, list.Items, 4)
+	assert.Equal(t, "SIGKILL", list.Items[0].Signal)
+	assert.Equal(t, "SIGTERM", list.Items[1].Signal)
+	assert.Empty(t, list.Items[2].Signal, "explicit null should decode to the zero value")
+	assert.Empty(t, list.Items[3].Signal, "absent signal should decode to the zero value")
+
+	// And that the decoded name survives the passthrough into the tool response.
+	mockJobs := &MockJobsClient{
+		ListByBuildFunc: func(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			return list, &buildkite.Response{}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+	_, handler, _ := ListJobs()
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListJobsArgs{
+		OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", DetailLevel: "detailed",
+	})
+	require.NoError(t, err)
+
+	var jobs JobListResult[JobDetail]
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &jobs))
+	require.Len(t, jobs.Items, 4)
+	assert.Equal(t, "SIGKILL", jobs.Items[0].Signal)
+	assert.Equal(t, "SIGTERM", jobs.Items[1].Signal)
+	assert.Empty(t, jobs.Items[2].Signal)
 }
