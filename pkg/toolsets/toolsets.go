@@ -434,9 +434,10 @@ func CreateBuiltinToolsets() map[string]Toolset {
 		},
 		ToolsetInvestigations: {
 			Name:        "Build Investigations",
-			Description: "Cross-domain tools for diagnosing Buildkite build failures",
+			Description: "Cross-domain tools for diagnosing failures and comparing builds",
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.GetBuildFailureSummary),
+				newToolDef(buildkite.CompareBuilds),
 			},
 		},
 		ToolsetUser: {
