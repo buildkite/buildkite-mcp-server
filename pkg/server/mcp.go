@@ -98,6 +98,10 @@ var instructionSections = []instructionSection{
 		text:    "Job output links: Job summaries expose a step ID as step_id; full job responses expose it as step.id. To link directly to that job's output, use https://buildkite.com/{org_slug}/{pipeline_slug}/builds/{build_number}/list?sid={step_id}&tab=output.",
 	},
 	{
+		toolset: toolsets.ToolsetBuilds,
+		text:    "Dynamic pipeline uploads: steps added at runtime via `buildkite-agent pipeline upload` do not appear in the pipeline's static configuration. To see what dynamic steps actually ran, call list_step_uploads (returns each step's state, source_job_id, created_jobs_count, rejection details), then get_step_upload with an upload_uuid to read its dynamic pipeline definition YAML (definition_yaml field). Large definitions are omitted from get_step_upload. Build is only retrievable within its ~30 day maximum lifetime.",
+	},
+	{
 		toolset: toolsets.ToolsetLogs,
 		text:    "Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.",
 	},
