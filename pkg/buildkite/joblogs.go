@@ -27,34 +27,34 @@ type JobLogsBaseParams struct {
 	ToolInput
 	OrgSlug      string `json:"org_slug"`
 	PipelineSlug string `json:"pipeline_slug"`
-	BuildNumber  string `json:"build_number"`
-	JobID        string `json:"job_id"`
-	CacheTTL     string `json:"cache_ttl,omitempty"`
-	ForceRefresh bool   `json:"force_refresh,omitempty"`
+	BuildNumber  string `json:"build_number" jsonschema:"Sequential build number, not the build UUID"`
+	JobID        string `json:"job_id" jsonschema:"Buildkite job UUID"`
+	CacheTTL     string `json:"cache_ttl,omitempty" jsonschema:"Go duration; defaults to 30s"`
+	ForceRefresh bool   `json:"force_refresh,omitempty" jsonschema:"Bypass cached log data"`
 }
 
 type SearchLogsParams struct {
 	JobLogsBaseParams
-	Pattern       string `json:"pattern"`
-	Context       int    `json:"context,omitempty"`
-	BeforeContext int    `json:"before_context,omitempty"`
-	AfterContext  int    `json:"after_context,omitempty"`
+	Pattern       string `json:"pattern" jsonschema:"Go regular expression"`
+	Context       int    `json:"context,omitempty" jsonschema:"Lines before and after each match; overrides before_context and after_context when nonzero"`
+	BeforeContext int    `json:"before_context,omitempty" jsonschema:"Lines before each match; ignored when context is nonzero"`
+	AfterContext  int    `json:"after_context,omitempty" jsonschema:"Lines after each match; ignored when context is nonzero"`
 	CaseSensitive bool   `json:"case_sensitive,omitempty"`
 	InvertMatch   bool   `json:"invert_match,omitempty"`
-	Reverse       bool   `json:"reverse,omitempty"`
-	SeekStart     int    `json:"seek_start,omitempty"`
-	Limit         int    `json:"limit,omitempty"`
+	Reverse       bool   `json:"reverse,omitempty" jsonschema:"Search from the end of the log"`
+	SeekStart     int    `json:"seek_start,omitempty" jsonschema:"Zero-based starting row; 0 uses the default (log end when reverse)"`
+	Limit         int    `json:"limit,omitempty" jsonschema:"Maximum matches to return; 0 returns all"`
 }
 
 type TailLogsParams struct {
 	JobLogsBaseParams
-	Tail int `json:"tail,omitempty"`
+	Tail int `json:"tail,omitempty" jsonschema:"Final log entries to return; defaults to 10"`
 }
 
 type ReadLogsParams struct {
 	JobLogsBaseParams
-	Seek  int `json:"seek,omitempty"`
-	Limit int `json:"limit,omitempty"`
+	Seek  int `json:"seek,omitempty" jsonschema:"Zero-based row at which to begin reading"`
+	Limit int `json:"limit,omitempty" jsonschema:"Maximum entries to return; 0 reads all remaining entries"`
 }
 
 type TerseLogEntry struct {
