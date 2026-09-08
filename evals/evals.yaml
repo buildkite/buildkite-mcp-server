@@ -185,3 +185,14 @@ matrix:
   #     vars:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source
+
+  # Look at the traces from the slowest tests on a build
+  - id: diagnose-slowest-tests
+    agent: claude
+    model: claude-opus-4-8
+    prompt: diagnose-slowest-tests
+    scenario:
+      vars:
+        BUILD_URL: "https://buildkite.com/buildkite/buildkite/builds/219800"
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
