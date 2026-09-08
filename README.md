@@ -8,6 +8,20 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Comparing builds
+
+The read-only `compare_builds` tool in the `investigations` toolset answers questions such as “What changed since this build last worked on main?” Supply `org_slug`, `pipeline_slug`, and the target `build_number`. It selects the most recently created earlier build that is currently passed on the same pipeline and exact branch. It does not require that the baseline had already passed when the target started. Supply `baseline_build_number` to compare against a specific build in that pipeline instead, including a failed build or one on another branch.
+
+The response identifies the baseline and selection rule, counts outcomes across all jobs, and returns up to 100 job comparisons, prioritizing newly failing, recovered, and still-failing steps. Matching uses step keys, job type, matrix values, and parallel index/total. When both jobs lack keys, it falls back to the exact nonblank name plus type, group key, matrix values, and parallel index/total, only when that combination is unique in each build. Matched pairs expose `match_method: "step_key"` or `"name_fallback"`; fallback matches carry a warning that they are heuristic. Unnamed unkeyed jobs and duplicate identities remain unmatched. Explicit keys never fall back to names, even when a key was added, removed, or changed between builds. Added/removed means a job identity is present in only one build, so renaming unkeyed jobs or changing matrix values or parallelism can also produce added/removed entries. Retried attempts are excluded; final-attempt states and retry counts remain visible.
+
+Execution times and deltas cover final attempts only. Scheduling time is `scheduled_at` to `started_at`, not dependency or manual waiting. These are not build wall-clock comparisons or total retry costs. Missing or inconsistent timestamps omit the corresponding timing. Unfinished builds are explicitly identified as changing snapshots.
+
+By default, up to three newly failing jobs include their last 20 log entries, bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
+
+Baseline discovery searches at most 500 candidates. If none is found, the response says no comparison was performed and asks for an explicit baseline. Job inventories are limited to 1,000 jobs per build; larger inventories return an error instead of misleading partial added/removed results. Output omissions are reported separately from the complete outcome counts.
+
+---
+
 ## Library Usage
 
 The exported Go API of this module should be considered unstable, and subject to breaking changes as we evolve this project.
