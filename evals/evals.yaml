@@ -87,7 +87,7 @@ matrix:
   # The original babystand scenario: drive a red CI branch to green.
   - id: red-to-green-complete
     agent: cursor-cloud
-    model: claude-opus-4-8
+    model: composer-2.5
     prompt: red-to-green-complete
     scenario:
       setup: |
