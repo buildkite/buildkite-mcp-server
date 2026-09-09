@@ -107,6 +107,11 @@ func TestCreatePipelineArgsSchema(t *testing.T) {
 	require.Contains(t, description, "Set false for non-GitHub repositories, centralized or manually managed webhooks")
 }
 
+func TestCreatePipelineWebhookArgsSchema(t *testing.T) {
+	req := sortedRequired[CreatePipelineWebhookArgs](t)
+	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
+}
+
 func TestUpdatePipelineArgsSchema(t *testing.T) {
 	req := sortedRequired[UpdatePipelineArgs](t)
 	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
