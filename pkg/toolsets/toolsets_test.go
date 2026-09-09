@@ -681,6 +681,14 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Contains(toolNames, "list_test_suites_for_pipeline")
 	assert.Contains(toolNames, "slowest_executions_for_build")
 	assert.Contains(toolNames, "read_execution_trace")
+
+	pipelines, exists := registry.Get(ToolsetPipelines)
+	assert.True(exists)
+	toolNames = toolNames[:0]
+	for _, tool := range pipelines.Tools {
+		toolNames = append(toolNames, tool.Tool.Name)
+	}
+	assert.Contains(toolNames, "create_pipeline_webhook")
 }
 
 func TestBuiltinToolSchemasRequireTelemetryContext(t *testing.T) {
