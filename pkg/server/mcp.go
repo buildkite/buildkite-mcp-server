@@ -99,7 +99,7 @@ var instructionSections = []instructionSection{
 	},
 	{
 		toolset: toolsets.ToolsetBuilds,
-		text:    "Dynamic pipeline uploads: steps added at runtime via `buildkite-agent pipeline upload` do not appear in the pipeline's static configuration. To see what dynamic steps actually ran, call list_step_uploads (returns each step's state, source_job_id, created_jobs_count, rejection details), then get_step_upload with an upload_uuid to read its dynamic pipeline definition YAML (definition_yaml field). Large definitions are omitted from get_step_upload. Build is only retrievable within its ~30 day maximum lifetime.",
+		text:    "Dynamic pipeline uploads: steps added at runtime via `buildkite-agent pipeline upload` do not appear in the pipeline's static configuration. To inspect what was dynamically uploaded, call list_step_uploads (returns each upload's state, source_job_id, created_jobs_count, and rejection details), then get_step_upload with an upload_uuid to read its dynamic pipeline definition YAML (definition_yaml field). Large definitions are omitted from get_step_upload. Step-upload data is only available while the build is within its maximum lifetime (~30 days).",
 	},
 	{
 		toolset: toolsets.ToolsetLogs,
