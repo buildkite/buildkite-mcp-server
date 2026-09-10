@@ -162,7 +162,7 @@ matrix:
   # WARN: This is a difficult scenario for MCP to resolve, and it takes a while
   #       to run. Uncomment if you want to test MCP against it.
   - id: red-to-green-100-dollar
-    agent: claude
+    agent: cursor-cloud
     model: claude-opus-4-8
     prompt: red-to-green-comment-only
     scenario:
