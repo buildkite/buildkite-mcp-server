@@ -6,7 +6,7 @@
     "devDependencies": {
         "@types/node": "^24",
         "prettier": "^3.6",
-        "typescript": "^5"
+        "typescript": "^7.0.0"
     },
     "scripts": {
         "build": "tsc"
