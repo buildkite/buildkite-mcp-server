@@ -117,6 +117,8 @@ github.com/buildkite/buildkite-logs v0.13.1 h1:KIdVP0OisatvZ6XA2123r/aQlQcdPMfHP
 github.com/buildkite/buildkite-logs v0.13.1/go.mod h1:lgSJ08tjx8Y63d/WLz5sO8jmobRoNslLkyy2SosDl3U=
 github.com/buildkite/buildkite-logs v0.13.2-0.20260910035429-4e9da2db4678 h1:1inNSyFh8U96c/e4dvzEhDsQeLNs01sbZIFC0AxLVD4=
 github.com/buildkite/buildkite-logs v0.13.2-0.20260910035429-4e9da2db4678/go.mod h1:lgSJ08tjx8Y63d/WLz5sO8jmobRoNslLkyy2SosDl3U=
+github.com/buildkite/buildkite-logs v0.13.2-0.20260910095057-b70c9b21285e h1:qanrLFRhkKgOnx8UziSultpwjlbc7gGyqLbBy2d1rMw=
+github.com/buildkite/buildkite-logs v0.13.2-0.20260910095057-b70c9b21285e/go.mod h1:lgSJ08tjx8Y63d/WLz5sO8jmobRoNslLkyy2SosDl3U=
 github.com/buildkite/go-buildkite/v5 v5.15.0 h1:ae9F3FBvf8UEXYY7jXkaUyVt2PddH+QrifsGuY4ltzc=
 github.com/buildkite/go-buildkite/v5 v5.15.0/go.mod h1:a5uCFNQjMFxT7g4H4NDId+DRkfYBo+CqvryoDZRppPk=
 github.com/buildkite/roko v1.4.0 h1:DxixoCdpNqxu4/1lXrXbfsKbJSd7r1qoxtef/TT2J80=
