@@ -165,6 +165,11 @@ func TestGetFailedTestExecutionsArgsSchema(t *testing.T) {
 	for _, opt := range []string{"include_failure_expanded", "page", "per_page"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+
+	desc := s.Properties["include_failure_expanded"].Description
+	require.Contains(t, desc, "unit or model spec")
+	require.Contains(t, desc, "feature or browser specs")
+	require.Contains(t, desc, "search_logs tool")
 }
 
 func TestReadLogsParamsSchema(t *testing.T) {
