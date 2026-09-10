@@ -18,7 +18,7 @@ type GetFailedTestExecutionsArgs struct {
 	OrgSlug                string `json:"org_slug"`
 	TestSuiteSlug          string `json:"test_suite_slug"`
 	RunID                  string `json:"run_id"`
-	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded failure details such as full error messages and stack traces"`
+	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded failure details such as full error messages and stack traces. Useful for unit or model spec failures where the backtrace is the root cause. For feature or browser specs, use search_logs tool on the failed job IDs instead"`
 	Page                   int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage                int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
