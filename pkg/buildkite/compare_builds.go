@@ -124,9 +124,11 @@ func compareJobOutcomes(target, baseline *ComparisonJob) string {
 		return "newly_failing"
 	case target.State == "passed" && comparisonFailed(baseline):
 		return "recovered"
+	case target.SoftFailed != baseline.SoftFailed:
+		return "state_changed"
 	case comparisonFailed(target) && comparisonFailed(baseline):
 		return "still_failing"
-	case target.State != baseline.State || target.SoftFailed != baseline.SoftFailed:
+	case target.State != baseline.State:
 		return "state_changed"
 	case target.RetriesCount != baseline.RetriesCount:
 		return "retries_changed"
@@ -352,6 +354,9 @@ func CompareBuilds() (mcp.Tool, mcp.ToolHandlerFor[CompareBuildsArgs, any], []st
 				entries, _, truncated, contentTruncated, _, logErr := readFailureLogTail(ctx, deps.BuildkiteLogsClient,
 					GetBuildFailureSummaryArgs{OrgSlug: args.OrgSlug, PipelineSlug: args.PipelineSlug, BuildNumber: args.BuildNumber}, buildkite.Job{ID: step.Target.ID}, 20)
 				if logErr != nil {
+					if isBuildkiteUnauthorized(logErr) {
+						return nil, nil, ErrUnauthorized
+					}
 					step.Target.LogError = logErr.Error()
 					continue
 				}

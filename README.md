@@ -16,7 +16,9 @@ The response identifies the baseline and selection rule, counts outcomes across 
 
 Execution times and deltas cover final attempts only. Scheduling time is `scheduled_at` to `started_at`, not dependency or manual waiting. These are not build wall-clock comparisons or total retry costs. Missing or inconsistent timestamps omit the corresponding timing. Unfinished builds are explicitly identified as changing snapshots.
 
-By default, up to three newly failing jobs include their last 20 log entries, bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
+Transitions between soft and hard failures are reported as `state_changed`, even when both jobs have state `failed`. A passed baseline build can contain soft-failed jobs.
+
+By default, up to three newly failing jobs include their last 20 log entries, bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison, except HTTP 401 authentication errors, which propagate through the server's reauthentication path. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
 
 Baseline discovery searches at most 500 candidates. If none is found, the response says no comparison was performed and asks for an explicit baseline. Job inventories are limited to 1,000 jobs per build; larger inventories return an error instead of misleading partial added/removed results. Output omissions are reported separately from the complete outcome counts.
 

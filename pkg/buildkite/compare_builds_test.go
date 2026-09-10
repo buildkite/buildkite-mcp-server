@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +39,25 @@ func TestCompareJobOutcomes(t *testing.T) {
 	}
 	require.Equal(t, "retries_changed", compareJobOutcomes(&ComparisonJob{State: "passed", RetriesCount: 1}, &ComparisonJob{State: "passed"}))
 	require.Equal(t, "state_changed", compareJobOutcomes(&ComparisonJob{State: "passed", SoftFailed: true}, &ComparisonJob{State: "passed"}))
+}
+
+func TestCompareBuildJobsSoftFailureTransitions(t *testing.T) {
+	for _, targetSoft := range []bool{false, true} {
+		for _, baselineSoft := range []bool{false, true} {
+			t.Run(fmt.Sprintf("target_soft=%t/baseline_soft=%t", targetSoft, baselineSoft), func(t *testing.T) {
+				result := BuildComparison{Baseline: &BuildSummary{State: "passed"}, ChangeCounts: map[string]int{}}
+				compareBuildJobs(
+					[]buildkite.Job{{StepKey: "test", State: "failed", SoftFailed: targetSoft}},
+					[]buildkite.Job{{StepKey: "test", State: "failed", SoftFailed: baselineSoft}}, &result)
+				want := "still_failing"
+				if targetSoft != baselineSoft {
+					want = "state_changed"
+				}
+				require.Equal(t, map[string]int{want: 1}, result.ChangeCounts)
+				require.Equal(t, want, result.Steps[0].Change)
+			})
+		}
+	}
 }
 
 func TestCompareBuildJobsIdentityAndTimings(t *testing.T) {
@@ -355,4 +376,50 @@ func TestCompareBuildsLogEvidence(t *testing.T) {
 	require.Empty(t, result.Steps[3].Target.LogTail)
 	require.Contains(t, strings.Join(result.Warnings, " "), "different branch")
 	require.Contains(t, strings.Join(result.Warnings, " "), "limited to three")
+}
+
+func TestCompareBuildsLogAuthenticationErrors(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "https://api.buildkite.com/log", nil)
+	for _, tc := range []struct {
+		name         string
+		err          error
+		unauthorized bool
+	}{
+		{"401", &buildkite.ErrorResponse{Response: &http.Response{StatusCode: http.StatusUnauthorized, Request: request}, Message: "expired token"}, true},
+		{"wrapped sentinel", fmt.Errorf("log access: %w", ErrUnauthorized), true},
+		{"403", &buildkite.ErrorResponse{Response: &http.Response{StatusCode: http.StatusForbidden, Request: request}, Message: "missing log scope"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			builds := &MockBuildsClient{GetFunc: func(_ context.Context, _, _, number string, _ *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				if number == "42" {
+					return buildkite.Build{Number: 42}, nil, nil
+				}
+				return buildkite.Build{Number: 40}, nil, nil
+			}}
+			jobs := &MockJobsClient{ListByBuildFunc: func(_ context.Context, _, _, number string, _ *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				state := "passed"
+				if number == "42" {
+					state = "failed"
+				}
+				return buildkite.JobsList{Items: []buildkite.Job{{ID: number, StepKey: "test", State: state}}}, nil, nil
+			}}
+			logs := &MockBuildkiteLogsClient{NewReaderFunc: func(context.Context, string, string, string, string, time.Duration, bool) (*buildkitelogs.ParquetReader, error) {
+				return nil, tc.err
+			}}
+			_, handler, _ := CompareBuilds()
+			res, structured, err := handler(ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: builds, JobsClient: jobs, BuildkiteLogsClient: logs}), nil, CompareBuildsArgs{BuildNumber: "42", BaselineBuildNumber: "40"})
+			if tc.unauthorized {
+				require.ErrorIs(t, err, ErrUnauthorized)
+				require.Nil(t, res)
+				require.Nil(t, structured)
+			} else {
+				require.NoError(t, err)
+				require.False(t, res.IsError)
+				var result BuildComparison
+				require.NoError(t, json.Unmarshal([]byte(getTextResult(t, res).Text), &result))
+				require.Equal(t, 1, result.ChangeCounts["newly_failing"])
+				require.Contains(t, result.Steps[0].Target.LogError, "missing log scope")
+			}
+		})
+	}
 }
