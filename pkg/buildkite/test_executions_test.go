@@ -2,7 +2,6 @@ package buildkite
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,72 +37,42 @@ func (m *MockExecutionTraceClient) GetTrace(ctx context.Context, org, slug, exec
 var _ ExecutionTraceClient = (*MockExecutionTraceClient)(nil)
 
 func TestReadExecutionTrace(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		view     string
-		wantView buildkite.TraceView
-	}{
-		{name: "defaults to summary", wantView: buildkite.TraceViewSummary},
-		{name: "requests full trace", view: "full", wantView: buildkite.TraceViewFull},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			client := &MockExecutionTraceClient{
-				GetTraceFunc: func(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error) {
-					require.Equal(t, "org", org)
-					require.Equal(t, "suite", slug)
-					require.Equal(t, "execution", executionID)
-					require.Equal(t, test.wantView, opt.View)
-
-					return buildkite.ExecutionTrace{
-						ExecutionID: "execution",
-						TraceID:     "trace",
-						View:        test.wantView,
-						SpanCount:   2,
-						SlowestSpans: []buildkite.TraceSpan{
-							{Name: "SELECT users", Category: buildkite.TraceCategorySQL},
-						},
-					}, nil, nil
-				},
-			}
-			ctx := ContextWithDeps(context.Background(), ToolDependencies{ExecutionTraceClient: client})
-			tool, handler, scopes := ReadExecutionTrace()
-
-			require.Equal(t, "read_execution_trace", tool.Name)
-			require.True(t, tool.Annotations.ReadOnlyHint)
-			require.Equal(t, []string{"read_suites"}, scopes)
-
-			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{
-				OrgSlug:       "org",
-				TestSuiteSlug: "suite",
-				ExecutionID:   "execution",
-				View:          test.view,
-			})
-			require.NoError(t, err)
-			require.False(t, result.IsError)
-			text := result.Content[0].(*mcp.TextContent).Text
-			requireJSONPathEqual(t, text, "execution", "execution_id")
-			requireJSONPathEqual(t, text, string(test.wantView), "view")
-			require.Contains(t, text, "SELECT users")
-		})
-	}
-}
-
-func TestReadExecutionTraceRejectsInvalidView(t *testing.T) {
-	called := false
 	client := &MockExecutionTraceClient{
 		GetTraceFunc: func(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error) {
-			called = true
-			return buildkite.ExecutionTrace{}, nil, nil
+			require.Equal(t, "org", org)
+			require.Equal(t, "suite", slug)
+			require.Equal(t, "execution", executionID)
+			require.Equal(t, buildkite.TraceViewSummary, opt.View)
+
+			return buildkite.ExecutionTrace{
+				ExecutionID: "execution",
+				TraceID:     "trace",
+				View:        buildkite.TraceViewSummary,
+				SpanCount:   2,
+				SlowestSpans: []buildkite.TraceSpan{
+					{Name: "SELECT users", Category: buildkite.TraceCategorySQL},
+				},
+			}, nil, nil
 		},
 	}
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{ExecutionTraceClient: client})
-	_, handler, _ := ReadExecutionTrace()
+	tool, handler, scopes := ReadExecutionTrace()
 
-	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{View: "compact"})
+	require.Equal(t, "read_execution_trace", tool.Name)
+	require.True(t, tool.Annotations.ReadOnlyHint)
+	require.Equal(t, []string{"read_suites"}, scopes)
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite",
+		ExecutionID:   "execution",
+	})
 	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "view must be 'summary' or 'full'")
-	require.False(t, called)
+	require.False(t, result.IsError)
+	text := result.Content[0].(*mcp.TextContent).Text
+	requireJSONPathEqual(t, text, "execution", "execution_id")
+	requireJSONPathEqual(t, text, string(buildkite.TraceViewSummary), "view")
+	require.Contains(t, text, "SELECT users")
 }
 
 func TestReadExecutionTraceWithError(t *testing.T) {
@@ -115,59 +84,10 @@ func TestReadExecutionTraceWithError(t *testing.T) {
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{ExecutionTraceClient: client})
 	_, handler, _ := ReadExecutionTrace()
 
-	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{View: "summary"})
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "API error")
-}
-
-func TestReadExecutionTraceBoundsFullView(t *testing.T) {
-	spans := make([]buildkite.TraceSpan, 2_000)
-	for i := range spans {
-		spans[i] = buildkite.TraceSpan{
-			SpanID:        fmt.Sprintf("span-%d", i),
-			ParentSpanID:  "parent",
-			Name:          "short span name",
-			Kind:          "internal",
-			ServiceName:   "service",
-			ScopeName:     "instrumentation",
-			Category:      buildkite.TraceCategoryOther,
-			Badge:         "OTHER",
-			Label:         "span label",
-			Detail:        "span detail",
-			Duration:      1,
-			SelfTime:      1,
-			Error:         true,
-			StatusMessage: "error status",
-		}
-	}
-
-	client := &MockExecutionTraceClient{
-		GetTraceFunc: func(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error) {
-			return buildkite.ExecutionTrace{
-				ExecutionID: "execution",
-				View:        buildkite.TraceViewFull,
-				SpanCount:   len(spans),
-				Spans:       spans,
-			}, nil, nil
-		},
-	}
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{ExecutionTraceClient: client})
-	_, handler, _ := ReadExecutionTrace()
-
-	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{View: "full"})
-	require.NoError(t, err)
-	require.False(t, result.IsError)
-	text := result.Content[0].(*mcp.TextContent).Text
-	require.LessOrEqual(t, len(text), executionTraceContentByteLimit)
-
-	var traceResult executionTraceResult
-	require.NoError(t, json.Unmarshal([]byte(text), &traceResult))
-	require.True(t, traceResult.ContentTruncated)
-	require.Equal(t, executionTraceContentByteLimit, traceResult.ContentLimitBytes)
-	require.Equal(t, len(text), traceResult.ContentBytes)
-	require.Equal(t, len(spans), traceResult.SpanCount)
-	require.Less(t, len(traceResult.Spans), len(spans))
 }
 
 func TestGetFailedExecutions(t *testing.T) {

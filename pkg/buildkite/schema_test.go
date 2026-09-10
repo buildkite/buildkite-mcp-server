@@ -79,8 +79,7 @@ func TestGetBuildArgsSchema(t *testing.T) {
 func TestReadExecutionTraceArgsSchema(t *testing.T) {
 	s := schemaFor[ReadExecutionTraceArgs](t)
 	require.Equal(t, []string{"execution_id", "org_slug", "test_suite_slug"}, sortedToolRequired(t, s))
-	require.Equal(t, "Trace view: 'summary' (default) or 'full'", s.Properties["view"].Description)
-	require.NotContains(t, s.Required, "view")
+	require.NotContains(t, s.Properties, "view")
 }
 
 func TestWaitForBuildArgsSchema(t *testing.T) {

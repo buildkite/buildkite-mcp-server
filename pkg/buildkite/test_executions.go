@@ -2,16 +2,12 @@ package buildkite
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
-	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
-
-const executionTraceContentByteLimit = 256 * 1024
 
 type TestExecutionsClient interface {
 	GetFailedExecutions(ctx context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error)
@@ -21,70 +17,17 @@ type ExecutionTraceClient interface {
 	GetTrace(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error)
 }
 
-type executionTraceResult struct {
-	buildkite.ExecutionTrace
-	ContentBytes      int  `json:"content_bytes"`
-	ContentLimitBytes int  `json:"content_limit_bytes"`
-	ContentTruncated  bool `json:"content_truncated,omitempty"`
-}
-
 type ReadExecutionTraceArgs struct {
 	ToolInput
 	OrgSlug       string `json:"org_slug"`
 	TestSuiteSlug string `json:"test_suite_slug"`
 	ExecutionID   string `json:"execution_id"`
-	View          string `json:"view,omitempty" jsonschema:"Trace view: 'summary' (default) or 'full'"`
-}
-
-func limitExecutionTraceSpans(result *executionTraceResult, limit int) error {
-	payload, err := marshalSanitizedJSON(result)
-	if err != nil {
-		return err
-	}
-	floor, err := payloadStructureBytes(payload, limit)
-	if err != nil {
-		return err
-	}
-	if floor <= limit {
-		return nil
-	}
-
-	spans := result.Spans
-	low, high := 0, len(spans)
-	var best *executionTraceResult
-	for low <= high {
-		mid := low + (high-low)/2
-		candidate := *result
-		candidate.Spans = spans[:mid]
-		candidate.ContentTruncated = mid < len(spans)
-
-		payload, err := marshalSanitizedJSON(&candidate)
-		if err != nil {
-			return err
-		}
-		floor, err := payloadStructureBytes(payload, limit)
-		if err != nil {
-			return err
-		}
-		if floor <= limit {
-			best = &candidate
-			low = mid + 1
-		} else {
-			high = mid - 1
-		}
-	}
-	if best == nil {
-		return fmt.Errorf("trace metadata exceeds %d byte limit", limit)
-	}
-
-	*result = *best
-	return nil
 }
 
 func ReadExecutionTrace() (mcp.Tool, mcp.ToolHandlerFor[ReadExecutionTraceArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "read_execution_trace",
-			Description: "Read the OpenTelemetry trace for a Buildkite Test Engine execution. The summary view returns category rollups and slowest spans; the full view also returns the span list",
+			Description: "Read an OpenTelemetry trace summary for a Buildkite Test Engine execution, including category rollups and slowest spans",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Read Execution Trace",
 				ReadOnlyHint: true,
@@ -94,37 +37,21 @@ func ReadExecutionTrace() (mcp.Tool, mcp.ToolHandlerFor[ReadExecutionTraceArgs, 
 			ctx, span := trace.Start(ctx, "buildkite.ReadExecutionTrace")
 			defer span.End()
 
-			if args.View == "" {
-				args.View = string(buildkite.TraceViewSummary)
-			}
-			if args.View != string(buildkite.TraceViewSummary) && args.View != string(buildkite.TraceViewFull) {
-				return utils.NewToolResultError("view must be 'summary' or 'full'"), nil, nil
-			}
-
 			span.SetAttributes(
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("test_suite_slug", args.TestSuiteSlug),
 				attribute.String("execution_id", args.ExecutionID),
-				attribute.String("view", args.View),
 			)
 
 			deps := DepsFromContext(ctx)
 			executionTrace, _, err := deps.ExecutionTraceClient.GetTrace(ctx, args.OrgSlug, args.TestSuiteSlug, args.ExecutionID, &buildkite.ExecutionTraceOptions{
-				View: buildkite.TraceView(args.View),
+				View: buildkite.TraceViewSummary,
 			})
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
 
-			result := executionTraceResult{
-				ExecutionTrace:    executionTrace,
-				ContentLimitBytes: executionTraceContentByteLimit,
-			}
-			if err := limitExecutionTraceSpans(&result, executionTraceContentByteLimit); err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("failed to limit execution trace: %v", err)), nil, nil
-			}
-
-			return mcpTextResultWithByteLimit(span, &result, executionTraceContentByteLimit)
+			return mcpTextResult(span, &executionTrace)
 		}, []string{"read_suites"}
 }
 
