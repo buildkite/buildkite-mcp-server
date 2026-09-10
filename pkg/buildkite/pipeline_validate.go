@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -129,6 +130,7 @@ var compilePipelineSchemas = sync.OnceValues(func() (*pipelineSchemas, error) {
 })
 
 type ValidatePipelineArgs struct {
+	ToolInput
 	YAML string `json:"yaml" jsonschema:"The Buildkite pipeline YAML content to validate (e.g. the contents of .buildkite/pipeline.yml)"`
 }
 
@@ -252,9 +254,7 @@ func validatePipelineInstance(schemas *pipelineSchemas, instance any, printer *m
 	}
 
 	shell := make(map[string]any, len(root))
-	for k, v := range root {
-		shell[k] = v
-	}
+	maps.Copy(shell, root)
 	if len(steps) > 0 {
 		shell["steps"] = placeholderSteps()
 	}
@@ -276,9 +276,7 @@ func validatePipelineInstance(schemas *pipelineSchemas, instance any, printer *m
 		}
 
 		groupShell := make(map[string]any, len(group))
-		for k, v := range group {
-			groupShell[k] = v
-		}
+		maps.Copy(groupShell, group)
 		if len(children) > 0 {
 			groupShell["steps"] = placeholderSteps()
 		}
@@ -517,28 +515,28 @@ func validatePipelineYAML(pipelineYAML string) (ValidatePipelineResult, error) {
 
 func ValidatePipeline() (mcp.Tool, mcp.ToolHandlerFor[ValidatePipelineArgs, any], []string) {
 	return mcp.Tool{
-			Name:        "validate_pipeline",
-			Description: "Validate Buildkite pipeline YAML against the official pipeline schema without calling the Buildkite API. Use this to check a pipeline definition (e.g. .buildkite/pipeline.yml) before creating or updating a pipeline, or before committing pipeline changes",
-			Annotations: &mcp.ToolAnnotations{
-				Title:        "Validate Pipeline YAML",
-				ReadOnlyHint: true,
-			},
-		}, func(ctx context.Context, request *mcp.CallToolRequest, args ValidatePipelineArgs) (*mcp.CallToolResult, any, error) {
-			_, span := trace.Start(ctx, "buildkite.ValidatePipeline")
-			defer span.End()
+		Name:        "validate_pipeline",
+		Description: "Validate Buildkite pipeline YAML against the official pipeline schema without calling the Buildkite API. Use this to check a pipeline definition (e.g. .buildkite/pipeline.yml) before creating or updating a pipeline, or before committing pipeline changes",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Validate Pipeline YAML",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ValidatePipelineArgs) (*mcp.CallToolResult, any, error) {
+		_, span := trace.Start(ctx, "buildkite.ValidatePipeline")
+		defer span.End()
 
-			span.SetAttributes(attribute.Int("yaml_bytes", len(args.YAML)))
+		span.SetAttributes(attribute.Int("yaml_bytes", len(args.YAML)))
 
-			result, err := validatePipelineYAML(args.YAML)
-			if err != nil {
-				return utils.NewToolResultError(fmt.Sprintf("pipeline validation failed: %v", err)), nil, nil
-			}
+		result, err := validatePipelineYAML(args.YAML)
+		if err != nil {
+			return utils.NewToolResultError(fmt.Sprintf("pipeline validation failed: %v", err)), nil, nil
+		}
 
-			span.SetAttributes(
-				attribute.Bool("valid", result.Valid),
-				attribute.Int("error_count", result.ErrorCount),
-			)
+		span.SetAttributes(
+			attribute.Bool("valid", result.Valid),
+			attribute.Int("error_count", result.ErrorCount),
+		)
 
-			return mcpTextResult(span, &result)
-		}, []string{}
+		return mcpTextResult(span, &result)
+	}, []string{}
 }

@@ -171,11 +171,11 @@ steps: [*e]
 		// referenced 90 times.
 		var sb strings.Builder
 		sb.WriteString("anchor: &big\n")
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			fmt.Fprintf(&sb, "  k%d: v\n", i)
 		}
 		sb.WriteString("steps:\n")
-		for i := 0; i < 90; i++ {
+		for range 90 {
 			sb.WriteString("  - *big\n")
 		}
 
@@ -194,7 +194,7 @@ steps: [*e]
 		script := strings.Repeat("x", 200*1024)
 		var sb strings.Builder
 		fmt.Fprintf(&sb, "script: &script \"%s\"\nsteps:\n", script)
-		for i := 0; i < 30; i++ {
+		for range 30 {
 			sb.WriteString("  - command: *script\n")
 		}
 
@@ -241,7 +241,7 @@ steps: [*e]
 
 		var sb strings.Builder
 		sb.WriteString("steps:\n")
-		for i := 0; i < maxPipelineSteps; i++ {
+		for i := range maxPipelineSteps {
 			fmt.Fprintf(&sb, "  - command: echo %d\n", i)
 		}
 		result, err := validatePipelineYAML(sb.String())
@@ -265,7 +265,7 @@ steps: [*e]
 
 		var sb strings.Builder
 		sb.WriteString("steps:\n")
-		for i := 0; i < 200; i++ {
+		for i := range 200 {
 			fmt.Fprintf(&sb, "  - group: group-%d\n    steps:\n", i)
 			fmt.Fprintf(&sb, "      - command: echo a\n      - command: echo b\n")
 		}
@@ -285,7 +285,7 @@ steps: [*e]
 		// maxCollectedValidationErrors leaf errors have been gathered.
 		var sb strings.Builder
 		sb.WriteString("steps:\n")
-		for i := 0; i < 10_000; i++ {
+		for i := range 10_000 {
 			fmt.Fprintf(&sb, "  - fake_property_%d: 1\n", i)
 		}
 		result, err := validatePipelineYAML(sb.String())
@@ -305,7 +305,7 @@ steps: [*e]
 		// value budget must refuse to validate the step instead.
 		var sb strings.Builder
 		sb.WriteString("steps:\n  - command: echo hello\n    notify:\n")
-		for i := 0; i < 40_000; i++ {
+		for i := range 40_000 {
 			fmt.Fprintf(&sb, "      - bogus%d\n", i)
 		}
 		result, err := validatePipelineYAML(sb.String())
@@ -322,7 +322,7 @@ steps: [*e]
 
 		var sb strings.Builder
 		sb.WriteString("notify:\n")
-		for i := 0; i < 40_000; i++ {
+		for i := range 40_000 {
 			fmt.Fprintf(&sb, "  - bogus%d\n", i)
 		}
 		sb.WriteString("steps:\n  - command: echo hello\n")
@@ -339,7 +339,7 @@ steps: [*e]
 
 		var sb strings.Builder
 		sb.WriteString("steps:\n  - group: g\n    steps:\n      - command: echo hello\n        notify:\n")
-		for i := 0; i < 40_000; i++ {
+		for i := range 40_000 {
 			fmt.Fprintf(&sb, "          - bogus%d\n", i)
 		}
 		result, err := validatePipelineYAML(sb.String())
@@ -390,7 +390,7 @@ steps:
 		// per-unit budget, because each child is its own unit.
 		var sb strings.Builder
 		sb.WriteString("steps:\n  - group: big\n    steps:\n")
-		for i := 0; i < 400; i++ {
+		for i := range 400 {
 			fmt.Fprintf(&sb, "      - label: step-%d\n        command: echo %d\n        agents:\n          queue: default\n", i, i)
 		}
 		result, err := validatePipelineYAML(sb.String())
@@ -416,7 +416,7 @@ steps:
 		// past maxValidationErrors.
 		var sb strings.Builder
 		sb.WriteString("steps:\n")
-		for i := 0; i < 30; i++ {
+		for i := range 30 {
 			fmt.Fprintf(&sb, "  - not_a_real_property_%d: true\n", i)
 		}
 
@@ -437,11 +437,11 @@ func BenchmarkValidatePipelineAdversarial(b *testing.B) {
 	aliasBomb := func() string {
 		var sb strings.Builder
 		sb.WriteString("anchor: &big\n")
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			fmt.Fprintf(&sb, "  k%d: v\n", i)
 		}
 		sb.WriteString("steps:\n")
-		for i := 0; i < 90; i++ {
+		for range 90 {
 			sb.WriteString("  - *big\n")
 		}
 		return sb.String()
@@ -450,7 +450,7 @@ func BenchmarkValidatePipelineAdversarial(b *testing.B) {
 	massInvalidSteps := func() string {
 		var sb strings.Builder
 		sb.WriteString("steps:\n")
-		for i := 0; i < 10_000; i++ {
+		for i := range 10_000 {
 			fmt.Fprintf(&sb, "  - fake_property_%d: 1\n", i)
 		}
 		return sb.String()
@@ -461,7 +461,7 @@ func BenchmarkValidatePipelineAdversarial(b *testing.B) {
 	maxInvalidSteps := func() string {
 		var sb strings.Builder
 		sb.WriteString("steps:\n")
-		for i := 0; i < maxPipelineSteps; i++ {
+		for i := range maxPipelineSteps {
 			fmt.Fprintf(&sb, "  - fake_property_%d: 1\n", i)
 		}
 		return sb.String()
@@ -474,7 +474,7 @@ func BenchmarkValidatePipelineAdversarial(b *testing.B) {
 	massNotifyStep := func() string {
 		var sb strings.Builder
 		sb.WriteString("steps:\n  - command: echo hello\n    notify:\n")
-		for i := 0; i < 40_000; i++ {
+		for i := range 40_000 {
 			fmt.Fprintf(&sb, "      - bogus%d\n", i)
 		}
 		return sb.String()
