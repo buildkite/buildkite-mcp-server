@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -118,6 +119,55 @@ func TestReadExecutionTraceWithError(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "API error")
+}
+
+func TestReadExecutionTraceBoundsFullView(t *testing.T) {
+	spans := make([]buildkite.TraceSpan, 2_000)
+	for i := range spans {
+		spans[i] = buildkite.TraceSpan{
+			SpanID:        fmt.Sprintf("span-%d", i),
+			ParentSpanID:  "parent",
+			Name:          "short span name",
+			Kind:          "internal",
+			ServiceName:   "service",
+			ScopeName:     "instrumentation",
+			Category:      buildkite.TraceCategoryOther,
+			Badge:         "OTHER",
+			Label:         "span label",
+			Detail:        "span detail",
+			Duration:      1,
+			SelfTime:      1,
+			Error:         true,
+			StatusMessage: "error status",
+		}
+	}
+
+	client := &MockExecutionTraceClient{
+		GetTraceFunc: func(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error) {
+			return buildkite.ExecutionTrace{
+				ExecutionID: "execution",
+				View:        buildkite.TraceViewFull,
+				SpanCount:   len(spans),
+				Spans:       spans,
+			}, nil, nil
+		},
+	}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ExecutionTraceClient: client})
+	_, handler, _ := ReadExecutionTrace()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{View: "full"})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	text := result.Content[0].(*mcp.TextContent).Text
+	require.LessOrEqual(t, len(text), executionTraceContentByteLimit)
+
+	var traceResult executionTraceResult
+	require.NoError(t, json.Unmarshal([]byte(text), &traceResult))
+	require.True(t, traceResult.ContentTruncated)
+	require.Equal(t, executionTraceContentByteLimit, traceResult.ContentLimitBytes)
+	require.Equal(t, len(text), traceResult.ContentBytes)
+	require.Equal(t, len(spans), traceResult.SpanCount)
+	require.Less(t, len(traceResult.Spans), len(spans))
 }
 
 func TestGetFailedExecutions(t *testing.T) {
