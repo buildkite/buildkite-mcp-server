@@ -30,6 +30,7 @@ type ToolDependencies struct {
 	TestRunsClient          TestRunsClient
 	TestSuitesClient        TestSuitesClient
 	TestExecutionsClient    TestExecutionsClient
+	ExecutionTraceClient    ExecutionTraceClient
 	TestsClient             TestsClient
 	BuildTestsClient        BuildTestsClient
 	BuildkiteLogsClient     BuildkiteLogsClient

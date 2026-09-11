@@ -76,6 +76,12 @@ func TestGetBuildArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 }
 
+func TestReadExecutionTraceArgsSchema(t *testing.T) {
+	s := schemaFor[ReadExecutionTraceArgs](t)
+	require.Equal(t, []string{"execution_id", "org_slug", "test_suite_slug"}, sortedToolRequired(t, s))
+	require.NotContains(t, s.Properties, "view")
+}
+
 func TestWaitForBuildArgsSchema(t *testing.T) {
 	req := sortedRequired[WaitForBuildArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)

@@ -17,6 +17,10 @@ type MockTestExecutionsClient struct {
 	GetFailedExecutionsFunc func(ctx context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error)
 }
 
+type MockExecutionTraceClient struct {
+	GetTraceFunc func(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error)
+}
+
 func (m *MockTestExecutionsClient) GetFailedExecutions(ctx context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
 	if m.GetFailedExecutionsFunc != nil {
 		return m.GetFailedExecutionsFunc(ctx, org, slug, runID, opt)
@@ -25,6 +29,66 @@ func (m *MockTestExecutionsClient) GetFailedExecutions(ctx context.Context, org,
 }
 
 var _ TestExecutionsClient = (*MockTestExecutionsClient)(nil)
+
+func (m *MockExecutionTraceClient) GetTrace(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error) {
+	return m.GetTraceFunc(ctx, org, slug, executionID, opt)
+}
+
+var _ ExecutionTraceClient = (*MockExecutionTraceClient)(nil)
+
+func TestReadExecutionTrace(t *testing.T) {
+	client := &MockExecutionTraceClient{
+		GetTraceFunc: func(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error) {
+			require.Equal(t, "org", org)
+			require.Equal(t, "suite", slug)
+			require.Equal(t, "execution", executionID)
+			require.Equal(t, buildkite.TraceViewSummary, opt.View)
+
+			return buildkite.ExecutionTrace{
+				ExecutionID: "execution",
+				TraceID:     "trace",
+				View:        buildkite.TraceViewSummary,
+				SpanCount:   2,
+				SlowestSpans: []buildkite.TraceSpan{
+					{Name: "SELECT users", Category: buildkite.TraceCategorySQL},
+				},
+			}, nil, nil
+		},
+	}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ExecutionTraceClient: client})
+	tool, handler, scopes := ReadExecutionTrace()
+
+	require.Equal(t, "read_execution_trace", tool.Name)
+	require.True(t, tool.Annotations.ReadOnlyHint)
+	require.Equal(t, []string{"read_suites"}, scopes)
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{
+		OrgSlug:       "org",
+		TestSuiteSlug: "suite",
+		ExecutionID:   "execution",
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	text := result.Content[0].(*mcp.TextContent).Text
+	requireJSONPathEqual(t, text, "execution", "execution_id")
+	requireJSONPathEqual(t, text, string(buildkite.TraceViewSummary), "view")
+	require.Contains(t, text, "SELECT users")
+}
+
+func TestReadExecutionTraceWithError(t *testing.T) {
+	client := &MockExecutionTraceClient{
+		GetTraceFunc: func(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error) {
+			return buildkite.ExecutionTrace{}, nil, fmt.Errorf("API error")
+		},
+	}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{ExecutionTraceClient: client})
+	_, handler, _ := ReadExecutionTrace()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "API error")
+}
 
 func TestGetFailedExecutions(t *testing.T) {
 	assert := require.New(t)
