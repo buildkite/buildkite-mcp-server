@@ -97,9 +97,14 @@ func TestGetPipelineArgsSchema(t *testing.T) {
 }
 
 func TestCreatePipelineArgsSchema(t *testing.T) {
-	req := sortedRequired[CreatePipelineArgs](t)
-	// Required: org_slug, name, repository_url, cluster_id, configuration
-	require.Equal(t, []string{"cluster_id", "configuration", "name", "org_slug", "repository_url"}, req)
+	s := schemaFor[CreatePipelineArgs](t)
+	// Required: org_slug, name, repository_url, cluster_id, configuration, create_webhook
+	require.Equal(t, []string{"cluster_id", "configuration", "create_webhook", "name", "org_slug", "repository_url"}, sortedToolRequired(t, s))
+
+	description := s.Properties["create_webhook"].Description
+	require.Contains(t, description, "Set true when GitHub push or pull-request events should trigger this pipeline automatically")
+	require.Contains(t, description, "the pipeline is still created and setup instructions are returned")
+	require.Contains(t, description, "Set false for non-GitHub repositories, centralized or manually managed webhooks")
 }
 
 func TestUpdatePipelineArgsSchema(t *testing.T) {
