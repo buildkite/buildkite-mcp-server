@@ -99,7 +99,7 @@ type ListBuildsArgs struct {
 	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Filter builds by pipeline. When omitted, lists builds across all pipelines in the organization"`
 	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
 	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled, running, passed, failed, canceled, skipped)"`
-	Commit       string `json:"commit,omitempty" jsonschema:"Filter builds by specific commit SHA"`
+	Commit       string `json:"commit,omitempty" jsonschema:"Full commit SHA to match exactly; shortened SHAs are not supported"`
 	Creator      string `json:"creator,omitempty" jsonschema:"Filter builds by build creator"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
