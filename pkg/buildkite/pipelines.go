@@ -344,6 +344,70 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 		}, []string{"write_pipelines"}
 }
 
+type CreatePipelineWebhookArgs struct {
+	ToolInput
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+}
+
+func CreatePipelineWebhook() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineWebhookArgs, any], []string) {
+	return mcp.Tool{
+		Name:        "create_pipeline_webhook",
+		Description: "Create a GitHub webhook for an existing pipeline configured with a compatible Buildkite GitHub App",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Create Pipeline Webhook",
+			DestructiveHint: boolPtr(false),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args CreatePipelineWebhookArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.CreatePipelineWebhook")
+		defer span.End()
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("pipeline_slug", args.PipelineSlug),
+		)
+
+		deps := DepsFromContext(ctx)
+		_, err := deps.PipelinesClient.AddWebhook(ctx, args.OrgSlug, args.PipelineSlug)
+		if err == nil {
+			result := WebhookInfo{
+				Created: true,
+				Note:    "Webhook created successfully.",
+			}
+			return mcpTextResult(span, &result)
+		}
+
+		var errResp *buildkite.ErrorResponse
+		if !errors.As(err, &errResp) || errResp.Response == nil || errResp.Response.StatusCode != http.StatusUnprocessableEntity {
+			return handleBuildkiteError(err)
+		}
+
+		result := WebhookInfo{
+			Created: false,
+			Error:   err.Error(),
+		}
+		switch errResp.Message {
+		case "Auto-creating webhooks is not supported for your repository.":
+			result.Note = "The webhook could not be created automatically because the pipeline is not connected through a compatible Buildkite GitHub App."
+			result.SetupURL = fmt.Sprintf("https://buildkite.com/organizations/%s/repository-providers", args.OrgSlug)
+			result.NextSteps = []string{
+				"Open setup_url and connect a compatible Buildkite GitHub App, or grant the existing app access to this repository.",
+				fmt.Sprintf("Open https://buildkite.com/%s/%s, then open Settings > GitHub > Setup Instructions.", args.OrgSlug, args.PipelineSlug),
+			}
+		case "Webhooks could not be created for your repository.":
+			result.Note = "Buildkite could not create another webhook. A webhook may already exist; inspect the pipeline's GitHub settings before retrying."
+			result.NextSteps = []string{
+				fmt.Sprintf("Open https://buildkite.com/%s/%s, then open Settings > GitHub > Setup Instructions and verify the webhook setup.", args.OrgSlug, args.PipelineSlug),
+				"Do not retry until you have confirmed that the pipeline does not already have a GitHub webhook.",
+			}
+		default:
+			return handleBuildkiteError(err)
+		}
+
+		return mcpTextResult(span, &result)
+	}, []string{"write_pipelines"}
+}
+
 type UpdatePipelineArgs struct {
 	ToolInput
 	OrgSlug                   string   `json:"org_slug"`
