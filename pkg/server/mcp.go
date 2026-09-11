@@ -90,6 +90,10 @@ var instructionSections = []instructionSection{
 		text:    "Build failure investigation: start with get_build_failure_summary. It combines build state, failed and broken jobs, promised failures from running jobs, bounded log tails, relevant annotations, and failed tests in one response. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
 	},
 	{
+		toolset: toolsets.ToolsetInvestigations,
+		text:    "Build comparison: use compare_builds when asked what changed since a build worked, or to compare two builds. Without an explicit baseline it selects an earlier successful build on the same pipeline and branch. Report the selected baseline and unmatched steps; shared failing steps do not establish a shared cause or justify a retry. Timings cover final attempts, not total retry cost or build wall-clock duration.",
+	},
+	{
 		toolset: toolsets.ToolsetBuilds,
 		text:    "Job state \"broken\" means the job did not run because something inside the build prevented execution: an if conditional evaluated to false, a branch filter did not match, or an upstream dependency failed. It does not mean the job's command failed. Distinguish: broken = build configuration or dependencies prevented execution; failed = job ran but exited non-zero; skipped = external factor (e.g. a newer build superseded it). When both failed and broken jobs are present, investigate failed upstream jobs first.",
 	},
