@@ -67,6 +67,7 @@ func TestListBuildsArgsSchema(t *testing.T) {
 
 	// Verify descriptions are set for fields that have non-obvious info
 	require.Equal(t, "Filter builds by git branch name", s.Properties["branch"].Description)
+	require.Equal(t, "Full commit SHA to match exactly; shortened SHAs are not supported", s.Properties["commit"].Description)
 	// org_slug should have no description (field name is self-explanatory)
 	require.Empty(t, s.Properties["org_slug"].Description)
 }
