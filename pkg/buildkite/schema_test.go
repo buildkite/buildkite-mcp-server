@@ -82,6 +82,15 @@ func TestReadExecutionTraceArgsSchema(t *testing.T) {
 	require.NotContains(t, s.Properties, "view")
 }
 
+func TestSlowestExecutionsForBuildArgsSchema(t *testing.T) {
+	s := schemaFor[SlowestExecutionsForBuildArgs](t)
+	require.Equal(t, []string{"build_uuid", "org_slug"}, sortedToolRequired(t, s))
+	require.Contains(t, s.Properties, "limit")
+	require.NotContains(t, s.Required, "limit")
+	require.Equal(t, "Buildkite build UUID. This is the build ID, not the pipeline build number.", s.Properties["build_uuid"].Description)
+	require.Equal(t, "Maximum number of executions to return. Defaults to 20 and is capped by the organization's slowest executions quota.", s.Properties["limit"].Description)
+}
+
 func TestWaitForBuildArgsSchema(t *testing.T) {
 	req := sortedRequired[WaitForBuildArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)

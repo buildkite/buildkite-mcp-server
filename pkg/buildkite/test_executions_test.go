@@ -21,6 +21,10 @@ type MockExecutionTraceClient struct {
 	GetTraceFunc func(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error)
 }
 
+type MockSlowestExecutionsClient struct {
+	ListSlowestByBuildFunc func(ctx context.Context, org, buildUUID string, opt *buildkite.SlowestExecutionsOptions) ([]buildkite.BuildExecution, *buildkite.Response, error)
+}
+
 func (m *MockTestExecutionsClient) GetFailedExecutions(ctx context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
 	if m.GetFailedExecutionsFunc != nil {
 		return m.GetFailedExecutionsFunc(ctx, org, slug, runID, opt)
@@ -35,6 +39,63 @@ func (m *MockExecutionTraceClient) GetTrace(ctx context.Context, org, slug, exec
 }
 
 var _ ExecutionTraceClient = (*MockExecutionTraceClient)(nil)
+
+func (m *MockSlowestExecutionsClient) ListSlowestByBuild(ctx context.Context, org, buildUUID string, opt *buildkite.SlowestExecutionsOptions) ([]buildkite.BuildExecution, *buildkite.Response, error) {
+	return m.ListSlowestByBuildFunc(ctx, org, buildUUID, opt)
+}
+
+var _ SlowestExecutionsClient = (*MockSlowestExecutionsClient)(nil)
+
+func TestSlowestExecutionsForBuild(t *testing.T) {
+	client := &MockSlowestExecutionsClient{
+		ListSlowestByBuildFunc: func(ctx context.Context, org, buildUUID string, opt *buildkite.SlowestExecutionsOptions) ([]buildkite.BuildExecution, *buildkite.Response, error) {
+			require.Equal(t, "org", org)
+			require.Equal(t, "019d66fb-e8db-47eb-866c-94b85d42b9a1", buildUUID)
+			require.Equal(t, 7, opt.Limit)
+
+			return []buildkite.BuildExecution{
+				{ID: "execution-1", SuiteSlug: "suite-one", TestID: "test-1", Duration: 31.5, HasTrace: true},
+				{ID: "execution-2", SuiteSlug: "suite-two", TestID: "test-2", Duration: 12.25, HasTrace: false},
+			}, nil, nil
+		},
+	}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{SlowestExecutionsClient: client})
+	tool, handler, scopes := SlowestExecutionsForBuild()
+
+	require.Equal(t, "slowest_executions_for_build", tool.Name)
+	require.Equal(t, "Slowest Executions for Build", tool.Annotations.Title)
+	require.True(t, tool.Annotations.ReadOnlyHint)
+	require.Contains(t, tool.Description, "read_execution_trace")
+	require.Equal(t, []string{"read_suites"}, scopes)
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), SlowestExecutionsForBuildArgs{
+		OrgSlug:   "org",
+		BuildUUID: "019d66fb-e8db-47eb-866c-94b85d42b9a1",
+		Limit:     7,
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	text := result.Content[0].(*mcp.TextContent).Text
+	requireJSONPathEqual(t, text, "execution-1", 0, "id")
+	requireJSONPathEqual(t, text, "suite-one", 0, "suite_slug")
+	requireJSONPathEqual(t, text, true, 0, "has_trace")
+	requireJSONPathEqual(t, text, false, 1, "has_trace")
+}
+
+func TestSlowestExecutionsForBuildWithError(t *testing.T) {
+	client := &MockSlowestExecutionsClient{
+		ListSlowestByBuildFunc: func(context.Context, string, string, *buildkite.SlowestExecutionsOptions) ([]buildkite.BuildExecution, *buildkite.Response, error) {
+			return nil, nil, fmt.Errorf("API error")
+		},
+	}
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{SlowestExecutionsClient: client})
+	_, handler, _ := SlowestExecutionsForBuild()
+
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), SlowestExecutionsForBuildArgs{})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "API error")
+}
 
 func TestReadExecutionTrace(t *testing.T) {
 	client := &MockExecutionTraceClient{
