@@ -50,7 +50,8 @@ Call `get_build_failure_summary` with the organization slug, pipeline slug, and 
 
 Interpret its jobs as follows:
 - **`failed`** jobs actually ran and exited non-zero — these are the root cause, start here
-- **`broken`** jobs never ran due to a failed dependency or unmet `if` condition — they are usually downstream victims of a `failed` job
+- **`broken`** jobs never ran because the pipeline configuration excluded them (`if`/`branches` did not match, `parallelism: 0`, or `skip`). They are never caused by a failed job, never fail the build, and are normal in passing builds — ignore them when explaining a failure
+- **`waiting_failed` / `blocked_failed` / `unblocked_failed`** jobs never ran because a job they depend on failed. They have no logs and nothing to investigate; fix the `failed` job and they will run
 - **`running` with a non-zero `promised_exit_status`** has declared an early failure but may still produce more logs, artifacts, or test results before it finishes
 
 If you need more context, take a failed job's `id` as the `job_id` for the lower-level log tools.
