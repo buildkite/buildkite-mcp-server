@@ -678,6 +678,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Contains(toolNames, "list_tests")
 	assert.Contains(toolNames, "list_tests_for_build")
 	assert.Contains(toolNames, "list_test_suites_for_pipeline")
+	assert.Contains(toolNames, "slowest_executions_for_build")
 	assert.Contains(toolNames, "read_execution_trace")
 }
 
