@@ -41,7 +41,6 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 			require.Equal(t, "42", number)
 			require.True(t, options.ExcludeJobs)
 			require.True(t, options.ExcludePipeline)
-			require.True(t, options.IncludeTestEngine)
 			return buildkite.Build{
 				ID:      "build-id",
 				Number:  42,
@@ -53,10 +52,6 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 					Total:  5,
 					States: map[string]int{"passed": 2, "failed": 1, "running": 1, "broken": 1},
 				},
-				TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{{
-					ID:    "run-1",
-					Suite: buildkite.TestEngineSuite{Slug: "suite-1"},
-				}}},
 			}, &buildkite.Response{Response: &http.Response{StatusCode: http.StatusOK}}, nil
 		},
 	}
@@ -109,25 +104,6 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 		},
 	}
 
-	type testExecutionCall struct {
-		org, suite, runID string
-		options           buildkite.FailedExecutionsOptions
-	}
-	var testExecutionCallsMu sync.Mutex
-	var testExecutionCalls []testExecutionCall
-	testExecutionsClient := &MockTestExecutionsClient{
-		GetFailedExecutionsFunc: func(_ context.Context, org, suite, runID string, options *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-			testExecutionCallsMu.Lock()
-			testExecutionCalls = append(testExecutionCalls, testExecutionCall{org: org, suite: suite, runID: runID, options: *options})
-			testExecutionCallsMu.Unlock()
-			return []buildkite.FailedExecution{{
-				ExecutionID:   "execution-1",
-				TestName:      "TestWidgets",
-				FailureReason: "expected 2, got 3",
-			}}, &buildkite.Response{NextPage: 2}, nil
-		},
-	}
-
 	type logCall struct {
 		ttl          time.Duration
 		forceRefresh bool
@@ -151,20 +127,18 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	}
 
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{
-		BuildsClient:         buildsClient,
-		JobsClient:           jobsClient,
-		AnnotationsClient:    annotationsClient,
-		TestExecutionsClient: testExecutionsClient,
-		BuildkiteLogsClient:  logsClient,
+		BuildsClient:        buildsClient,
+		JobsClient:          jobsClient,
+		AnnotationsClient:   annotationsClient,
+		BuildkiteLogsClient: logsClient,
 	})
 
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
-		OrgSlug:              "org",
-		PipelineSlug:         "pipeline",
-		BuildNumber:          "42",
-		LogTail:              2,
-		MaxFailedTestsPerRun: 7,
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "42",
+		LogTail:      2,
 	})
 	require.NoError(t, err)
 	require.False(t, callResult.IsError)
@@ -200,20 +174,6 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	require.False(t, summary.AnnotationsTruncated)
 	require.Equal(t, "annotation-error", summary.Annotations[0].ID)
 	require.NotContains(t, getTextResult(t, callResult).Text, "coverage passed")
-
-	require.Len(t, summary.TestRuns, 1)
-	require.Equal(t, "suite-1", summary.TestRuns[0].TestSuiteSlug)
-	require.True(t, summary.TestRuns[0].Truncated)
-	require.Equal(t, "TestWidgets", summary.TestRuns[0].FailedExecutions[0].TestName)
-	require.False(t, summary.TestRunsTruncated)
-	require.True(t, summary.FailedTestsTruncated)
-
-	testExecutionCallsMu.Lock()
-	require.Equal(t, []testExecutionCall{{
-		org: "org", suite: "suite-1", runID: "run-1",
-		options: buildkite.FailedExecutionsOptions{Page: 1, PerPage: 7},
-	}}, testExecutionCalls)
-	testExecutionCallsMu.Unlock()
 
 	logCallsMu.Lock()
 	require.Equal(t, map[string][]logCall{
@@ -286,7 +246,7 @@ func TestGetBuildFailureSummaryPrioritizesFailuresAndCanceledJobsBeforeDownstrea
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 3,
-		IncludeLogs: &include, IncludeAnnotations: &include, IncludeFailedTests: &include,
+		IncludeLogs: &include, IncludeAnnotations: &include,
 	})
 	require.NoError(t, err)
 
@@ -339,7 +299,7 @@ func TestGetBuildFailureSummaryEnforcesServerJobLimit(t *testing.T) {
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 50,
-		IncludeAnnotations: &include, IncludeFailedTests: &include,
+		IncludeAnnotations: &include,
 	})
 	require.NoError(t, err)
 
@@ -389,7 +349,7 @@ func TestGetBuildFailureSummaryIncludesTimedOutJobAndLog(t *testing.T) {
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
-		IncludeAnnotations: &include, IncludeFailedTests: &include,
+		IncludeAnnotations: &include,
 	})
 	require.NoError(t, err)
 
@@ -439,7 +399,7 @@ func TestGetBuildFailureSummaryIncludesExpiredAndDownstreamFailedJobsWithoutLogs
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
-		IncludeAnnotations: &include, IncludeFailedTests: &include,
+		IncludeAnnotations: &include,
 	})
 	require.NoError(t, err)
 
@@ -505,7 +465,6 @@ func TestGetBuildFailureSummaryCanDisableOptionalSections(t *testing.T) {
 		BuildNumber:        "1",
 		IncludeLogs:        &include,
 		IncludeAnnotations: &include,
-		IncludeFailedTests: &include,
 	})
 
 	require.NoError(t, err)
@@ -515,7 +474,6 @@ func TestGetBuildFailureSummaryCanDisableOptionalSections(t *testing.T) {
 	require.Equal(t, "passed", summary.Build.State)
 	require.Empty(t, summary.Jobs)
 	require.Empty(t, summary.Annotations)
-	require.Empty(t, summary.TestRuns)
 }
 
 func TestGetBuildFailureSummaryLimitsFinalEscapedJSONPayload(t *testing.T) {
@@ -651,7 +609,6 @@ func TestGetBuildFailureSummaryHonorsContentLimitBytesArg(t *testing.T) {
 			BuildNumber:        "1",
 			ContentLimitBytes:  requested,
 			IncludeAnnotations: &include,
-			IncludeFailedTests: &include,
 		})
 
 		require.NoError(t, err)
@@ -669,74 +626,6 @@ func TestGetBuildFailureSummaryHonorsContentLimitBytesArg(t *testing.T) {
 		// The semantic trim keeps the newest lines, so the final fetched line
 		// must survive.
 		require.Contains(t, job.LogTail[len(job.LogTail)-1].C, "line-59")
-	})
-
-	t.Run("trims failed-test collections semantically instead of erroring", func(t *testing.T) {
-		runs := make([]buildkite.TestEngineRun, 4)
-		for i := range runs {
-			runs[i] = buildkite.TestEngineRun{
-				ID:    fmt.Sprintf("run-%d", i+1),
-				Suite: buildkite.TestEngineSuite{Slug: fmt.Sprintf("suite-%d", i+1)},
-			}
-		}
-		testCtx := ContextWithDeps(context.Background(), ToolDependencies{
-			BuildsClient: &MockBuildsClient{
-				GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-					return buildkite.Build{Number: 1, State: "failed", TestEngine: &buildkite.TestEngineProperty{Runs: runs}}, &buildkite.Response{}, nil
-				},
-			},
-			JobsClient: &MockJobsClient{
-				ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
-					return buildkite.JobsList{}, &buildkite.Response{}, nil
-				},
-			},
-			TestExecutionsClient: &MockTestExecutionsClient{
-				GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, options *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-					// Fully populated executions: even with every string
-					// emptied, the field keys alone put ~100 executions past
-					// the requested cap, forcing semantic item reduction.
-					executions := make([]buildkite.FailedExecution, options.PerPage)
-					for i := range executions {
-						executions[i] = buildkite.FailedExecution{
-							ExecutionID:      fmt.Sprintf("%s-execution-%d", runID, i+1),
-							RunID:            runID,
-							TestID:           fmt.Sprintf("test-%d", i+1),
-							RunName:          "nightly",
-							CommitSHA:        "abc123def456",
-							Branch:           "main",
-							TestName:         fmt.Sprintf("test %d", i+1),
-							FailureReason:    "expected true to be false",
-							Duration:         1.25,
-							Location:         "spec/widgets_spec.rb:42",
-							RunURL:           "https://buildkite.com/organizations/org/analytics/suites/suite/runs/run",
-							TestURL:          "https://buildkite.com/organizations/org/analytics/suites/suite/tests/test",
-							TestExecutionURL: "https://buildkite.com/organizations/org/analytics/suites/suite/tests/test/executions/execution",
-						}
-					}
-					return executions, &buildkite.Response{}, nil
-				},
-			},
-		})
-
-		requested := 8 * 1024
-		include := false
-		callResult, _, err := handler(testCtx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
-			OrgSlug:            "org",
-			PipelineSlug:       "pipeline",
-			BuildNumber:        "1",
-			ContentLimitBytes:  requested,
-			IncludeAnnotations: &include,
-		})
-
-		require.NoError(t, err)
-		require.False(t, callResult.IsError)
-		text := getTextResult(t, callResult).Text
-		require.LessOrEqual(t, len(text), requested)
-
-		var summary BuildFailureSummary
-		require.NoError(t, json.Unmarshal([]byte(text), &summary))
-		require.True(t, summary.FailedTestsTruncated)
-		require.True(t, summary.ContentTruncated)
 	})
 
 	t.Run("clamps values above the server maximum", func(t *testing.T) {
@@ -762,8 +651,16 @@ func TestGetBuildFailureSummaryDefaultLimitPreservesCollectionsForStringOverage(
 	// An escape-heavy build message pushes the serialized payload past the
 	// default limit while the strings-emptied structure stays tiny. The
 	// generic limiter can fix that by shortening strings alone, so the
-	// semantic pass must not sacrifice failed-test items for it.
+	// semantic pass must not sacrifice annotation items for it.
 	escapeHeavy := strings.Repeat("\"\\\n", failureSummaryContentByteLimit)
+	annotationsClient := &MockAnnotationsClient{
+		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+			if options.Page == 1 {
+				return []buildkite.Annotation{{ID: "ann-1", Style: "error", BodyHTML: "test failed"}}, &buildkite.Response{}, nil
+			}
+			return nil, &buildkite.Response{}, nil
+		},
+	}
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{
 		BuildsClient: &MockBuildsClient{
 			GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -771,10 +668,6 @@ func TestGetBuildFailureSummaryDefaultLimitPreservesCollectionsForStringOverage(
 					Number:  1,
 					State:   "failed",
 					Message: escapeHeavy,
-					TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{{
-						ID:    "run-1",
-						Suite: buildkite.TestEngineSuite{Slug: "suite-1"},
-					}}},
 				}, &buildkite.Response{}, nil
 			},
 		},
@@ -783,24 +676,14 @@ func TestGetBuildFailureSummaryDefaultLimitPreservesCollectionsForStringOverage(
 				return buildkite.JobsList{}, &buildkite.Response{}, nil
 			},
 		},
-		TestExecutionsClient: &MockTestExecutionsClient{
-			GetFailedExecutionsFunc: func(context.Context, string, string, string, *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-				return []buildkite.FailedExecution{{
-					ExecutionID:   "execution-1",
-					TestName:      "TestWidgets",
-					FailureReason: "expected 2, got 3",
-				}}, &buildkite.Response{}, nil
-			},
-		},
+		AnnotationsClient: annotationsClient,
 	})
 
-	include := false
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
-		OrgSlug:            "org",
-		PipelineSlug:       "pipeline",
-		BuildNumber:        "1",
-		IncludeAnnotations: &include,
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
 	})
 
 	require.NoError(t, err)
@@ -812,148 +695,7 @@ func TestGetBuildFailureSummaryDefaultLimitPreservesCollectionsForStringOverage(
 	require.NoError(t, json.Unmarshal([]byte(text), &summary))
 	require.True(t, summary.ContentTruncated)
 	require.Less(t, len(summary.Build.Message), len(escapeHeavy))
-	require.Len(t, summary.TestRuns, 1)
-	require.Len(t, summary.TestRuns[0].FailedExecutions, 1)
-	require.False(t, summary.FailedTestsTruncated)
-}
-
-func TestGetBuildFailureSummaryBoundsTestEngineWork(t *testing.T) {
-	runs := make([]buildkite.TestEngineRun, 4)
-	for i := range runs {
-		runs[i] = buildkite.TestEngineRun{
-			ID:    fmt.Sprintf("run-%d", i+1),
-			Suite: buildkite.TestEngineSuite{Slug: fmt.Sprintf("suite-%d", i+1)},
-		}
-	}
-
-	buildsClient := &MockBuildsClient{
-		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			return buildkite.Build{Number: 1, State: "failed", TestEngine: &buildkite.TestEngineProperty{Runs: runs}}, &buildkite.Response{}, nil
-		},
-	}
-	jobsClient := &MockJobsClient{
-		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
-			return buildkite.JobsList{}, &buildkite.Response{}, nil
-		},
-	}
-
-	var callsMu sync.Mutex
-	calls := map[string]int{}
-	testExecutionsClient := &MockTestExecutionsClient{
-		GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, options *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-			callsMu.Lock()
-			calls[runID] = options.PerPage
-			callsMu.Unlock()
-
-			executions := make([]buildkite.FailedExecution, options.PerPage)
-			for i := range executions {
-				executions[i] = buildkite.FailedExecution{ExecutionID: fmt.Sprintf("%s-execution-%d", runID, i+1)}
-			}
-			response := &buildkite.Response{}
-			if runID == "run-1" {
-				response.NextPage = 2
-			}
-			return executions, response, nil
-		},
-	}
-
-	include := false
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{
-		BuildsClient:         buildsClient,
-		JobsClient:           jobsClient,
-		TestExecutionsClient: testExecutionsClient,
-	})
-	_, handler, _ := GetBuildFailureSummary()
-	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
-		OrgSlug:              "org",
-		PipelineSlug:         "pipeline",
-		BuildNumber:          "1",
-		IncludeLogs:          &include,
-		IncludeAnnotations:   &include,
-		MaxTestRuns:          2,
-		MaxFailedTests:       3,
-		MaxFailedTestsPerRun: 2,
-	})
-	require.NoError(t, err)
-
-	var summary BuildFailureSummary
-	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
-	require.Len(t, summary.TestRuns, 2)
-	require.True(t, summary.TestRunsTruncated)
-	require.True(t, summary.FailedTestsTruncated)
-	require.Len(t, summary.TestRuns[0].FailedExecutions, 2)
-	require.Len(t, summary.TestRuns[1].FailedExecutions, 1)
-
-	callsMu.Lock()
-	require.Equal(t, map[string]int{"run-1": 2, "run-2": 2}, calls)
-	callsMu.Unlock()
-}
-
-func TestLoadFailureTestRunsInspectsMaxRunsIndependentlyOfMaxTotal(t *testing.T) {
-	runs := make([]buildkite.TestEngineRun, 20)
-	for i := range runs {
-		runs[i] = buildkite.TestEngineRun{
-			ID:    fmt.Sprintf("run-%d", i+1),
-			Suite: buildkite.TestEngineSuite{Slug: fmt.Sprintf("suite-%d", i+1)},
-		}
-	}
-
-	var callsMu sync.Mutex
-	calls := map[string]int{}
-	client := &MockTestExecutionsClient{
-		GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, options *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-			callsMu.Lock()
-			calls[runID] = options.PerPage
-			callsMu.Unlock()
-			if runID == "run-20" {
-				return []buildkite.FailedExecution{{ExecutionID: "execution-1"}}, &buildkite.Response{}, nil
-			}
-			return nil, &buildkite.Response{}, nil
-		},
-	}
-
-	results, runsTruncated, failedTestsTruncated, err := loadFailureTestRuns(
-		context.Background(), client, GetBuildFailureSummaryArgs{OrgSlug: "org"}, runs, 20, 20, 1,
-	)
-
-	require.NoError(t, err)
-	require.Len(t, results, 20)
-	require.False(t, runsTruncated)
-	require.False(t, failedTestsTruncated)
-	require.Empty(t, results[0].FailedExecutions)
-	require.Equal(t, "execution-1", results[19].FailedExecutions[0].ExecutionID)
-	callsMu.Lock()
-	require.Len(t, calls, 20)
-	for _, perPage := range calls {
-		require.Equal(t, 1, perPage)
-	}
-	callsMu.Unlock()
-}
-
-func TestLoadFailureTestRunsRedistributesUnusedCapacity(t *testing.T) {
-	client := &MockTestExecutionsClient{
-		GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, options *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-			require.Equal(t, 2, options.PerPage)
-			if runID == "run-1" {
-				return nil, &buildkite.Response{}, nil
-			}
-			return []buildkite.FailedExecution{{ExecutionID: "execution-1"}, {ExecutionID: "execution-2"}}, &buildkite.Response{}, nil
-		},
-	}
-	runs := []buildkite.TestEngineRun{
-		{ID: "run-1", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
-		{ID: "run-2", Suite: buildkite.TestEngineSuite{Slug: "suite-2"}},
-	}
-
-	results, runsTruncated, failedTestsTruncated, err := loadFailureTestRuns(
-		context.Background(), client, GetBuildFailureSummaryArgs{OrgSlug: "org"}, runs, 2, 2, 3,
-	)
-
-	require.NoError(t, err)
-	require.False(t, runsTruncated)
-	require.False(t, failedTestsTruncated)
-	require.Empty(t, results[0].FailedExecutions)
-	require.Len(t, results[1].FailedExecutions, 2)
+	require.Len(t, summary.Annotations, 1)
 }
 
 func TestGetBuildFailureSummaryPreservesPartialResultForForbiddenOptionalSections(t *testing.T) {
@@ -969,13 +711,7 @@ func TestGetBuildFailureSummaryPreservesPartialResultForForbiddenOptionalSection
 	}
 	buildsClient := &MockBuildsClient{
 		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-			return buildkite.Build{
-				Number: 1,
-				State:  "failed",
-				TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{{
-					ID: "run", Suite: buildkite.TestEngineSuite{Slug: "suite"},
-				}}},
-			}, &buildkite.Response{}, nil
+			return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{}, nil
 		},
 	}
 	jobsClient := &MockJobsClient{
@@ -996,17 +732,11 @@ func TestGetBuildFailureSummaryPreservesPartialResultForForbiddenOptionalSection
 			return nil, nil, forbidden
 		},
 	}
-	testExecutionsClient := &MockTestExecutionsClient{
-		GetFailedExecutionsFunc: func(context.Context, string, string, string, *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-			return nil, nil, forbidden
-		},
-	}
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{
-		BuildsClient:         buildsClient,
-		JobsClient:           jobsClient,
-		BuildkiteLogsClient:  logsClient,
-		AnnotationsClient:    annotationsClient,
-		TestExecutionsClient: testExecutionsClient,
+		BuildsClient:        buildsClient,
+		JobsClient:          jobsClient,
+		BuildkiteLogsClient: logsClient,
+		AnnotationsClient:   annotationsClient,
 	})
 
 	_, handler, _ := GetBuildFailureSummary()
@@ -1022,8 +752,6 @@ func TestGetBuildFailureSummaryPreservesPartialResultForForbiddenOptionalSection
 	require.Contains(t, summary.Jobs[0].LogError, forbidden.Message)
 	require.Len(t, summary.Warnings, 1)
 	require.Contains(t, summary.Warnings[0], forbidden.Message)
-	require.Len(t, summary.TestRuns, 1)
-	require.Contains(t, summary.TestRuns[0].Error, forbidden.Message)
 }
 
 func TestFailureSummaryOptionalLoadersPropagateUnauthorized(t *testing.T) {
@@ -1062,17 +790,6 @@ func TestFailureSummaryOptionalLoadersPropagateUnauthorized(t *testing.T) {
 		require.Empty(t, jobs[0].LogError)
 	})
 
-	t.Run("test executions", func(t *testing.T) {
-		client := &MockTestExecutionsClient{
-			GetFailedExecutionsFunc: func(context.Context, string, string, string, *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-				return nil, nil, unauthorized
-			},
-		}
-		runs := []buildkite.TestEngineRun{{ID: "run", Suite: buildkite.TestEngineSuite{Slug: "suite"}}}
-
-		_, _, _, err := loadFailureTestRuns(context.Background(), client, args, runs, 1, 1, 1)
-		require.ErrorIs(t, err, ErrUnauthorized)
-	})
 }
 
 func TestFailureSummaryOptionalLoadersPreserveOrdinaryErrors(t *testing.T) {
@@ -1086,17 +803,6 @@ func TestFailureSummaryOptionalLoadersPreserveOrdinaryErrors(t *testing.T) {
 	jobs := []FailureSummaryJob{{}}
 	require.NoError(t, loadFailureLogs(context.Background(), logsClient, args, []buildkite.Job{{ID: "job", State: "failed"}}, jobs, 1))
 	require.Contains(t, jobs[0].LogError, "logs unavailable")
-
-	testClient := &MockTestExecutionsClient{
-		GetFailedExecutionsFunc: func(context.Context, string, string, string, *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-			return nil, nil, errors.New("tests unavailable")
-		},
-	}
-	runs, _, failedTestsTruncated, err := loadFailureTestRuns(context.Background(), testClient, args, []buildkite.TestEngineRun{{ID: "run", Suite: buildkite.TestEngineSuite{Slug: "suite"}}}, 1, 1, 1)
-	require.NoError(t, err)
-	require.Contains(t, runs[0].Error, "tests unavailable")
-	require.True(t, runs[0].Truncated)
-	require.True(t, failedTestsTruncated)
 }
 
 func TestReadFailureLogTailBoundsEntryContent(t *testing.T) {
@@ -1132,16 +838,13 @@ func TestBoundFailureLogEntriesReportsPartialEntryTruncation(t *testing.T) {
 	require.LessOrEqual(t, len(entries[0].C), 5)
 }
 
-func TestApplyFailureSummaryContentLimitsBoundsAggregateAndExpandedFailures(t *testing.T) {
+func TestApplyFailureSummaryContentLimitsBoundsAggregateContent(t *testing.T) {
 	const jobs = 10
 	const entriesPerJob = 50
 	content := strings.Repeat("x", failureSummaryEntryContentByteLimit)
 	result := BuildFailureSummary{
 		Jobs:        make([]FailureSummaryJob, jobs),
 		Annotations: make([]FailureSummaryAnnotation, 20),
-		TestRuns: []FailureSummaryTestRun{{
-			FailedExecutions: make([]FailureSummaryFailedExecution, 10),
-		}},
 	}
 	for i := range result.Jobs {
 		result.Jobs[i].LogTail = make([]FailureSummaryLogEntry, entriesPerJob)
@@ -1151,14 +854,6 @@ func TestApplyFailureSummaryContentLimitsBoundsAggregateAndExpandedFailures(t *t
 	}
 	for i := range result.Annotations {
 		result.Annotations[i].BodyHTML = content
-	}
-	for i := range result.TestRuns[0].FailedExecutions {
-		execution := &result.TestRuns[0].FailedExecutions[i]
-		execution.FailureReason = content
-		execution.FailureExpanded = []buildkite.FailureExpanded{{
-			Backtrace: []string{content, content},
-			Expanded:  []string{content, content},
-		}}
 	}
 
 	applyFailureSummaryContentLimits(&result)
@@ -1174,37 +869,6 @@ func TestApplyFailureSummaryContentLimitsBoundsAggregateAndExpandedFailures(t *t
 		}
 	}
 	require.True(t, result.Annotations[len(result.Annotations)-1].BodyTruncated)
-	require.True(t, result.TestRuns[0].ContentTruncated)
-	for _, execution := range result.TestRuns[0].FailedExecutions {
-		require.True(t, execution.ContentTruncated)
-	}
-}
-
-func TestLimitFailureExpandedBoundsEmptyArrayStructure(t *testing.T) {
-	tests := map[string][]buildkite.FailureExpanded{
-		"failure expanded items": make([]buildkite.FailureExpanded, failureSummaryContentByteLimit),
-		"backtrace items": {{
-			Backtrace: make([]string, failureSummaryContentByteLimit),
-		}},
-		"expanded items": {{
-			Expanded: make([]string, failureSummaryContentByteLimit),
-		}},
-	}
-
-	for name, values := range tests {
-		t.Run(name, func(t *testing.T) {
-			entryRemaining := failureSummaryExecutionByteLimit
-			sectionRemaining := failureSummaryTestContentByteLimit
-			limited, truncated := limitFailureExpanded(values, &entryRemaining, &sectionRemaining)
-
-			require.True(t, truncated)
-			require.GreaterOrEqual(t, entryRemaining, 0)
-			require.GreaterOrEqual(t, sectionRemaining, 0)
-			payload, err := json.Marshal(limited)
-			require.NoError(t, err)
-			require.LessOrEqual(t, len(payload), failureSummaryExecutionByteLimit)
-		})
-	}
 }
 
 func TestLimitFailureSummaryLogCollectionsRetainsNewestRowsAndUpdatesMetadata(t *testing.T) {
@@ -1301,4 +965,298 @@ func TestLoadFailureAnnotationsStopsAtScanLimit(t *testing.T) {
 	require.Empty(t, annotations)
 	require.True(t, truncated)
 	require.Equal(t, failureSummaryAnnotationScanPages, pages)
+}
+
+func TestGetBuildFailureSummaryIncludesGenuinelyFailedTests(t *testing.T) {
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(_ context.Context, _, _, _ string, options *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			require.True(t, options.IncludeTestEngine)
+			return buildkite.Build{
+				ID:     "build-uuid",
+				Number: 42,
+				State:  "failed",
+				TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{
+					{ID: "run-1", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
+					{ID: "run-2", Suite: buildkite.TestEngineSuite{Slug: "suite-2"}},
+				}},
+			}, &buildkite.Response{}, nil
+		},
+	}
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			return buildkite.JobsList{}, &buildkite.Response{}, nil
+		},
+	}
+	buildTestsClient := &MockBuildTestsClient{
+		ListFunc: func(_ context.Context, org, buildUUID string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+			require.Equal(t, "org", org)
+			require.Equal(t, "build-uuid", buildUUID)
+			require.Equal(t, "result:^failed", opt.Tags)
+			require.Equal(t, defaultFailureSummaryFailedTests, opt.PerPage)
+			return []buildkite.TestWithMetrics{
+				{Test: buildkite.Test{ID: "test-a", Name: "a always fails"}},
+				{Test: buildkite.Test{ID: "test-b", Name: "b always fails"}},
+			}, &buildkite.Response{}, nil
+		},
+	}
+	older := buildkite.NewTimestamp(time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC))
+	newer := buildkite.NewTimestamp(time.Date(2026, 9, 10, 11, 0, 0, 0, time.UTC))
+	testExecutionsClient := &MockTestExecutionsClient{
+		GetFailedExecutionsFunc: func(_ context.Context, org, slug, runID string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+			require.Equal(t, "org", org)
+			require.Equal(t, failureSummaryRunExecutionsPageSize, opt.PerPage)
+			switch runID {
+			case "run-1":
+				require.Equal(t, "suite-1", slug)
+				return []buildkite.FailedExecution{
+					{TestID: "test-a", FailureReason: "older failure", CreatedAt: older},
+					{TestID: "test-rescued", FailureReason: "passed on retry", CreatedAt: older},
+				}, &buildkite.Response{}, nil
+			case "run-2":
+				require.Equal(t, "suite-2", slug)
+				return []buildkite.FailedExecution{
+					{TestID: "test-a", FailureReason: "newest failure", CreatedAt: newer},
+					{TestID: "test-b", FailureReason: "b failed", CreatedAt: older},
+				}, &buildkite.Response{}, nil
+			default:
+				return nil, nil, fmt.Errorf("unexpected run: %s", runID)
+			}
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient:         buildsClient,
+		JobsClient:           jobsClient,
+		BuildTestsClient:     buildTestsClient,
+		TestExecutionsClient: testExecutionsClient,
+	})
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42",
+	})
+	require.NoError(t, err)
+	require.False(t, callResult.IsError)
+
+	text := getTextResult(t, callResult).Text
+	var summary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(text), &summary))
+	require.Len(t, summary.FailedTests, 2)
+	require.False(t, summary.FailedTestsTruncated)
+	require.Empty(t, summary.Warnings)
+
+	require.Equal(t, "test-a", summary.FailedTests[0].ID)
+	require.Equal(t, "newest failure", summary.FailedTests[0].FailureReason)
+	require.Equal(t, "run-2", summary.FailedTests[0].RunID)
+	require.Equal(t, "suite-2", summary.FailedTests[0].TestSuiteSlug)
+
+	require.Equal(t, "test-b", summary.FailedTests[1].ID)
+	require.Equal(t, "b failed", summary.FailedTests[1].FailureReason)
+	require.NotContains(t, text, "test-rescued")
+}
+
+func TestGetBuildFailureSummarySkipsFailedTestsWithoutTestEngine(t *testing.T) {
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{ID: "build-uuid", Number: 42, State: "failed"}, &buildkite.Response{}, nil
+		},
+	}
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			return buildkite.JobsList{}, &buildkite.Response{}, nil
+		},
+	}
+	buildTestsClient := &MockBuildTestsClient{
+		ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+			require.Fail(t, "build tests must not be listed for builds without Test Engine data")
+			return nil, nil, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient:     buildsClient,
+		JobsClient:       jobsClient,
+		BuildTestsClient: buildTestsClient,
+	})
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42",
+	})
+	require.NoError(t, err)
+	require.False(t, callResult.IsError)
+	require.NotContains(t, getTextResult(t, callResult).Text, "failed_tests")
+}
+
+func TestGetBuildFailureSummaryFailedTestsForbiddenBecomesWarning(t *testing.T) {
+	forbidden := &buildkite.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: http.StatusForbidden,
+			Request: &http.Request{
+				Method: http.MethodGet,
+				URL:    &url.URL{Scheme: "https", Host: "api.buildkite.com"},
+			},
+		},
+		Message: "Your access token is missing the read_suites scope",
+	}
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+				ID:     "build-uuid",
+				Number: 42,
+				State:  "failed",
+				TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{
+					{ID: "run-1", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
+				}},
+			}, &buildkite.Response{}, nil
+		},
+	}
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			if options.State[0] == "failed" {
+				return buildkite.JobsList{Items: []buildkite.Job{{ID: "job", State: "failed"}}}, &buildkite.Response{}, nil
+			}
+			return buildkite.JobsList{}, &buildkite.Response{}, nil
+		},
+	}
+	buildTestsClient := &MockBuildTestsClient{
+		ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+			return nil, nil, forbidden
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient:     buildsClient,
+		JobsClient:       jobsClient,
+		BuildTestsClient: buildTestsClient,
+	})
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42",
+	})
+	require.NoError(t, err)
+	require.False(t, callResult.IsError)
+
+	var summary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
+	require.Len(t, summary.Jobs, 1)
+	require.Empty(t, summary.FailedTests)
+	require.Len(t, summary.Warnings, 1)
+	require.Contains(t, summary.Warnings[0], forbidden.Message)
+}
+
+func TestLoadFailureTestsPropagatesUnauthorized(t *testing.T) {
+	unauthorized := fmt.Errorf("wrapped API failure: %w", &buildkite.ErrorResponse{
+		Response: &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Request: &http.Request{
+				Method: http.MethodGet,
+				URL:    &url.URL{Scheme: "https", Host: "api.buildkite.com"},
+			},
+		},
+	})
+	args := GetBuildFailureSummaryArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1"}
+	build := buildkite.Build{
+		ID: "build-uuid",
+		TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{
+			{ID: "run-1", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
+		}},
+	}
+
+	t.Run("build tests list", func(t *testing.T) {
+		deps := ToolDependencies{
+			BuildTestsClient: &MockBuildTestsClient{
+				ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+					return nil, nil, unauthorized
+				},
+			},
+		}
+		_, _, _, err := loadFailureTests(context.Background(), deps, args, build, defaultFailureSummaryFailedTests, defaultFailureSummaryTestRuns)
+		require.ErrorIs(t, err, ErrUnauthorized)
+	})
+
+	t.Run("failed executions", func(t *testing.T) {
+		deps := ToolDependencies{
+			BuildTestsClient: &MockBuildTestsClient{
+				ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+					return []buildkite.TestWithMetrics{{Test: buildkite.Test{ID: "test-a"}}}, &buildkite.Response{}, nil
+				},
+			},
+			TestExecutionsClient: &MockTestExecutionsClient{
+				GetFailedExecutionsFunc: func(context.Context, string, string, string, *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+					return nil, nil, unauthorized
+				},
+			},
+		}
+		_, _, _, err := loadFailureTests(context.Background(), deps, args, build, defaultFailureSummaryFailedTests, defaultFailureSummaryTestRuns)
+		require.ErrorIs(t, err, ErrUnauthorized)
+	})
+}
+
+func TestLoadFailureTestsBoundsRunsAndReportsWarnings(t *testing.T) {
+	args := GetBuildFailureSummaryArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1"}
+	build := buildkite.Build{
+		ID: "build-uuid",
+		TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{
+			{ID: "run-1", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
+			{ID: "run-2", Suite: buildkite.TestEngineSuite{Slug: "suite-2"}},
+			{ID: "run-3", Suite: buildkite.TestEngineSuite{Slug: "suite-3"}},
+		}},
+	}
+	deps := ToolDependencies{
+		BuildTestsClient: &MockBuildTestsClient{
+			ListFunc: func(_ context.Context, _, _ string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+				require.Equal(t, 2, opt.PerPage)
+				return []buildkite.TestWithMetrics{
+					{Test: buildkite.Test{ID: "test-a"}},
+					{Test: buildkite.Test{ID: "test-b"}},
+				}, &buildkite.Response{NextPage: 2}, nil
+			},
+		},
+		TestExecutionsClient: &MockTestExecutionsClient{
+			GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, _ *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+				switch runID {
+				case "run-1":
+					return []buildkite.FailedExecution{{TestID: "test-a", FailureReason: "boom"}}, &buildkite.Response{}, nil
+				case "run-2":
+					return nil, nil, errors.New("executions endpoint unavailable")
+				default:
+					return nil, nil, fmt.Errorf("unexpected run scanned: %s", runID)
+				}
+			},
+		},
+	}
+
+	tests, truncated, warnings, err := loadFailureTests(context.Background(), deps, args, build, 2, 2)
+	require.NoError(t, err)
+	require.True(t, truncated)
+	require.Len(t, tests, 2)
+	require.Equal(t, "boom", tests[0].FailureReason)
+	require.Equal(t, "run-1", tests[0].RunID)
+	require.Empty(t, tests[1].FailureReason)
+	require.Len(t, warnings, 2)
+	require.Contains(t, warnings[0], "first 2 of 3 Test Engine runs")
+	require.Contains(t, warnings[1], "run-2")
+	require.Contains(t, warnings[1], "executions endpoint unavailable")
+}
+
+func TestApplyFailureSummaryContentLimitsBoundsFailedTestContent(t *testing.T) {
+	summary := &BuildFailureSummary{
+		FailedTests: []FailureSummaryFailedTest{{
+			TestWithMetrics: buildkite.TestWithMetrics{Test: buildkite.Test{
+				ID:   "test",
+				Name: strings.Repeat("n", 2*failureSummaryEntryContentByteLimit),
+			}},
+			FailureReason: strings.Repeat("r", 2*failureSummaryEntryContentByteLimit),
+			FailureExpanded: []buildkite.FailureExpanded{{
+				Backtrace: []string{strings.Repeat("b", 2*failureSummaryEntryContentByteLimit)},
+			}},
+		}},
+	}
+
+	applyFailureSummaryContentLimits(summary)
+
+	require.True(t, summary.ContentTruncated)
+	require.True(t, summary.FailedTests[0].ContentTruncated)
+	require.LessOrEqual(t, len(summary.FailedTests[0].FailureReason), failureSummaryEntryContentByteLimit)
+	require.LessOrEqual(t, len(summary.FailedTests[0].Name), failureSummaryEntryContentByteLimit)
+	require.LessOrEqual(t, len(summary.FailedTests[0].FailureExpanded[0].Backtrace[0]), failureSummaryEntryContentByteLimit)
 }
