@@ -3,6 +3,7 @@ package buildkite
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -36,6 +37,30 @@ const (
 	failureSummaryTestContentByteLimit   = 64 * 1024
 	failureSummaryContentByteLimit       = failureSummaryLogContentByteLimit + failureSummaryAnnotationContentLimit + failureSummaryTestContentByteLimit
 	failureSummaryConcurrency            = 4
+
+	// failureSummaryLogAnchorScanRows is how many rows from the end of a job
+	// log are scanned for the agent's failure marker. Only hook output (plugin
+	// post-command and pre-exit hooks, then the agent's own pre-exit hook)
+	// follows the marker, so the marker sits within this region whenever it
+	// exists. Parquet row groups are written in batches of 1000 rows, so the
+	// scan decodes at most one extra row group compared with a plain tail.
+	failureSummaryLogAnchorScanRows = 1000
+	// failureSummaryLogAnchorTrailingRows caps how many rows after the marker
+	// are kept. The agent prints "^^^ +++" and the hook error line right after
+	// the marker, then opens a new group for cleanup hooks; the window stops at
+	// that group boundary or at this cap, whichever comes first.
+	failureSummaryLogAnchorTrailingRows = 8
+	// failureSummaryLogErrorAnchorPrefix is what the agent's shell logger
+	// prints for Errorf (internal/shell/logger.go in buildkite/agent). The job
+	// executor calls Errorf right after the command exits non-zero and after a
+	// hook fails, so it marks the point where the failure was reported. The
+	// bare "^^^ +++" expansion marker is not used as a signal because the agent
+	// also prints it for non-fatal warnings such as ignored protected
+	// environment variables.
+	failureSummaryLogErrorAnchorPrefix = "🚨 Error:"
+
+	failureSummaryLogSelectionTail        = "tail"
+	failureSummaryLogSelectionErrorAnchor = "error_anchor"
 )
 
 // GetBuildFailureSummaryArgs controls the amount of diagnostic context returned
@@ -46,14 +71,14 @@ type GetBuildFailureSummaryArgs struct {
 	OrgSlug                string `json:"org_slug"`
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`
-	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200)"`
+	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200). When the agent's failure marker is found near the end of the log the window ends just after that marker, skipping cleanup-hook output; otherwise it is the last lines of the log (see each job's log_selection)"`
 	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum terminal problem or downstream-failed jobs to return (default 10, server may enforce a lower maximum, absolute max 50)"`
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to inspect (default 5, max 20)"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed test executions to return across all Test Engine runs (default 100, max 200)"`
 	MaxFailedTestsPerRun   int    `json:"max_failed_tests_per_run,omitempty" jsonschema:"Maximum failed test executions to return per Test Engine run (default 20, max 100)"`
 	ContentLimitBytes      int    `json:"content_limit_bytes,omitempty" jsonschema:"Maximum bytes for the response payload (default and max 262144); lower it to fit clients with small tool-result limits, combining with log_tail and max_jobs for finer trimming"`
-	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed, timed-out, canceled, and promised-failing jobs (default true)"`
+	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log window (anchored on the agent's failure marker when present, otherwise the log tail) for failed, timed-out, canceled, and promised-failing jobs (default true)"`
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include failed Test Engine executions when the build has Test Engine runs (default true)"`
 	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded test failure details such as stack traces within the summary's bounded test-content budget"`
@@ -90,11 +115,21 @@ type FailureSummaryJob struct {
 	PromisedExitStatusAt *buildkite.Timestamp     `json:"promised_exit_status_at,omitempty"`
 	ExpiredAt            *buildkite.Timestamp     `json:"expired_at,omitempty"`
 	LogTail              []FailureSummaryLogEntry `json:"log_tail,omitempty"`
-	LogTotalRows         int64                    `json:"log_total_rows,omitempty"`
-	LogTruncated         bool                     `json:"log_truncated,omitempty"`
-	LogContentTruncated  bool                     `json:"log_content_truncated,omitempty"`
-	LogEntriesOmitted    int                      `json:"log_entries_omitted,omitempty"`
-	LogError             string                   `json:"log_error,omitempty"`
+	// LogSelection says how LogTail was chosen: "error_anchor" when the window
+	// ends just after the agent's failure marker, "tail" when it is the last
+	// rows of the log.
+	LogSelection string `json:"log_selection,omitempty"`
+	// LogAnchorRN is the row number of the agent's failure marker when
+	// LogSelection is "error_anchor".
+	LogAnchorRN *int64 `json:"log_anchor_rn,omitempty"`
+	// LogAnchorGroup is the log group (section header) the failure marker was
+	// printed under, so the failing section can be named without reading rows.
+	LogAnchorGroup      string `json:"log_anchor_group,omitempty"`
+	LogTotalRows        int64  `json:"log_total_rows,omitempty"`
+	LogTruncated        bool   `json:"log_truncated,omitempty"`
+	LogContentTruncated bool   `json:"log_content_truncated,omitempty"`
+	LogEntriesOmitted   int    `json:"log_entries_omitted,omitempty"`
+	LogError            string `json:"log_error,omitempty"`
 }
 
 type FailureSummaryAnnotation struct {
@@ -292,7 +327,34 @@ func loadFailureAnnotations(ctx context.Context, client AnnotationsClient, args 
 	return results, true, nil
 }
 
-func readFailureLogTail(ctx context.Context, client BuildkiteLogsClient, args GetBuildFailureSummaryArgs, job buildkite.Job, tail int) ([]FailureSummaryLogEntry, int64, bool, bool, int, error) {
+// failureLogWindow is the slice of one job's log that the summary returns,
+// plus the metadata that says how the slice was chosen.
+type failureLogWindow struct {
+	Entries          []FailureSummaryLogEntry
+	TotalRows        int64
+	Truncated        bool
+	ContentTruncated bool
+	Omitted          int
+	Selection        string
+	AnchorRN         *int64
+	AnchorGroup      string
+}
+
+// scannedLogEntry is a log row read during the anchor scan, keeping the
+// group and boundary information needed to place the window.
+type scannedLogEntry struct {
+	FailureSummaryLogEntry
+	group    string
+	boundary bool
+}
+
+// readFailureLogWindow returns up to tail rows of a job log. When the agent's
+// failure marker is found in the last failureSummaryLogAnchorScanRows rows,
+// the window ends just after the marker so it shows the output that led to
+// the failure instead of the cleanup-hook output that follows it. When no
+// marker is found (timeouts, cancellations, lost agents, logs from other
+// tooling) the window is the plain tail of the log.
+func readFailureLogWindow(ctx context.Context, client BuildkiteLogsClient, args GetBuildFailureSummaryArgs, job buildkite.Job, tail int) (failureLogWindow, error) {
 	reader, err := newParquetReader(ctx, client, JobLogsBaseParams{
 		OrgSlug:      args.OrgSlug,
 		PipelineSlug: args.PipelineSlug,
@@ -300,31 +362,91 @@ func readFailureLogTail(ctx context.Context, client BuildkiteLogsClient, args Ge
 		JobID:        job.ID,
 	})
 	if err != nil {
-		return nil, 0, false, false, 0, err
+		return failureLogWindow{}, err
 	}
 	defer reader.Close()
 
 	fileInfo, err := reader.GetFileInfo()
 	if err != nil {
-		return nil, 0, false, false, 0, fmt.Errorf("get log file info: %w", err)
+		return failureLogWindow{}, fmt.Errorf("get log file info: %w", err)
 	}
 
-	startRow := max(fileInfo.RowCount-int64(tail), 0)
-	entries := make([]FailureSummaryLogEntry, 0, min(int(fileInfo.RowCount-startRow), tail))
-	contentTruncated := false
-	for entry, readErr := range reader.SeekToRow(ctx, startRow) {
+	window := failureLogWindow{TotalRows: fileInfo.RowCount, Selection: failureSummaryLogSelectionTail}
+
+	scanStart := max(fileInfo.RowCount-int64(failureSummaryLogAnchorScanRows), 0)
+	scanned := make([]scannedLogEntry, 0, min(int(fileInfo.RowCount-scanStart), failureSummaryLogAnchorScanRows))
+	for entry, readErr := range reader.SeekToRow(ctx, scanStart) {
 		if readErr != nil {
-			return nil, fileInfo.RowCount, startRow > 0, contentTruncated, 0, fmt.Errorf("read log tail: %w", readErr)
+			return failureLogWindow{}, fmt.Errorf("read log tail: %w", readErr)
 		}
 		terse := toTerseEntry(entry)
 		var entryContentTruncated bool
 		terse.C, entryContentTruncated = truncateUTF8Bytes(terse.C, failureSummaryEntryContentByteLimit)
-		entries = append(entries, FailureSummaryLogEntry{TerseLogEntry: terse, ContentTruncated: entryContentTruncated})
-		contentTruncated = contentTruncated || entryContentTruncated
+		scanned = append(scanned, scannedLogEntry{
+			FailureSummaryLogEntry: FailureSummaryLogEntry{TerseLogEntry: terse, ContentTruncated: entryContentTruncated},
+			group:                  entry.CleanGroup(true),
+			boundary:               isFailureLogGroupBoundary(terse.C),
+		})
 	}
 
-	entries, omitted, jobTruncated := boundFailureLogEntries(entries, failureSummaryLogJobContentByteLimit)
-	return entries, fileInfo.RowCount, startRow > 0, contentTruncated || jobTruncated, omitted, nil
+	end := len(scanned)
+	if anchor := findFailureLogAnchor(scanned); anchor >= 0 {
+		anchorRN := scanned[anchor].RN
+		window.Selection = failureSummaryLogSelectionErrorAnchor
+		window.AnchorRN = &anchorRN
+		window.AnchorGroup = scanned[anchor].group
+		end = failureLogWindowEnd(scanned, anchor)
+	}
+	start := max(end-tail, 0)
+	window.Truncated = scanStart+int64(start) > 0
+
+	entries := make([]FailureSummaryLogEntry, 0, end-start)
+	for _, row := range scanned[start:end] {
+		entries = append(entries, row.FailureSummaryLogEntry)
+		window.ContentTruncated = window.ContentTruncated || row.ContentTruncated
+	}
+
+	var jobTruncated bool
+	window.Entries, window.Omitted, jobTruncated = boundFailureLogEntries(entries, failureSummaryLogJobContentByteLimit)
+	window.ContentTruncated = window.ContentTruncated || jobTruncated
+	return window, nil
+}
+
+// findFailureLogAnchor returns the index of the first row printed by the
+// agent's Errorf, or -1. The first marker is used rather than the last: when
+// a command fails, post-command and pre-exit hooks may fail too and print
+// their own markers, and the earliest one is the root cause the reader wants.
+func findFailureLogAnchor(scanned []scannedLogEntry) int {
+	for i, row := range scanned {
+		if strings.HasPrefix(row.C, failureSummaryLogErrorAnchorPrefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+// failureLogWindowEnd returns the exclusive end index of a window anchored at
+// the given row: the marker itself, then following rows up to the cap, and
+// never past the next group boundary where cleanup hooks begin.
+func failureLogWindowEnd(scanned []scannedLogEntry, anchor int) int {
+	end := anchor + 1
+	limit := min(len(scanned), anchor+1+failureSummaryLogAnchorTrailingRows)
+	for end < limit && !scanned[end].boundary {
+		end++
+	}
+	return end
+}
+
+// isFailureLogGroupBoundary reports whether a cleaned log line opens a new
+// group. The agent's hooks print "~~~ name" headers, and the docker-compose
+// plugin and others print a bare "~~~" before running a hook script.
+func isFailureLogGroupBoundary(content string) bool {
+	for _, marker := range []string{"~~~", "---", "+++"} {
+		if content == marker || strings.HasPrefix(content, marker+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 func boundFailureLogEntries(entries []FailureSummaryLogEntry, limit int) ([]FailureSummaryLogEntry, int, bool) {
@@ -369,7 +491,7 @@ func loadFailureLogs(ctx context.Context, client BuildkiteLogsClient, args GetBu
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			entries, totalRows, truncated, contentTruncated, omitted, err := readFailureLogTail(ctx, client, args, sourceJobs[index], tail)
+			window, err := readFailureLogWindow(ctx, client, args, sourceJobs[index], tail)
 			if err != nil {
 				if isBuildkiteUnauthorized(err) {
 					unauthorized <- ErrUnauthorized
@@ -378,11 +500,14 @@ func loadFailureLogs(ctx context.Context, client BuildkiteLogsClient, args GetBu
 				jobs[index].LogError = err.Error()
 				return
 			}
-			jobs[index].LogTail = entries
-			jobs[index].LogTotalRows = totalRows
-			jobs[index].LogTruncated = truncated
-			jobs[index].LogContentTruncated = contentTruncated
-			jobs[index].LogEntriesOmitted = omitted
+			jobs[index].LogTail = window.Entries
+			jobs[index].LogSelection = window.Selection
+			jobs[index].LogAnchorRN = window.AnchorRN
+			jobs[index].LogAnchorGroup = window.AnchorGroup
+			jobs[index].LogTotalRows = window.TotalRows
+			jobs[index].LogTruncated = window.Truncated
+			jobs[index].LogContentTruncated = window.ContentTruncated
+			jobs[index].LogEntriesOmitted = window.Omitted
 		}(i)
 	}
 
@@ -847,7 +972,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Each job's log_tail is a window that ends just after the agent's failure marker when one is found (log_selection \"error_anchor\", with log_anchor_rn and log_anchor_group naming the failing section), so it shows the output that led to the failure rather than the cleanup output that follows; otherwise it is the last lines of the log (log_selection \"tail\"). Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
