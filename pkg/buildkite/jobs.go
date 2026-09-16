@@ -54,6 +54,7 @@ type JobSummary struct {
 	ExitStatus   *int                      `json:"exit_status"`
 	SoftFailed   bool                      `json:"soft_failed,omitempty"`
 	SignalReason string                    `json:"signal_reason,omitempty"`
+	BrokenReason string                    `json:"broken_reason,omitempty"`
 	StepKey      string                    `json:"step_key,omitempty"`
 	StepID       string                    `json:"step_id,omitempty"`
 	RetriesCount int                       `json:"retries_count,omitempty"`
@@ -98,6 +99,7 @@ func summarizeJob(job buildkite.Job) JobSummary {
 		ExitStatus:   job.ExitStatus,
 		SoftFailed:   job.SoftFailed,
 		SignalReason: job.SignalReason,
+		BrokenReason: job.BrokenReason,
 		StepKey:      job.StepKey,
 		StepID:       stepID,
 		RetriesCount: job.RetriesCount,

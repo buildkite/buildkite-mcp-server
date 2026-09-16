@@ -74,8 +74,12 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 				require.Equal(t, []string{"canceled"}, options.State)
 				require.Equal(t, defaultFailureSummaryJobs-1, options.PerPage)
 				return buildkite.JobsList{}, &buildkite.Response{}, nil
+			case "waiting_failed":
+				require.Equal(t, []string{"waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
+				require.Equal(t, defaultFailureSummaryJobs-1, options.PerPage)
+				return buildkite.JobsList{}, &buildkite.Response{}, nil
 			case "broken":
-				require.Equal(t, []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
+				require.Equal(t, []string{"broken"}, options.State)
 				require.Equal(t, defaultFailureSummaryJobs-1, options.PerPage)
 				return buildkite.JobsList{Items: []buildkite.Job{
 					{ID: "job-broken", Name: "deploy", State: "broken"},
@@ -153,11 +157,13 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	require.NotNil(t, summary.Build.JobStateCounts)
 	require.Equal(t, 5, summary.Build.JobStateCounts.Total)
 	require.Equal(t, map[string]int{"passed": 2, "failed": 1, "running": 1, "broken": 1}, summary.Build.JobStateCounts.States)
+	require.Contains(t, text, `"truncated": false`)
 	require.Len(t, summary.Jobs, 3)
 	require.False(t, summary.JobsTruncated)
 
 	require.Equal(t, "job-failed", summary.Jobs[0].ID)
-	require.Equal(t, int64(3), summary.Jobs[0].LogTotalRows)
+	require.NotNil(t, summary.Jobs[0].LogTotalRows)
+	require.Equal(t, int64(3), *summary.Jobs[0].LogTotalRows)
 	require.True(t, summary.Jobs[0].LogTruncated)
 	require.Equal(t, []string{"compile error", "build failed"}, []string{summary.Jobs[0].LogTail[0].C, summary.Jobs[0].LogTail[1].C})
 
@@ -227,8 +233,12 @@ func TestGetBuildFailureSummaryPrioritizesFailuresAndCanceledJobsBeforeDownstrea
 				require.Equal(t, []string{"canceled"}, options.State)
 				require.Equal(t, 2, options.PerPage)
 				return buildkite.JobsList{Items: []buildkite.Job{{ID: "canceled", State: "canceled"}}}, &buildkite.Response{}, nil
+			case "waiting_failed":
+				require.Equal(t, []string{"waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
+				require.Equal(t, 1, options.PerPage)
+				return buildkite.JobsList{}, &buildkite.Response{}, nil
 			case "broken":
-				require.Equal(t, []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
+				require.Equal(t, []string{"broken"}, options.State)
 				require.Equal(t, 1, options.PerPage)
 				return buildkite.JobsList{Items: []buildkite.Job{
 					{ID: "broken-1", State: "broken"},
@@ -327,7 +337,7 @@ func TestGetBuildFailureSummaryIncludesTimedOutJobAndLog(t *testing.T) {
 			case "failed":
 				require.Equal(t, []string{"failed", "timed_out", "expired"}, options.State)
 				return buildkite.JobsList{Items: []buildkite.Job{{ID: "timed-out", State: "timed_out"}}}, &buildkite.Response{}, nil
-			case "canceled", "broken":
+			case "canceled", "waiting_failed", "broken":
 				return buildkite.JobsList{}, &buildkite.Response{}, nil
 			default:
 				return buildkite.JobsList{}, nil, fmt.Errorf("unexpected job states: %v", options.State)
@@ -375,9 +385,12 @@ func TestGetBuildFailureSummaryIncludesExpiredAndDownstreamFailedJobsWithoutLogs
 			case "canceled":
 				require.Equal(t, []string{"canceled"}, options.State)
 				return buildkite.JobsList{}, &buildkite.Response{}, nil
-			case "broken":
-				require.Equal(t, []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
+			case "waiting_failed":
+				require.Equal(t, []string{"waiting_failed", "blocked_failed", "unblocked_failed"}, options.State)
 				return buildkite.JobsList{Items: []buildkite.Job{{ID: "waiting", State: "waiting_failed"}}}, &buildkite.Response{}, nil
+			case "broken":
+				require.Equal(t, []string{"broken"}, options.State)
+				return buildkite.JobsList{}, &buildkite.Response{}, nil
 			default:
 				return buildkite.JobsList{}, nil, fmt.Errorf("unexpected job states: %v", options.State)
 			}
