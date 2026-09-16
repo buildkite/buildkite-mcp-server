@@ -47,7 +47,7 @@ type GetBuildFailureSummaryArgs struct {
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`
 	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200)"`
-	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum problem jobs to return, filled in priority order: failed, timed-out and expired jobs first, then canceled, then jobs stopped by a failed dependency (waiting_failed, blocked_failed, unblocked_failed), then broken jobs that pipeline configuration excluded (default 10, server may enforce a lower maximum, absolute max 50)"`
+	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum problem jobs to return, filled in priority order: failed, timed-out and expired jobs first, then canceled; when include_non_primary_failure_jobs is true, then jobs stopped by a failed dependency (waiting_failed, blocked_failed, unblocked_failed), then broken jobs that pipeline configuration excluded (default 10, server may enforce a lower maximum, absolute max 50)"`
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to inspect (default 5, max 20)"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed test executions to return across all Test Engine runs (default 100, max 200)"`
@@ -57,6 +57,7 @@ type GetBuildFailureSummaryArgs struct {
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include failed Test Engine executions when the build has Test Engine runs (default true)"`
 	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded test failure details such as stack traces within the summary's bounded test-content budget"`
+	IncludeNonPrimaryJobs  bool   `json:"include_non_primary_failure_jobs,omitempty" jsonschema:"Also list jobs that never ran: waiting_failed, blocked_failed and unblocked_failed (stopped by a failed dependency) and broken (excluded by pipeline configuration). They have no log and never explain why a build failed; job_state_counts tallies them either way. Default false"`
 }
 
 // FailureSummaryJobStateCounts wraps buildkite.JobStateCounts and adds
@@ -867,7 +868,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and only when include_non_primary_failure_jobs is true the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
@@ -942,7 +943,10 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		// order. Canceled jobs ran and may have logs. The *_failed states exist
 		// only because a dependency failed, so they are evidence of the failure.
 		// Broken jobs were excluded by pipeline configuration when the build was
-		// created; they are routine in passing builds and go last.
+		// created; they are routine in passing builds and go last. Neither of the
+		// never-ran tiers is fetched unless asked for, so jobs_truncated only ever
+		// describes tiers that were actually fetched; job_state_counts still
+		// tallies the states that were skipped.
 		appendJobsInStates := func(states []string, keep func(buildkite.Job) bool) error {
 			remainingJobs := maxJobs - len(sourceJobs)
 			if remainingJobs <= 0 && jobsTruncated {
@@ -972,11 +976,13 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		if listErr := appendJobsInStates([]string{"canceled"}, isCanceledFailureSummaryJob); listErr != nil {
 			return handleBuildkiteError(listErr)
 		}
-		if listErr := appendJobsInStates([]string{"waiting_failed", "blocked_failed", "unblocked_failed"}, isDependencyFailedFailureSummaryJob); listErr != nil {
-			return handleBuildkiteError(listErr)
-		}
-		if listErr := appendJobsInStates([]string{"broken"}, isBrokenFailureSummaryJob); listErr != nil {
-			return handleBuildkiteError(listErr)
+		if args.IncludeNonPrimaryJobs {
+			if listErr := appendJobsInStates([]string{"waiting_failed", "blocked_failed", "unblocked_failed"}, isDependencyFailedFailureSummaryJob); listErr != nil {
+				return handleBuildkiteError(listErr)
+			}
+			if listErr := appendJobsInStates([]string{"broken"}, isBrokenFailureSummaryJob); listErr != nil {
+				return handleBuildkiteError(listErr)
+			}
 		}
 		result.Jobs = make([]FailureSummaryJob, len(sourceJobs))
 		for i, job := range sourceJobs {
