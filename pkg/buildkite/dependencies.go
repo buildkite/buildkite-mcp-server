@@ -31,6 +31,7 @@ type ToolDependencies struct {
 	TestSuitesClient        TestSuitesClient
 	TestExecutionsClient    TestExecutionsClient
 	ExecutionTraceClient    ExecutionTraceClient
+	SlowestExecutionsClient SlowestExecutionsClient
 	TestsClient             TestsClient
 	BuildTestsClient        BuildTestsClient
 	BuildkiteLogsClient     BuildkiteLogsClient

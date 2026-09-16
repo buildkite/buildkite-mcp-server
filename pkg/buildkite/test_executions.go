@@ -17,11 +17,55 @@ type ExecutionTraceClient interface {
 	GetTrace(ctx context.Context, org, slug, executionID string, opt *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error)
 }
 
+type SlowestExecutionsClient interface {
+	ListSlowestByBuild(ctx context.Context, org, buildUUID string, opt *buildkite.SlowestExecutionsOptions) ([]buildkite.BuildExecution, *buildkite.Response, error)
+}
+
 type ReadExecutionTraceArgs struct {
 	ToolInput
 	OrgSlug       string `json:"org_slug"`
 	TestSuiteSlug string `json:"test_suite_slug"`
 	ExecutionID   string `json:"execution_id"`
+}
+
+type SlowestExecutionsForBuildArgs struct {
+	ToolInput
+	OrgSlug   string `json:"org_slug"`
+	BuildUUID string `json:"build_uuid" jsonschema:"Buildkite build UUID. This is the build ID, not the pipeline build number."`
+	Limit     int    `json:"limit,omitempty" jsonschema:"Maximum number of executions to return. Defaults to 20 and is capped by the organization's slowest executions quota."`
+}
+
+func SlowestExecutionsForBuild() (mcp.Tool, mcp.ToolHandlerFor[SlowestExecutionsForBuildArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "slowest_executions_for_build",
+			Description: "List the slowest test executions for a Buildkite build across every visible Test Engine suite, slowest first. Returns the identifiers needed by read_execution_trace and whether each execution has a trace.",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "Slowest Executions for Build",
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args SlowestExecutionsForBuildArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.SlowestExecutionsForBuild")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("build_uuid", args.BuildUUID),
+				attribute.Int("limit", args.Limit),
+			)
+
+			deps := DepsFromContext(ctx)
+			executions, _, err := deps.SlowestExecutionsClient.ListSlowestByBuild(ctx, args.OrgSlug, args.BuildUUID, &buildkite.SlowestExecutionsOptions{
+				Limit: args.Limit,
+			})
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			span.SetAttributes(attribute.Int("item_count", len(executions)))
+
+			return mcpTextResult(span, &executions)
+		}, []string{"read_suites"}
 }
 
 func ReadExecutionTrace() (mcp.Tool, mcp.ToolHandlerFor[ReadExecutionTraceArgs, any], []string) {

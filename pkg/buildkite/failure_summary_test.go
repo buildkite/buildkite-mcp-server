@@ -817,7 +817,7 @@ func TestFailureSummaryOptionalLoadersPreserveOrdinaryErrors(t *testing.T) {
 	require.Contains(t, jobs[0].LogError, "logs unavailable")
 }
 
-func TestReadFailureLogTailBoundsEntryContent(t *testing.T) {
+func TestReadFailureLogWindowBoundsEntryContent(t *testing.T) {
 	logPath := t.TempDir() + "/large.parquet"
 	writeTestParquetFile(t, logPath, []string{strings.Repeat("é", failureSummaryEntryContentByteLimit)})
 	client := &MockBuildkiteLogsClient{
@@ -826,16 +826,17 @@ func TestReadFailureLogTailBoundsEntryContent(t *testing.T) {
 		},
 	}
 
-	entries, _, _, contentTruncated, _, err := readFailureLogTail(context.Background(), client, GetBuildFailureSummaryArgs{
+	window, err := readFailureLogWindow(context.Background(), client, GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
 	}, buildkite.Job{ID: "job"}, 1)
 
 	require.NoError(t, err)
-	require.Len(t, entries, 1)
-	require.LessOrEqual(t, len(entries[0].C), failureSummaryEntryContentByteLimit)
-	require.True(t, entries[0].ContentTruncated)
-	require.True(t, contentTruncated)
-	require.True(t, utf8.ValidString(entries[0].C))
+	require.Len(t, window.Entries, 1)
+	require.LessOrEqual(t, len(window.Entries[0].C), failureSummaryEntryContentByteLimit)
+	require.True(t, window.Entries[0].ContentTruncated)
+	require.True(t, window.ContentTruncated)
+	require.True(t, utf8.ValidString(window.Entries[0].C))
+	require.Equal(t, failureSummaryLogSelectionTail, window.Selection)
 }
 
 func TestBoundFailureLogEntriesReportsPartialEntryTruncation(t *testing.T) {
