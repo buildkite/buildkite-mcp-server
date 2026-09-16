@@ -55,3 +55,51 @@ func TestGetBuildFailureSummaryOmitsNeverRanJobsByDefault(t *testing.T) {
 	require.NotNil(t, summary.Build.JobStateCounts)
 	require.Equal(t, 153, summary.Build.JobStateCounts.States["broken"], "the census still reports the skipped states")
 }
+
+// A further page of primary failures must keep jobs_truncated true even when
+// client-side filtering leaves the returned list shorter than max_jobs.
+func TestGetBuildFailureSummaryPrimaryPageWithMoreOutranksShortJobList(t *testing.T) {
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{Number: 1, State: "failing"}, &buildkite.Response{}, nil
+		},
+	}
+	softPromise := 0
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			switch options.State[0] {
+			case "failed":
+				require.Equal(t, 4, options.PerPage)
+				return buildkite.JobsList{
+					Items: []buildkite.Job{
+						{ID: "failed-1", State: "failed"},
+						{ID: "running-soft-1", State: "running", PromisedExitStatus: &softPromise},
+						{ID: "failed-2", State: "failed"},
+						{ID: "running-soft-2", State: "running", PromisedExitStatus: &softPromise},
+					},
+					Links: buildkite.JobsListLinks{Next: "https://api.buildkite.com/v2/...?after=page-2"},
+				}, &buildkite.Response{}, nil
+			case "canceled":
+				return buildkite.JobsList{}, &buildkite.Response{}, nil
+			default:
+				require.Failf(t, "unexpected job list", "never-ran states must not be fetched by default, got %v", options.State)
+				return buildkite.JobsList{}, nil, nil
+			}
+		},
+	}
+	include := false
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: buildsClient, JobsClient: jobsClient})
+
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 3,
+		IncludeLogs: &include, IncludeAnnotations: &include, IncludeFailedTests: &include,
+	})
+	require.NoError(t, err)
+
+	var summary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
+	require.Equal(t, []string{"failed-1", "failed-2"}, []string{summary.Jobs[0].ID, summary.Jobs[1].ID})
+	require.Less(t, len(summary.Jobs), 3)
+	require.True(t, summary.JobsTruncated, "a further page of primary failures outranks a short job list")
+}
