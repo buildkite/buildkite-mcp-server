@@ -1452,6 +1452,7 @@ func TestLoadFailureJobTestsBudgetExhaustedJobStaysFound(t *testing.T) {
 	require.Empty(t, jobs[1].FailedTests)
 	require.Equal(t, fmt.Sprintf(failedTestsHintBudgetExhausted, "job-second"), jobs[1].FailedTestsHint)
 	require.NotContains(t, jobs[1].FailedTestsHint, "outside its tests")
+	require.Contains(t, jobs[1].FailedTestsHint, `state "enabled"`, "the manual retry must carry the same muted-test exclusion")
 }
 
 func TestTestSuiteSlugFromURL(t *testing.T) {

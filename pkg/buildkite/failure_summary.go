@@ -146,7 +146,7 @@ const (
 	failedTestsHintUnavailable      = "The failed-test lookup failed for this job; test results may exist. Diagnose from log_tail. A 403 means the token lacks the read_suites scope."
 	// failedTestsHintBudgetExhausted takes the job ID; it rides on a found
 	// job whose entries were all displaced by earlier jobs' entries.
-	failedTestsHintBudgetExhausted = "This job has failed tests, but max_failed_tests was used up by earlier jobs so none are listed here. Raise max_failed_tests, or call list_tests_for_build with tags \"build.job_id:%s,result:^failed\"."
+	failedTestsHintBudgetExhausted = "This job has failed tests, but max_failed_tests was used up by earlier jobs so none are listed here. Raise max_failed_tests, or call list_tests_for_build with state \"enabled\" and tags \"build.job_id:%s,result:^failed\" (the state filter keeps muted tests out, as this summary does)."
 )
 
 const (
