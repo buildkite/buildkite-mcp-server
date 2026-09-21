@@ -1461,6 +1461,90 @@ func TestTestSuiteSlugFromURL(t *testing.T) {
 	require.Empty(t, testSuiteSlugFromURL(""))
 }
 
+func TestLimitJSONValueFlagsTruncatedFailedTestEntries(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	root := map[string]any{
+		"jobs": []any{map[string]any{
+			"failed_tests": []any{
+				map[string]any{"test_id": "cut-reason", "failure_reason": long},
+				map[string]any{"test_id": "cut-expanded", "failure_expanded": []any{map[string]any{"expanded": []any{long}}}},
+				map[string]any{"test_id": "intact", "failure_reason": "short"},
+			},
+		}},
+	}
+
+	limitedValue, truncated := limitJSONValue(root, 16, "")
+	require.True(t, truncated)
+	entries := limitedValue.(map[string]any)["jobs"].([]any)[0].(map[string]any)["failed_tests"].([]any)
+
+	cutReason := entries[0].(map[string]any)
+	require.Len(t, cutReason["failure_reason"], 16)
+	require.Equal(t, true, cutReason["content_truncated"], "a shortened failure_reason must be flagged on its entry")
+
+	cutExpanded := entries[1].(map[string]any)
+	require.Equal(t, true, cutExpanded["content_truncated"], "a shortened expanded line must be flagged on its entry")
+
+	intact := entries[2].(map[string]any)
+	require.NotContains(t, intact, "content_truncated")
+}
+
+func TestGetBuildFailureSummaryLoweredContentLimitFlagsTruncatedFailedTest(t *testing.T) {
+	reason := strings.Repeat("assertion detail ", 200)
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return failureSummaryTestBuild(true), &buildkite.Response{}, nil
+		},
+	}
+	buildTestsClient := &MockBuildTestsClient{
+		ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+			return []buildkite.TestWithMetrics{
+				{Test: buildkite.Test{ID: "test-a", Name: "a", URL: "https://api.buildkite.com/v2/analytics/organizations/org/suites/suite-1/tests/test-a"}},
+			}, &buildkite.Response{}, nil
+		},
+	}
+	executionsClient := &MockTestExecutionsClient{
+		GetFailedExecutionsFunc: func(context.Context, string, string, string, *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+			return []buildkite.FailedExecution{{TestID: "test-a", FailureReason: reason}}, &buildkite.Response{}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient:         buildsClient,
+		JobsClient:           failureSummaryTestJobsClient("job-failed"),
+		BuildTestsClient:     buildTestsClient,
+		TestExecutionsClient: executionsClient,
+		TestRunsClient:       finishedTestRunsClient(t),
+	})
+	_, handler, _ := GetBuildFailureSummary()
+	noLogs := false
+
+	full, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42", IncludeLogs: &noLogs,
+	})
+	require.NoError(t, err)
+	var fullSummary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, full).Text), &fullSummary))
+	require.Len(t, fullSummary.Jobs[0].FailedTests, 1)
+	require.Equal(t, reason, fullSummary.Jobs[0].FailedTests[0].FailureReason)
+	require.False(t, fullSummary.Jobs[0].FailedTests[0].ContentTruncated)
+
+	requested := len(getTextResult(t, full).Text) - 1024
+	lowered, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42", IncludeLogs: &noLogs, ContentLimitBytes: requested,
+	})
+	require.NoError(t, err)
+	text := getTextResult(t, lowered).Text
+	require.LessOrEqual(t, len(text), requested)
+
+	var summary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(text), &summary))
+	require.True(t, summary.ContentTruncated)
+	require.Len(t, summary.Jobs[0].FailedTests, 1, "the entry should be shortened, not dropped")
+	entry := summary.Jobs[0].FailedTests[0]
+	require.Less(t, len(entry.FailureReason), len(reason))
+	require.True(t, entry.ContentTruncated, "a failure_reason cut by content_limit_bytes must be flagged")
+}
+
 func TestApplyFailureSummaryContentLimitsBoundsFailedTestContent(t *testing.T) {
 	summary := &BuildFailureSummary{
 		Jobs: []FailureSummaryJob{{
