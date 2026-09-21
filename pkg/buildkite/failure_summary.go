@@ -140,7 +140,7 @@ const (
 // deliberately absent from a complete found list, where the data speaks for
 // itself.
 const (
-	failedTestsHintNoneRecorded     = "No terminally failed tests are recorded for this job; it likely failed outside its tests (setup, infrastructure, timeout) or never uploaded results. Diagnose from log_tail; do not conclude its tests passed."
+	failedTestsHintNoneRecorded     = "No terminally failed enabled tests are recorded for this job; it likely failed outside its tests (setup, infrastructure, timeout), never uploaded results, or only muted tests failed. Diagnose from log_tail; do not conclude its tests passed."
 	failedTestsHintIngestionPending = "Test results are still being ingested; this list may be empty or incomplete right now. Diagnose from log_tail and re-call this tool after the build settles."
 	failedTestsHintIngestionPartial = "Test results are still being ingested; more failed tests may appear."
 	failedTestsHintUnavailable      = "The failed-test lookup failed for this job; test results may exist. Diagnose from log_tail. A 403 means the token lacks the read_suites scope."
@@ -503,8 +503,10 @@ func failureSummaryTestsIngestionSettled(ctx context.Context, client TestRunsCli
 
 // loadFailureJobTests fills the failed-test fields of each terminal failed or
 // timed-out job. Membership comes from one build tests query per anchor job,
-// scoped by the automatic build.job_id execution tag plus the result:^failed
-// operator: only tests whose every execution within that job failed. Job-level
+// scoped by the automatic build.job_id execution tag, the result:^failed
+// operator, and the enabled test state: only enabled tests whose every
+// execution within that job failed. Muted tests are excluded because Test
+// Engine soft-fails them, so they cannot be a build-failure cause. Job-level
 // retries never enter (retried jobs are not anchors) and in-job framework
 // retries are excluded by ^failed, whose per-job scope is lag-safe because a
 // job's attempts arrive in one upload, so a failure and its rescue ingest
@@ -548,8 +550,13 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
+			// State "enabled" drops muted and skipped tests: a muted test still
+			// runs and still records failed executions, but Test Engine treats
+			// its failure as a soft fail that cannot fail the build, so it is
+			// never a failure cause. The result tag alone would keep it.
 			tests, response, err := deps.BuildTestsClient.List(ctx, args.OrgSlug, build.ID, &buildkite.BuildTestsListOptions{
 				ListOptions: buildkite.ListOptions{Page: 1, PerPage: maxTests},
+				State:       "enabled",
 				Tags:        fmt.Sprintf("build.job_id:%s,result:^failed", anchor.job.ID),
 			})
 			if err != nil {

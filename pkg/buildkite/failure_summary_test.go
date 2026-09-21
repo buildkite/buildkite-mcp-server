@@ -1025,6 +1025,7 @@ func TestGetBuildFailureSummaryIncludesJobAnchoredFailedTests(t *testing.T) {
 			require.Equal(t, "org", org)
 			require.Equal(t, "build-uuid", buildUUID)
 			require.Equal(t, "build.job_id:job-failed,result:^failed", opt.Tags)
+			require.Equal(t, "enabled", opt.State, "muted and skipped tests are never failure causes")
 			require.Equal(t, defaultFailureSummaryFailedTests, opt.PerPage)
 			return []buildkite.TestWithMetrics{
 				{Test: buildkite.Test{
