@@ -13,9 +13,11 @@ This guide explains how to effectively use the Buildkite MCP server's log tools 
 The server provides a composite investigation tool and lower-level log tools:
 
 ### 1. get_build_failure_summary - Start Here
-**Best first step for diagnosing a build failure** — combines build state, failed and broken jobs, promised failures from still-running jobs, bounded log tails, error/warning annotations, and failed Test Engine executions in one call.
+**Best first step for diagnosing a build failure** — combines build state, failed and broken jobs, promised failures from still-running jobs, bounded log tails, error/warning annotations, and failed Test Engine tests in one call.
 
-The default 50-line tail per failed job is usually enough for an initial diagnosis. Use the lower-level tools only when the summary identifies an area that needs deeper inspection. You can reduce output with `log_tail`, `max_jobs`, `max_annotations`, `max_test_runs`, `max_failed_tests`, and `max_failed_tests_per_run`, or disable optional sections with `include_logs`, `include_annotations`, and `include_failed_tests`. Test Engine work defaults to at most 5 runs and 100 failed executions total.
+The default 50-line tail per failed job is usually enough for an initial diagnosis. Use the lower-level tools only when the summary identifies an area that needs deeper inspection. You can reduce output with `log_tail`, `max_jobs`, `max_annotations`, `max_test_runs`, and `max_failed_tests`, or disable optional sections with `include_logs`, `include_annotations`, and `include_failed_tests`. Failed tests default to at most 50 per build, and failure details (`failure_reason`) are scanned from at most 5 Test Engine runs.
+
+Failed tests are listed per job: each terminal failed or timed-out job carries `failed_tests` (only tests whose every execution within that job failed) and `failed_tests_status`, one of `found`, `none_recorded`, `ingestion_pending`, or `unavailable`. An empty or absent `failed_tests` list does **not** mean the job's tests passed; follow the job's `failed_tests_hint` and treat its `log_tail` as the authoritative fallback. A `found` job whose entries lack `failure_reason` carries `test_suite_slug` and `run_id` so you can call `get_failed_executions` for the detail.
 
 ### 2. tail_logs - Focused Follow-up
 Shows the last N entries for one job when the composite summary needs more log context.

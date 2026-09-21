@@ -144,6 +144,9 @@ const (
 	failedTestsHintIngestionPending = "Test results are still being ingested; this list may be empty or incomplete right now. Diagnose from log_tail and re-call this tool after the build settles."
 	failedTestsHintIngestionPartial = "Test results are still being ingested; more failed tests may appear."
 	failedTestsHintUnavailable      = "The failed-test lookup failed for this job; test results may exist. Diagnose from log_tail. A 403 means the token lacks the read_suites scope."
+	// failedTestsHintBudgetExhausted takes the job ID; it rides on a found
+	// job whose entries were all displaced by earlier jobs' entries.
+	failedTestsHintBudgetExhausted = "This job has failed tests, but max_failed_tests was used up by earlier jobs so none are listed here. Raise max_failed_tests, or call list_tests_for_build with tags \"build.job_id:%s,result:^failed\"."
 )
 
 const (
@@ -452,21 +455,22 @@ func testSuiteSlugFromURL(url string) string {
 
 // failureSummaryTestsIngestionSettled reports whether the build's test data
 // can still change: the build must be finished and every Test Engine run
-// (within the scan cap) must report state "finished". Any error or unchecked
-// run counts as unsettled, so uncertainty always degrades toward claiming
-// less. A 401 propagates so the whole tool fails consistently.
-func failureSummaryTestsIngestionSettled(ctx context.Context, client TestRunsClient, args GetBuildFailureSummaryArgs, build buildkite.Build, maxRuns int) (bool, error) {
+// listed on the build must report state "finished". Any run lookup error
+// counts as unsettled, so uncertainty always degrades toward claiming less.
+// The run state is the API's own signal, not proof that ingestion is
+// complete, so callers phrase a settled result as "no longer expected to
+// change". A 401 propagates so the whole tool fails consistently.
+func failureSummaryTestsIngestionSettled(ctx context.Context, client TestRunsClient, args GetBuildFailureSummaryArgs, build buildkite.Build) (bool, error) {
 	if build.FinishedAt == nil || client == nil {
 		return false, nil
 	}
 
 	runs := build.TestEngine.Runs
-	checkable := min(len(runs), maxRuns)
-	finished := make([]bool, checkable)
-	runErrors := make([]error, checkable)
+	finished := make([]bool, len(runs))
+	runErrors := make([]error, len(runs))
 	semaphore := make(chan struct{}, failureSummaryConcurrency)
 	var waitGroup sync.WaitGroup
-	for i := range checkable {
+	for i := range runs {
 		waitGroup.Add(1)
 		go func(index int) {
 			defer waitGroup.Done()
@@ -483,8 +487,8 @@ func failureSummaryTestsIngestionSettled(ctx context.Context, client TestRunsCli
 	}
 	waitGroup.Wait()
 
-	settled := len(runs) <= maxRuns
-	for i := range checkable {
+	settled := true
+	for i := range runs {
 		if runErrors[i] != nil {
 			if isBuildkiteUnauthorized(runErrors[i]) {
 				return false, ErrUnauthorized
@@ -576,15 +580,11 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 			continue
 		}
 
-		tests := anchor.tests
-		if len(tests) > remaining {
-			tests = tests[:remaining]
-			anchor.truncated = true
-		}
-		remaining -= len(tests)
-		anchor.result.FailedTestsTruncated = anchor.truncated
-
-		if len(tests) == 0 {
+		// Status is decided by what the API returned, before the build-wide
+		// budget trims the list: a job whose failures were all pushed out by
+		// earlier jobs is still "found", never "none_recorded".
+		if len(anchor.tests) == 0 {
+			anchor.result.FailedTestsTruncated = anchor.truncated
 			if settled {
 				anchor.result.FailedTestsStatus = failedTestsStatusNoneRecorded
 				anchor.result.FailedTestsHint = failedTestsHintNoneRecorded
@@ -595,8 +595,19 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 			continue
 		}
 
+		tests := anchor.tests
+		if len(tests) > remaining {
+			tests = tests[:remaining]
+			anchor.truncated = true
+		}
+		remaining -= len(tests)
+		anchor.result.FailedTestsTruncated = anchor.truncated
 		anchor.result.FailedTestsStatus = failedTestsStatusFound
-		if !settled {
+		switch {
+		case len(tests) == 0:
+			anchor.result.FailedTestsHint = fmt.Sprintf(failedTestsHintBudgetExhausted, anchor.job.ID)
+			continue
+		case !settled:
 			anchor.result.FailedTestsHint = failedTestsHintIngestionPartial
 		}
 		anchor.result.FailedTests = make([]FailureSummaryFailedTest, len(tests))
@@ -1194,7 +1205,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				result.TestEngine = testEngineStatusNoData
 			} else {
 				result.TestEngine = testEngineStatusActive
-				settled, settledErr := failureSummaryTestsIngestionSettled(ctx, deps.TestRunsClient, args, build, maxTestRuns)
+				settled, settledErr := failureSummaryTestsIngestionSettled(ctx, deps.TestRunsClient, args, build)
 				if settledErr != nil {
 					return nil, nil, settledErr
 				}
