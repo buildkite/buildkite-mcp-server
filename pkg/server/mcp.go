@@ -92,9 +92,9 @@ var instructionSections = []instructionSection{
 	{
 		toolset: toolsets.ToolsetPipelines,
 		text:    "Pipeline authoring: always check pipeline YAML with validate_pipeline before creating or updating a pipeline, or before committing changes to .buildkite/pipeline.yml. It validates against the official pipeline schema locally — the call itself never contacts the Buildkite API and works regardless of the configured token's scopes — and catches structural errors that would otherwise fail silently at upload time. A valid result does not guarantee runtime correctness (environment variable interpolation, plugin configuration, dynamically generated steps).",
-  },
-  {
-    toolset: toolsets.ToolsetInvestigations,
+	},
+	{
+		toolset: toolsets.ToolsetInvestigations,
 		text:    "Build comparison: use compare_builds when asked what changed since a build worked, or to compare two builds. Without an explicit baseline it selects an earlier successful build on the same pipeline and branch. Report the selected baseline and unmatched steps; shared failing steps do not establish a shared cause or justify a retry. Timings cover final attempts, not total retry cost or build wall-clock duration.",
 	},
 	{
