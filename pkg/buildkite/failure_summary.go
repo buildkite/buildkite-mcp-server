@@ -80,7 +80,7 @@ type GetBuildFailureSummaryArgs struct {
 	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log window (anchored on the agent's failure marker when present, otherwise the log tail) for failed, timed-out, canceled, and promised-failing jobs (default true)"`
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include Test Engine tests whose executions in this build all failed, when the build has Test Engine runs (default true)"`
-	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded test failure details such as stack traces within the summary's bounded test-content budget"`
+	IncludeFailureExpanded *bool  `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded test failure details such as stack traces within the summary's bounded test-content budget (default true); set false to keep failed_tests to the one-line failure_reason"`
 }
 
 // FailureSummaryJobStateCounts wraps buildkite.JobStateCounts and adds
@@ -825,7 +825,7 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 			defer func() { <-semaphore }()
 
 			executions, _, executionsErr := deps.TestExecutionsClient.GetFailedExecutions(ctx, args.OrgSlug, runs[index].Suite.Slug, runs[index].ID, &buildkite.FailedExecutionsOptions{
-				IncludeFailureExpanded: args.IncludeFailureExpanded,
+				IncludeFailureExpanded: defaultTrue(args.IncludeFailureExpanded),
 				Page:                   1,
 				PerPage:                failureSummaryRunExecutionsPageSize,
 			})
@@ -1350,6 +1350,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			attribute.Bool("include_logs", defaultTrue(args.IncludeLogs)),
 			attribute.Bool("include_annotations", defaultTrue(args.IncludeAnnotations)),
 			attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
+			attribute.Bool("include_failure_expanded", defaultTrue(args.IncludeFailureExpanded)),
 		)
 
 		build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.BuildGetOptions{
