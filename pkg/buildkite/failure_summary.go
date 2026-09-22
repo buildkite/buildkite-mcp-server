@@ -59,16 +59,24 @@ type GetBuildFailureSummaryArgs struct {
 	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded test failure details such as stack traces within the summary's bounded test-content budget"`
 }
 
+// FailureSummaryJobStateCounts wraps buildkite.JobStateCounts and adds
+// Truncated, which is always false — the API returns a complete server-side
+// tally, so callers can rely on it without paginating list_jobs.
+type FailureSummaryJobStateCounts struct {
+	buildkite.JobStateCounts
+	Truncated bool `json:"truncated"`
+}
+
 type BuildFailureSummaryBuild struct {
 	BuildSummary
 	Blocked bool `json:"blocked"`
 	// JobStateCounts tallies every job in the build by state, so the jobs
 	// below can be confirmed as the build's only problems without listing
 	// jobs. Omitted when the API does not return it.
-	JobStateCounts *buildkite.JobStateCounts `json:"job_state_counts,omitempty"`
-	ScheduledAt    *buildkite.Timestamp      `json:"scheduled_at,omitempty"`
-	StartedAt      *buildkite.Timestamp      `json:"started_at,omitempty"`
-	FinishedAt     *buildkite.Timestamp      `json:"finished_at,omitempty"`
+	JobStateCounts *FailureSummaryJobStateCounts `json:"job_state_counts,omitempty"`
+	ScheduledAt    *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
+	StartedAt      *buildkite.Timestamp          `json:"started_at,omitempty"`
+	FinishedAt     *buildkite.Timestamp          `json:"finished_at,omitempty"`
 }
 
 type FailureSummaryLogEntry struct {
@@ -145,10 +153,14 @@ func boundedFailureSummaryJobs(value, configuredMax int) int {
 }
 
 func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
+	var jobStateCounts *FailureSummaryJobStateCounts
+	if build.JobStateCounts != nil {
+		jobStateCounts = &FailureSummaryJobStateCounts{JobStateCounts: *build.JobStateCounts}
+	}
 	return BuildFailureSummaryBuild{
 		BuildSummary:   summarizeBuild(build),
 		Blocked:        build.Blocked,
-		JobStateCounts: build.JobStateCounts,
+		JobStateCounts: jobStateCounts,
 		ScheduledAt:    build.ScheduledAt,
 		StartedAt:      build.StartedAt,
 		FinishedAt:     build.FinishedAt,

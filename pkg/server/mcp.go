@@ -92,6 +92,10 @@ var instructionSections = []instructionSection{
 	{
 		toolset: toolsets.ToolsetPipelines,
 		text:    "Pipeline authoring: always check pipeline YAML with validate_pipeline before creating or updating a pipeline, or before committing changes to .buildkite/pipeline.yml. It validates against the official pipeline schema locally — the call itself never contacts the Buildkite API and works regardless of the configured token's scopes — and catches structural errors that would otherwise fail silently at upload time. A valid result does not guarantee runtime correctness (environment variable interpolation, plugin configuration, dynamically generated steps).",
+  },
+  {
+    toolset: toolsets.ToolsetInvestigations,
+		text:    "Build comparison: use compare_builds when asked what changed since a build worked, or to compare two builds. Without an explicit baseline it selects an earlier successful build on the same pipeline and branch. Report the selected baseline and unmatched steps; shared failing steps do not establish a shared cause or justify a retry. Timings cover final attempts, not total retry cost or build wall-clock duration.",
 	},
 	{
 		toolset: toolsets.ToolsetBuilds,
@@ -100,6 +104,10 @@ var instructionSections = []instructionSection{
 	{
 		toolset: toolsets.ToolsetBuilds,
 		text:    "Job output links: Job summaries expose a step ID as step_id; full job responses expose it as step.id. To link directly to that job's output, use https://buildkite.com/{org_slug}/{pipeline_slug}/builds/{build_number}/list?sid={step_id}&tab=output.",
+	},
+	{
+		toolset: toolsets.ToolsetBuilds,
+		text:    "Dynamic pipeline uploads: steps added at runtime via `buildkite-agent pipeline upload` do not appear in the pipeline's static configuration. To inspect what was dynamically uploaded, call list_step_uploads (returns each upload's state, source_job_id, created_jobs_count, and rejection details), then get_step_upload with an upload_uuid to read its dynamic pipeline definition YAML (definition_yaml field). Large definitions are omitted from get_step_upload. Step-upload data is only available while the build is within its maximum lifetime (~30 days).",
 	},
 	{
 		toolset: toolsets.ToolsetLogs,

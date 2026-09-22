@@ -179,6 +179,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	require.NotNil(t, summary.Build.JobStateCounts)
 	require.Equal(t, 5, summary.Build.JobStateCounts.Total)
 	require.Equal(t, map[string]int{"passed": 2, "failed": 1, "running": 1, "broken": 1}, summary.Build.JobStateCounts.States)
+	require.Contains(t, text, `"truncated": false`)
 	require.Len(t, summary.Jobs, 3)
 	require.False(t, summary.JobsTruncated)
 

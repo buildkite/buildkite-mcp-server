@@ -412,6 +412,8 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.ListTestRuns),
 				newToolDef(buildkite.GetTestRun),
 				newToolDef(buildkite.GetFailedTestExecutions),
+				newToolDef(buildkite.SlowestExecutionsForBuild),
+				newToolDef(buildkite.ReadExecutionTrace),
 				newToolDef(buildkite.GetTest),
 				newToolDef(buildkite.ListTestSuitesForPipeline),
 			},
@@ -435,9 +437,10 @@ func CreateBuiltinToolsets() map[string]Toolset {
 		},
 		ToolsetInvestigations: {
 			Name:        "Build Investigations",
-			Description: "Cross-domain tools for diagnosing Buildkite build failures",
+			Description: "Cross-domain tools for diagnosing failures and comparing builds",
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.GetBuildFailureSummary),
+				newToolDef(buildkite.CompareBuilds),
 			},
 		},
 		ToolsetUser: {
