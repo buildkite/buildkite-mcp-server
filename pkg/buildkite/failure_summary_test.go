@@ -1054,6 +1054,7 @@ func TestGetBuildFailureSummaryIncludesJobAnchoredFailedTests(t *testing.T) {
 			require.Equal(t, "suite-1", slug)
 			require.Equal(t, "run-1", runID)
 			require.Equal(t, failureSummaryRunExecutionsPageSize, opt.PerPage)
+			require.True(t, opt.IncludeFailureExpanded, "expanded failure details are requested by default")
 			return []buildkite.FailedExecution{
 				{TestID: "test-a", FailureReason: "older failure", CreatedAt: older},
 				{TestID: "test-a", FailureReason: "newest failure", CreatedAt: newer},
@@ -1105,6 +1106,58 @@ func TestGetBuildFailureSummaryIncludesJobAnchoredFailedTests(t *testing.T) {
 	require.NotContains(t, text, "test-rescued")
 	require.NotContains(t, text, "executions_count")
 	require.NotContains(t, text, "duration_avg")
+}
+
+func TestGetBuildFailureSummaryIncludeFailureExpandedOptOut(t *testing.T) {
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return failureSummaryTestBuild(true), &buildkite.Response{}, nil
+		},
+	}
+	buildTestsClient := &MockBuildTestsClient{
+		ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+			return []buildkite.TestWithMetrics{{Test: buildkite.Test{
+				ID:       "test-a",
+				Name:     "a always fails",
+				Location: "./spec/a_spec.rb:1",
+				URL:      "https://api.buildkite.com/v2/analytics/organizations/org/suites/suite-1/tests/test-a",
+			}}}, &buildkite.Response{}, nil
+		},
+	}
+	executionsCalls := 0
+	testExecutionsClient := &MockTestExecutionsClient{
+		GetFailedExecutionsFunc: func(_ context.Context, _, _, _ string, opt *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+			executionsCalls++
+			require.False(t, opt.IncludeFailureExpanded, "include_failure_expanded: false must be passed through")
+			return []buildkite.FailedExecution{
+				{TestID: "test-a", FailureReason: "a failed", CreatedAt: buildkite.NewTimestamp(time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC))},
+			}, &buildkite.Response{}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient:         buildsClient,
+		JobsClient:           failureSummaryTestJobsClient("job-failed"),
+		BuildTestsClient:     buildTestsClient,
+		TestRunsClient:       finishedTestRunsClient(t),
+		TestExecutionsClient: testExecutionsClient,
+	})
+	include := false
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42",
+		IncludeFailureExpanded: &include,
+	})
+	require.NoError(t, err)
+	require.False(t, callResult.IsError)
+	require.Equal(t, 1, executionsCalls)
+
+	var summary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
+	require.Len(t, summary.Jobs, 2)
+	require.Len(t, summary.Jobs[0].FailedTests, 1)
+	require.Equal(t, "a failed", summary.Jobs[0].FailedTests[0].FailureReason)
+	require.Empty(t, summary.Jobs[0].FailedTests[0].FailureExpanded)
 }
 
 func TestGetBuildFailureSummaryMarksTestEngineNoData(t *testing.T) {
