@@ -242,6 +242,7 @@ const (
 	ToolsetClusterSecrets = "cluster_secrets"
 	ToolsetAgents         = "agents"
 	ToolsetPipelines      = "pipelines"
+	ToolsetTeams          = "teams"
 	ToolsetBuilds         = "builds"
 	ToolsetArtifacts      = "artifacts"
 	ToolsetLogs           = "logs"
@@ -258,6 +259,7 @@ var ValidToolsets = []string{
 	ToolsetClusterSecrets,
 	ToolsetAgents,
 	ToolsetPipelines,
+	ToolsetTeams,
 	ToolsetBuilds,
 	ToolsetArtifacts,
 	ToolsetLogs,
@@ -371,6 +373,15 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.GetPipelineSchedule),
 				newToolDef(buildkite.CreatePipelineSchedule),
 				newToolDef(buildkite.UpdatePipelineSchedule),
+			},
+		},
+		ToolsetTeams: {
+			Name:        "Team Management",
+			Description: "Tools for reading Buildkite teams and their pipeline access",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListTeams),
+				newToolDef(buildkite.ListTeamPipelines),
+				newToolDef(buildkite.ListPipelineTeams),
 			},
 		},
 		ToolsetBuilds: {

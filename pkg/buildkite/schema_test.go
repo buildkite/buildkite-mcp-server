@@ -473,3 +473,25 @@ func TestLoadSkillArgsSchema(t *testing.T) {
 	req := sortedRequired[LoadSkillArgs](t)
 	require.Equal(t, []string{"skill_name"}, req)
 }
+
+func TestListTeamsArgsSchema(t *testing.T) {
+	s := schemaFor[ListTeamsArgs](t)
+	require.Equal(t, []string{"org_slug"}, sortedToolRequired(t, s))
+	for _, opt := range []string{"page", "per_page"} {
+		require.Contains(t, s.Properties, opt)
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestListTeamPipelinesArgsSchema(t *testing.T) {
+	s := schemaFor[ListTeamPipelinesArgs](t)
+	require.Equal(t, []string{"org_slug", "team_id"}, sortedToolRequired(t, s))
+	for _, opt := range []string{"page", "per_page"} {
+		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
+	}
+}
+
+func TestListPipelineTeamsArgsSchema(t *testing.T) {
+	s := schemaFor[ListPipelineTeamsArgs](t)
+	require.Equal(t, []string{"org_slug", "pipeline_slug"}, sortedToolRequired(t, s))
+}

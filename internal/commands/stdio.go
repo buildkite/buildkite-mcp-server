@@ -24,6 +24,8 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 		BuildsClient:            globals.Client.Builds,
 		PipelinesClient:         globals.Client.Pipelines,
 		PipelineSchedulesClient: globals.Client.PipelineSchedules,
+		TeamsClient:             globals.Client.Teams,
+		TeamPipelinesClient:     globals.Client.TeamPipelines,
 		ClustersClient:          globals.Client.Clusters,
 		ClusterSecretsClient:    globals.Client.ClusterSecrets,
 		ClusterQueuesClient:     globals.Client.ClusterQueues,

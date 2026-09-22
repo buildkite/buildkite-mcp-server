@@ -657,7 +657,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered
-	expectedToolsets := []string{"clusters", "cluster_secrets", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
+	expectedToolsets := []string{"clusters", "cluster_secrets", "agents", "pipelines", "teams", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
 	for _, name := range expectedToolsets {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
@@ -784,4 +784,26 @@ func TestClusterSecretsToolset(t *testing.T) {
 			true,
 		),
 	)
+}
+
+func TestTeamsToolset(t *testing.T) {
+	assert := require.New(t)
+
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+
+	teams, exists := registry.Get(ToolsetTeams)
+	assert.True(exists)
+
+	toolNames := make([]string, 0, len(teams.Tools))
+	for _, tool := range teams.Tools {
+		toolNames = append(toolNames, tool.Tool.Name)
+		assert.True(tool.IsReadOnly(), "%s should be read-only", tool.Tool.Name)
+	}
+	assert.Equal([]string{"list_teams", "list_team_pipelines", "list_pipeline_teams"}, toolNames)
+
+	assert.Equal([]string{"read_pipelines", "read_teams"}, teams.GetRequiredScopes())
+
+	// Every tool in the toolset is read-only, so read-only mode keeps them all.
+	assert.Len(registry.GetEnabledTools([]string{ToolsetTeams}, true), 3)
 }
