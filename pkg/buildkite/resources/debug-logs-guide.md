@@ -55,6 +55,14 @@ Interpret its jobs as follows:
 
 If you need more context, take a failed job's `id` as the `job_id` for the lower-level log tools.
 
+### Step 0b: Acting on test_runs
+
+When the summary includes `test_runs`, the decision of what to call next depends on the type of spec:
+
+**Feature or browser specs** (paths like `spec/features/`, `spec/integration/`, Capybara/Selenium): the test framework only sees the browser-level symptom ("element not visible", "expected text not found"). The root cause — a server exception, a CSS regression, a JS error — is one layer deeper and only visible in the raw job log. Use `search_logs` on the failed job IDs; do not call `get_failed_executions`.
+
+**Unit or model specs** (paths like `spec/models/`, `spec/lib/`, `spec/services/`): the backtrace reported by the test framework is the root cause. Call `get_failed_executions` with `include_failure_expanded: true` to get the full stack trace without reading raw logs.
+
 ### Step 1: Quick Assessment
 Use `tail_logs` with `tail: 50-100` to see the most recent output. Most failures surface here.
 
