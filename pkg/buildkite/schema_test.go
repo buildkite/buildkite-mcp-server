@@ -97,6 +97,11 @@ func TestWaitForBuildArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 }
 
+func TestRetryFailedJobsArgsSchema(t *testing.T) {
+	req := sortedRequired[RetryFailedJobsArgs](t)
+	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
+}
+
 func TestGetBuildFailureSummaryArgsSchema(t *testing.T) {
 	s := schemaFor[GetBuildFailureSummaryArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, sortedRequired[GetBuildFailureSummaryArgs](t))

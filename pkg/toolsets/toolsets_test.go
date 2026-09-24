@@ -670,6 +670,14 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Equal("compare_builds", investigations.Tools[1].Tool.Name)
 	assert.Equal([]string{"read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
 
+	builds, exists := registry.Get(ToolsetBuilds)
+	assert.True(exists)
+	buildToolNames := make([]string, 0, len(builds.Tools))
+	for _, tool := range builds.Tools {
+		buildToolNames = append(buildToolNames, tool.Tool.Name)
+	}
+	assert.Contains(buildToolNames, "retry_failed_jobs")
+
 	tests, exists := registry.Get(ToolsetTests)
 	assert.True(exists)
 	toolNames := make([]string, 0, len(tests.Tools))
