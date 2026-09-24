@@ -99,7 +99,7 @@ var instructionSections = []instructionSection{
 	},
 	{
 		toolset: toolsets.ToolsetBuilds,
-		text:    "Job state \"broken\" means the job did not run because something inside the build prevented execution: an if conditional evaluated to false, a branch filter did not match, or an upstream dependency failed. It does not mean the job's command failed. Distinguish: broken = build configuration or dependencies prevented execution; failed = job ran but exited non-zero; skipped = external factor (e.g. a newer build superseded it). When both failed and broken jobs are present, investigate failed upstream jobs first.",
+		text:    "Job state \"broken\" means the pipeline configuration decided, when the job was created, that it would not run: an `if` condition or `branches` filter did not match, `parallelism` was 0, or the step was marked `skip`. Broken is never caused by another job failing, never fails a build, and is normal in passing builds. Jobs stopped by a failed dependency are `waiting_failed`, `blocked_failed` or `unblocked_failed` instead; those appear only in builds that actually failed. None of these four states ran, so they have no logs. `failed` = ran and exited non-zero; `skipped` = an external factor (e.g. a newer build superseded it). To explain a red build, investigate only `failed`, `timed_out`, `expired` jobs as well as `running` jobs that have non-zero `promised_exit_status`.",
 	},
 	{
 		toolset: toolsets.ToolsetBuilds,
