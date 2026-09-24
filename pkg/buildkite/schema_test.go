@@ -117,8 +117,8 @@ func TestCreatePipelineArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"cluster_id", "configuration", "create_webhook", "name", "org_slug", "repository_url"}, sortedToolRequired(t, s))
 
 	description := s.Properties["create_webhook"].Description
-	require.Contains(t, description, "Set true when GitHub push or pull-request events should trigger this pipeline automatically")
-	require.Contains(t, description, "the pipeline is still created and setup instructions are returned")
+	require.Contains(t, description, "Set true when GitHub push or pull-request events should trigger this pipeline")
+	require.Contains(t, description, "the pipeline is created and setup instructions are returned")
 	require.Contains(t, description, "Set false for non-GitHub repositories, centralized or manually managed webhooks")
 }
 
