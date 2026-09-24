@@ -305,7 +305,7 @@ func TestCreatePipelineWithWebhookError(t *testing.T) {
 	webhookErr := &buildkite.ErrorResponse{
 		Response: &http.Response{
 			StatusCode: http.StatusUnprocessableEntity,
-			Request:    httptest.NewRequest(http.MethodPost, "https://api.buildkite.com/v2/organizations/org/pipelines/test-pipeline/webhook", nil),
+			Request:    httptest.NewRequest(http.MethodPost, "https://api.buildkite.com/v2/organizations/org%3Fnext%23section/pipelines/test-pipeline/webhook", nil),
 		},
 		RawBody: []byte(`{"message":"Auto-creating webhooks requires a GitHub App to be installed and configured with access to the repository \"example/repo\". Please check that the repository URL is correct and that the GitHub App has been granted access to the repository.","code":"github_app_required"}`),
 	}
@@ -326,7 +326,7 @@ steps:
 	client := &MockPipelinesClient{
 		CreateFunc: func(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error) {
 			// validate required fields
-			assert.Equal("org", org)
+			assert.Equal("org?next#section", org)
 			assert.Equal("Test Pipeline", p.Name)
 			assert.Equal("https://github.com/example/repo.git", p.Repository)
 			assert.Equal("cluster-123", p.ClusterID)
@@ -361,7 +361,7 @@ steps:
 	request := createMCPRequest(t, map[string]any{})
 
 	args := CreatePipelineArgs{
-		OrgSlug:       "org",
+		OrgSlug:       "org?next#section",
 		Name:          "Test Pipeline",
 		ClusterID:     "cluster-123",
 		RepositoryURL: "https://github.com/example/repo.git",
@@ -379,7 +379,7 @@ steps:
 	requireJSONPathEqual(t, textContent.Text, false, "webhook", "created")
 	requireJSONPathEqual(t, textContent.Text, webhookErr.Error(), "webhook", "error")
 	requireJSONPathEqual(t, textContent.Text, "Pipeline created successfully, but its GitHub webhook could not be created automatically. Do not recreate the pipeline.", "webhook", "note")
-	requireJSONPathEqual(t, textContent.Text, "https://buildkite.example.com/organizations/org/repository-providers", "webhook", "setup_url")
+	requireJSONPathEqual(t, textContent.Text, "https://buildkite.example.com/organizations/org%3Fnext%23section/repository-providers", "webhook", "setup_url")
 	requireJSONPathEqual(t, textContent.Text, "Open setup_url and connect a compatible Buildkite GitHub App, or grant the existing app access to this repository.", "webhook", "next_steps", 0)
 	requireJSONPathEqual(t, textContent.Text, "Open the existing pipeline's repository settings at https://buildkite.example.com/org/test-pipeline/settings/repository.", "webhook", "next_steps", 1)
 	requireJSONPathEqual(t, textContent.Text, "Do not create another pipeline; the pipeline in this result was created successfully.", "webhook", "next_steps", 3)

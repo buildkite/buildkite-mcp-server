@@ -329,7 +329,7 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 						case "github_app_required":
 							result.Webhook.Note = "Pipeline created successfully, but its GitHub webhook could not be created automatically. Do not recreate the pipeline."
 							if pipelineURL, parseErr := url.Parse(pipeline.WebURL); parseErr == nil && pipelineURL.IsAbs() && pipelineURL.Host != "" {
-								result.Webhook.SetupURL = fmt.Sprintf("%s://%s/organizations/%s/repository-providers", pipelineURL.Scheme, pipelineURL.Host, args.OrgSlug)
+								result.Webhook.SetupURL = fmt.Sprintf("%s://%s/organizations/%s/repository-providers", pipelineURL.Scheme, pipelineURL.Host, url.PathEscape(args.OrgSlug))
 								result.Webhook.NextSteps = []string{
 									"Open setup_url and connect a compatible Buildkite GitHub App, or grant the existing app access to this repository.",
 									fmt.Sprintf("Open the existing pipeline's repository settings at %s.", pipelineURL.JoinPath("settings", "repository")),
