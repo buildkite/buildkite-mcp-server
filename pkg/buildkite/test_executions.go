@@ -95,7 +95,20 @@ func ReadExecutionTrace() (mcp.Tool, mcp.ToolHandlerFor[ReadExecutionTraceArgs, 
 				return handleBuildkiteError(err)
 			}
 
-			return mcpTextResult(span, &executionTrace)
+			result := struct {
+				buildkite.ExecutionTrace
+				Guidance string `json:"guidance,omitempty"`
+			}{ExecutionTrace: executionTrace}
+			switch executionTrace.TraceStatus {
+			case buildkite.TraceStatusMissing:
+				result.Guidance = "The collector recorded a trace but the spans never arrived. Check the job log for Could not export, or retry in a minute if the test just finished."
+			case buildkite.TraceStatusExpired:
+				result.Guidance = "This trace is older than a month and has been deleted. The test result is still here."
+			case buildkite.TraceStatusNone:
+				result.Guidance = "This test wasn't traced."
+			}
+
+			return mcpTextResult(span, &result)
 		}, []string{"read_suites"}
 }
 

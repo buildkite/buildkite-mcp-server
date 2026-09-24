@@ -108,6 +108,7 @@ func TestReadExecutionTrace(t *testing.T) {
 			return buildkite.ExecutionTrace{
 				ExecutionID: "execution",
 				TraceID:     "trace",
+				TraceStatus: buildkite.TraceStatusOK,
 				View:        buildkite.TraceViewSummary,
 				SpanCount:   2,
 				SlowestSpans: []buildkite.TraceSpan{
@@ -133,7 +134,40 @@ func TestReadExecutionTrace(t *testing.T) {
 	text := result.Content[0].(*mcp.TextContent).Text
 	requireJSONPathEqual(t, text, "execution", "execution_id")
 	requireJSONPathEqual(t, text, string(buildkite.TraceViewSummary), "view")
+	requireJSONPathEqual(t, text, string(buildkite.TraceStatusOK), "trace_status")
+	require.NotContains(t, text, `"guidance"`)
 	require.Contains(t, text, "SELECT users")
+}
+
+func TestReadExecutionTraceWithoutSpans(t *testing.T) {
+	cases := []struct {
+		status   buildkite.TraceStatus
+		guidance string
+	}{
+		{buildkite.TraceStatusMissing, "The collector recorded a trace but the spans never arrived. Check the job log for Could not export, or retry in a minute if the test just finished."},
+		{buildkite.TraceStatusExpired, "This trace is older than a month and has been deleted. The test result is still here."},
+		{buildkite.TraceStatusNone, "This test wasn't traced."},
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.status), func(t *testing.T) {
+			client := &MockExecutionTraceClient{
+				GetTraceFunc: func(context.Context, string, string, string, *buildkite.ExecutionTraceOptions) (buildkite.ExecutionTrace, *buildkite.Response, error) {
+					return buildkite.ExecutionTrace{ExecutionID: "execution", TraceStatus: tc.status}, nil, nil
+				},
+			}
+			ctx := ContextWithDeps(context.Background(), ToolDependencies{ExecutionTraceClient: client})
+			_, handler, _ := ReadExecutionTrace()
+
+			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ReadExecutionTraceArgs{})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			text := result.Content[0].(*mcp.TextContent).Text
+			requireJSONPathEqual(t, text, "execution", "execution_id")
+			requireJSONPathEqual(t, text, string(tc.status), "trace_status")
+			requireJSONPathEqual(t, text, tc.guidance, "guidance")
+		})
+	}
 }
 
 func TestReadExecutionTraceWithError(t *testing.T) {
