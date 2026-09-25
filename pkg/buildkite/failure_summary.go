@@ -47,7 +47,7 @@ type GetBuildFailureSummaryArgs struct {
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`
 	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200)"`
-	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum terminal problem or downstream-failed jobs to return (default 10, server may enforce a lower maximum, absolute max 50)"`
+	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum problem jobs to return, filled in priority order: failed, timed-out and expired jobs first, then canceled, then jobs stopped by a failed dependency (waiting_failed, blocked_failed, unblocked_failed), then broken jobs that pipeline configuration excluded (default 10, server may enforce a lower maximum, absolute max 50)"`
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to scan for failure details of the returned failed tests (default 5, max 20)"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed Test Engine tests to return for the build (default 50, max 100)"`
@@ -89,7 +89,7 @@ type FailureSummaryJob struct {
 	PromisedExitStatusAt *buildkite.Timestamp     `json:"promised_exit_status_at,omitempty"`
 	ExpiredAt            *buildkite.Timestamp     `json:"expired_at,omitempty"`
 	LogTail              []FailureSummaryLogEntry `json:"log_tail,omitempty"`
-	LogTotalRows         int64                    `json:"log_total_rows,omitempty"`
+	LogTotalRows         *int64                   `json:"log_total_rows,omitempty"`
 	LogTruncated         bool                     `json:"log_truncated,omitempty"`
 	LogContentTruncated  bool                     `json:"log_content_truncated,omitempty"`
 	LogEntriesOmitted    int                      `json:"log_entries_omitted,omitempty"`
@@ -229,13 +229,27 @@ func isCanceledFailureSummaryJob(job buildkite.Job) bool {
 	return job.State == "canceled"
 }
 
-func isDownstreamFailureSummaryJob(job buildkite.Job) bool {
+// Jobs that never ran because a dependency failed. They appear only in builds
+// that actually failed, so they are evidence of the failure even though they
+// carry no log.
+func isDependencyFailedFailureSummaryJob(job buildkite.Job) bool {
 	switch job.State {
-	case "broken", "waiting_failed", "blocked_failed", "unblocked_failed":
+	case "waiting_failed", "blocked_failed", "unblocked_failed":
 		return true
 	default:
 		return false
 	}
+}
+
+// Jobs that pipeline configuration excluded when the build was created (if or
+// branches mismatch, parallelism 0, skip). Never caused by another job and
+// routine in passing builds.
+func isBrokenFailureSummaryJob(job buildkite.Job) bool {
+	return job.State == "broken"
+}
+
+func isDownstreamFailureSummaryJob(job buildkite.Job) bool {
+	return isDependencyFailedFailureSummaryJob(job) || isBrokenFailureSummaryJob(job)
 }
 
 func shouldReadFailureLog(job buildkite.Job) bool {
@@ -243,12 +257,18 @@ func shouldReadFailureLog(job buildkite.Job) bool {
 }
 
 func failureSummaryJob(job buildkite.Job) FailureSummaryJob {
-	return FailureSummaryJob{
+	result := FailureSummaryJob{
 		JobSummary:           summarizeJob(job),
 		PromisedExitStatus:   job.PromisedExitStatus,
 		PromisedExitStatusAt: job.PromisedExitStatusAt,
 		ExpiredAt:            job.ExpiredAt,
 	}
+	if isDownstreamFailureSummaryJob(job) {
+		// Never reached an agent, so the log is known to be empty rather than unread.
+		var zero int64
+		result.LogTotalRows = &zero
+	}
+	return result
 }
 
 func truncateUTF8Bytes(value string, limit int) (string, bool) {
@@ -426,7 +446,7 @@ func loadFailureLogs(ctx context.Context, client BuildkiteLogsClient, args GetBu
 				return
 			}
 			jobs[index].LogTail = entries
-			jobs[index].LogTotalRows = totalRows
+			jobs[index].LogTotalRows = &totalRows
 			jobs[index].LogTruncated = truncated
 			jobs[index].LogContentTruncated = contentTruncated
 			jobs[index].LogEntriesOmitted = omitted
@@ -1205,19 +1225,27 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			}
 		}
 
-		remainingJobs := maxJobs - len(sourceJobs)
-		if remainingJobs > 0 || !jobsTruncated {
-			canceledJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				State:              []string{"canceled"},
+		// Non-primary jobs fill whatever budget the primaries left, in priority
+		// order. Canceled jobs ran and may have logs. The *_failed states exist
+		// only because a dependency failed, so they are evidence of the failure.
+		// Broken jobs were excluded by pipeline configuration when the build was
+		// created; they are routine in passing builds and go last.
+		appendJobsInStates := func(states []string, keep func(buildkite.Job) bool) error {
+			remainingJobs := maxJobs - len(sourceJobs)
+			if remainingJobs <= 0 && jobsTruncated {
+				return nil
+			}
+			list, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
+				State:              states,
 				IncludeRetriedJobs: &includeRetriedJobs,
 				PerPage:            remainingJobs + 1,
 			})
 			if listErr != nil {
-				return handleBuildkiteError(listErr)
+				return listErr
 			}
-			jobsTruncated = jobsTruncated || canceledJobsList.Links.Next != ""
-			for _, job := range canceledJobsList.Items {
-				if !isCanceledFailureSummaryJob(job) {
+			jobsTruncated = jobsTruncated || list.Links.Next != ""
+			for _, job := range list.Items {
+				if !keep(job) {
 					continue
 				}
 				if len(sourceJobs) < maxJobs {
@@ -1226,29 +1254,16 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 					jobsTruncated = true
 				}
 			}
+			return nil
 		}
-
-		remainingJobs = maxJobs - len(sourceJobs)
-		if remainingJobs > 0 || !jobsTruncated {
-			downstreamJobsList, _, listErr := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-				State:              []string{"broken", "waiting_failed", "blocked_failed", "unblocked_failed"},
-				IncludeRetriedJobs: &includeRetriedJobs,
-				PerPage:            remainingJobs + 1,
-			})
-			if listErr != nil {
-				return handleBuildkiteError(listErr)
-			}
-			jobsTruncated = jobsTruncated || downstreamJobsList.Links.Next != ""
-			for _, job := range downstreamJobsList.Items {
-				if !isDownstreamFailureSummaryJob(job) {
-					continue
-				}
-				if len(sourceJobs) < maxJobs {
-					sourceJobs = append(sourceJobs, job)
-				} else {
-					jobsTruncated = true
-				}
-			}
+		if listErr := appendJobsInStates([]string{"canceled"}, isCanceledFailureSummaryJob); listErr != nil {
+			return handleBuildkiteError(listErr)
+		}
+		if listErr := appendJobsInStates([]string{"waiting_failed", "blocked_failed", "unblocked_failed"}, isDependencyFailedFailureSummaryJob); listErr != nil {
+			return handleBuildkiteError(listErr)
+		}
+		if listErr := appendJobsInStates([]string{"broken"}, isBrokenFailureSummaryJob); listErr != nil {
+			return handleBuildkiteError(listErr)
 		}
 		result.Jobs = make([]FailureSummaryJob, len(sourceJobs))
 		for i, job := range sourceJobs {
