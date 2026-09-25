@@ -587,7 +587,10 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 
 	var warnings []string
 	remaining := maxTests
-	entriesByTestID := map[string][]*FailureSummaryFailedTest{}
+	// Entries are keyed by test ID and then by the anchor job that returned
+	// them: the same test can fail in two terminal jobs (a matrix, say) with
+	// different reasons, and each job's entry must keep its own detail.
+	targetsByTestID := map[string][]failureSummaryFailedTestTarget{}
 	for _, anchor := range anchors {
 		if anchor.err != nil {
 			if isBuildkiteUnauthorized(anchor.err) {
@@ -642,11 +645,11 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 				TestSuiteSlug: suiteSlug,
 				RunID:         runIDBySuite[suiteSlug],
 			}
-			entriesByTestID[test.ID] = append(entriesByTestID[test.ID], &anchor.result.FailedTests[j])
+			targetsByTestID[test.ID] = append(targetsByTestID[test.ID], failureSummaryFailedTestTarget{jobID: anchor.job.ID, entry: &anchor.result.FailedTests[j]})
 		}
 	}
 
-	if deps.TestExecutionsClient == nil || len(entriesByTestID) == 0 {
+	if deps.TestExecutionsClient == nil || len(targetsByTestID) == 0 {
 		return warnings, nil
 	}
 
@@ -680,8 +683,15 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 	}
 	joinGroup.Wait()
 
-	hasDetail := map[string]bool{}
-	detailAt := map[string]*buildkite.Timestamp{}
+	// Detail is joined per (test, job): an execution carries the automatic
+	// build.job_id tag, and only the entry that job returned takes it. An
+	// execution without the tag (an older collector) can still be joined when
+	// the test was returned by exactly one job, since there is nothing to
+	// confuse it with; when two jobs returned the test, an untagged execution
+	// is left alone rather than guessed onto both.
+	type detailKey struct{ testID, jobID string }
+	hasDetail := map[detailKey]bool{}
+	detailAt := map[detailKey]*buildkite.Timestamp{}
 	for i, run := range runs {
 		if runErrors[i] != nil {
 			if isBuildkiteUnauthorized(runErrors[i]) {
@@ -691,30 +701,73 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 			continue
 		}
 		for _, execution := range executionsByRun[i] {
-			targets, ok := entriesByTestID[execution.TestID]
+			targets, ok := targetsByTestID[execution.TestID]
 			if !ok {
 				// A failure a retry rescued, an execution from a retried job,
 				// or a test beyond the caps — not part of the returned set.
 				continue
 			}
-			if hasDetail[execution.TestID] {
-				newer := execution.CreatedAt != nil && (detailAt[execution.TestID] == nil || execution.CreatedAt.After(detailAt[execution.TestID].Time))
+			executionJobID := execution.Tags[failureSummaryJobIDTag]
+			if executionJobID == "" {
+				if !failureSummaryTargetsShareOneJob(targets) {
+					continue
+				}
+				executionJobID = targets[0].jobID
+			}
+			key := detailKey{testID: execution.TestID, jobID: executionJobID}
+			if hasDetail[key] {
+				newer := execution.CreatedAt != nil && (detailAt[key] == nil || execution.CreatedAt.After(detailAt[key].Time))
 				if !newer {
 					continue
 				}
 			}
-			hasDetail[execution.TestID] = true
-			detailAt[execution.TestID] = execution.CreatedAt
-			for _, entry := range targets {
-				entry.RunID = run.ID
-				entry.TestSuiteSlug = run.Suite.Slug
-				entry.FailureReason = execution.FailureReason
-				entry.FailureExpanded = execution.FailureExpanded
+			matched := false
+			for _, target := range targets {
+				if target.jobID != executionJobID {
+					continue
+				}
+				matched = true
+				target.entry.RunID = run.ID
+				target.entry.TestSuiteSlug = run.Suite.Slug
+				target.entry.FailureReason = execution.FailureReason
+				target.entry.FailureExpanded = execution.FailureExpanded
+			}
+			if matched {
+				// An execution tagged with a job that returned no entry for this
+				// test (a retried job, say) must not claim the detail slot.
+				hasDetail[key] = true
+				detailAt[key] = execution.CreatedAt
 			}
 		}
 	}
 
 	return warnings, nil
+}
+
+// failureSummaryJobIDTag is the automatic execution tag naming the job that
+// uploaded the execution; the same tag scopes the per-job membership query.
+const failureSummaryJobIDTag = "build.job_id"
+
+// failureSummaryFailedTestTarget is a returned failed-test entry together
+// with the anchor job that returned it, so detail can be joined per job.
+type failureSummaryFailedTestTarget struct {
+	jobID string
+	entry *FailureSummaryFailedTest
+}
+
+// failureSummaryTargetsShareOneJob reports whether every entry for a test
+// came from the same anchor job, so an untagged execution can be joined
+// without guessing.
+func failureSummaryTargetsShareOneJob(targets []failureSummaryFailedTestTarget) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	for _, target := range targets[1:] {
+		if target.jobID != targets[0].jobID {
+			return false
+		}
+	}
+	return true
 }
 
 func limitFailureSummaryString(value string, fieldLimit int, entryRemaining, sectionRemaining *int) (string, bool) {
@@ -1082,7 +1135,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, then jobs that never ran (waiting_failed/blocked_failed/unblocked_failed were stopped by a failed dependency; broken were excluded by pipeline configuration — never a cause of failure; neither has logs), promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, then jobs that never ran (waiting_failed/blocked_failed/unblocked_failed were stopped by a failed dependency; broken were excluded by pipeline configuration — never a cause of failure; neither has logs), promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
