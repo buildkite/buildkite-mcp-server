@@ -654,7 +654,7 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 
 	runs, affectedRuns := failureSummaryRunsToScan(build.TestEngine.Runs, entriesByTestID, maxRuns)
 	if affectedRuns > len(runs) {
-		warnings = append(warnings, fmt.Sprintf("test failure details cover only the %d most affected of %d Test Engine runs holding returned failed tests; raise max_test_runs to scan more", len(runs), affectedRuns))
+		warnings = append(warnings, fmt.Sprintf("test failure details cover only the %d most affected of %d Test Engine runs for suites holding returned failed tests; raise max_test_runs to scan more", len(runs), affectedRuns))
 	}
 
 	executionsByRun := make([][]buildkite.FailedExecution, len(runs))
@@ -720,21 +720,24 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 }
 
 // failureSummaryRunsToScan picks the Test Engine runs whose failed executions
-// are worth fetching for the returned failed tests. Runs are ranked by how
-// many returned tests belong to their suite, most first (slug order breaks
-// ties, so the choice is stable), and capped at maxRuns; a run holding none
-// of the returned tests is never scanned, so a build with many suites and
-// failures in one costs one call instead of maxRuns misses. Tests whose suite
-// could not be read from their URL cannot be ranked, so when any exist and
-// slots remain, unranked runs fill the slots in build order as a fallback.
-// The second result is the number of runs holding returned tests, so the
-// caller can say how many were left unscanned.
+// are worth fetching for the returned failed tests. Suites are ranked by how
+// many returned tests belong to them, most first (slug order breaks ties, so
+// the choice is stable), and every run the build lists for a ranked suite is
+// taken in build order until maxRuns is reached. A suite can list more than
+// one run in a build (separate uploads with different run keys), and the
+// build tests list does not say which run holds a test's execution, so
+// keeping only one run per suite could leave a test unretrieved while slots
+// sit spare. A run of a suite holding none of the returned tests is never
+// scanned, so a build with many suites and failures in one costs one call
+// instead of maxRuns misses. Tests whose suite could not be read from their
+// URL cannot be ranked, so when any exist and slots remain, the remaining
+// runs fill the slots in build order as a fallback. The second result is the
+// number of runs belonging to suites that hold returned tests, so the caller
+// can say how many were left unscanned.
 func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, entriesByTestID map[string][]*FailureSummaryFailedTest, maxRuns int) ([]buildkite.TestEngineRun, int) {
-	runBySuite := make(map[string]buildkite.TestEngineRun, len(runs))
+	runsBySuite := make(map[string][]buildkite.TestEngineRun, len(runs))
 	for _, run := range runs {
-		if _, exists := runBySuite[run.Suite.Slug]; !exists {
-			runBySuite[run.Suite.Slug] = run
-		}
+		runsBySuite[run.Suite.Slug] = append(runsBySuite[run.Suite.Slug], run)
 	}
 
 	testsBySuite := map[string]int{}
@@ -744,7 +747,7 @@ func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, entriesByTestID ma
 		if len(entries) > 0 {
 			slug = entries[0].TestSuiteSlug
 		}
-		if _, listed := runBySuite[slug]; slug == "" || !listed {
+		if slug == "" || len(runsBySuite[slug]) == 0 {
 			unranked = true
 			continue
 		}
@@ -752,8 +755,10 @@ func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, entriesByTestID ma
 	}
 
 	ranked := make([]string, 0, len(testsBySuite))
+	affectedRuns := 0
 	for slug := range testsBySuite {
 		ranked = append(ranked, slug)
+		affectedRuns += len(runsBySuite[slug])
 	}
 	slices.SortFunc(ranked, func(a, b string) int {
 		if testsBySuite[a] != testsBySuite[b] {
@@ -764,26 +769,23 @@ func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, entriesByTestID ma
 
 	selected := make([]buildkite.TestEngineRun, 0, min(maxRuns, len(runs)))
 	chosen := map[string]bool{}
-	for _, slug := range ranked {
-		if len(selected) >= maxRuns {
-			break
+	take := func(run buildkite.TestEngineRun) {
+		if len(selected) < maxRuns && !chosen[run.ID] {
+			selected = append(selected, run)
+			chosen[run.ID] = true
 		}
-		selected = append(selected, runBySuite[slug])
-		chosen[slug] = true
+	}
+	for _, slug := range ranked {
+		for _, run := range runsBySuite[slug] {
+			take(run)
+		}
 	}
 	if unranked {
 		for _, run := range runs {
-			if len(selected) >= maxRuns {
-				break
-			}
-			if chosen[run.Suite.Slug] {
-				continue
-			}
-			selected = append(selected, run)
-			chosen[run.Suite.Slug] = true
+			take(run)
 		}
 	}
-	return selected, len(ranked)
+	return selected, affectedRuns
 }
 
 // markFailureDetailNotRetrieved labels every returned failed test that no

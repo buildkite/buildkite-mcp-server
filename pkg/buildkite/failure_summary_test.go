@@ -1430,6 +1430,52 @@ func TestLoadFailureJobTestsScansRunsHoldingTheMostFailedTests(t *testing.T) {
 	require.Contains(t, warnings[0], "max_test_runs")
 }
 
+func TestLoadFailureJobTestsScansEveryRunOfAnAffectedSuite(t *testing.T) {
+	args := GetBuildFailureSummaryArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1"}
+	build := buildkite.Build{
+		ID:         "build-uuid",
+		FinishedAt: buildkite.NewTimestamp(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)),
+		TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{
+			{ID: "run-1a", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
+			{ID: "run-2", Suite: buildkite.TestEngineSuite{Slug: "suite-2"}},
+			{ID: "run-1b", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
+		}},
+	}
+	sourceJobs := []buildkite.Job{{ID: "job-failed", State: "failed"}}
+	var scannedMu sync.Mutex
+	var scanned []string
+	deps := ToolDependencies{
+		BuildTestsClient: &MockBuildTestsClient{
+			ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+				return []buildkite.TestWithMetrics{
+					{Test: buildkite.Test{ID: "test-a", URL: "https://api.buildkite.com/v2/analytics/organizations/org/suites/suite-1/tests/test-a"}},
+				}, &buildkite.Response{}, nil
+			},
+		},
+		TestExecutionsClient: &MockTestExecutionsClient{
+			GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, _ *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+				scannedMu.Lock()
+				scanned = append(scanned, runID)
+				scannedMu.Unlock()
+				if runID == "run-1b" {
+					return []buildkite.FailedExecution{{TestID: "test-a", FailureReason: "in the second upload"}}, &buildkite.Response{}, nil
+				}
+				return nil, &buildkite.Response{}, nil
+			},
+		},
+	}
+
+	jobs := make([]FailureSummaryJob, 1)
+	warnings, err := loadFailureJobTests(context.Background(), deps, args, build, sourceJobs, jobs, 10, 5, true)
+	require.NoError(t, err)
+	require.Empty(t, warnings, "two runs for one suite fit within the cap, so nothing is left unscanned")
+	slices.Sort(scanned)
+	require.Equal(t, []string{"run-1a", "run-1b"}, scanned, "every run of the affected suite is scanned; the untouched suite is not")
+	require.Equal(t, "in the second upload", jobs[0].FailedTests[0].FailureReason)
+	require.Equal(t, "run-1b", jobs[0].FailedTests[0].RunID, "the run that held the execution replaces the first-run guess")
+	require.Empty(t, jobs[0].FailedTests[0].FailureDetailStatus)
+}
+
 func TestLoadFailureJobTestsFallsBackToBuildOrderForUnrankedTests(t *testing.T) {
 	args := GetBuildFailureSummaryArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1"}
 	build := buildkite.Build{
