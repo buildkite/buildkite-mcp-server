@@ -249,7 +249,10 @@ func limitJSONValue(value any, stringLimit int, context string) (any, bool) {
 		if logContentTruncated {
 			limited["log_content_truncated"] = true
 		}
-		if truncated && (context == "failed_executions" || context == "log_tail") {
+		// Items under these collections carry their own content_truncated
+		// flag so a shortened failure_reason, expanded line, or log line is
+		// never mistaken for the complete text.
+		if truncated && (context == "failed_executions" || context == "failed_tests" || context == "log_tail") {
 			contentTruncated = true
 		}
 		if contentTruncated {
