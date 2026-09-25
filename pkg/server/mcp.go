@@ -87,7 +87,7 @@ var instructionSections = []instructionSection{
 	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field."},
 	{
 		toolset: toolsets.ToolsetInvestigations,
-		text:    "Build failure investigation: start with get_build_failure_summary. It combines build state, failed and broken jobs, promised failures from running jobs, bounded log tails, relevant annotations, and failed tests in one response. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
+		text:    "Build failure investigation: start with get_build_failure_summary. It combines build state, failed and canceled jobs, promised failures from running jobs, bounded log tails, relevant annotations, and failed tests in one response; jobs that never ran (broken, waiting_failed, blocked_failed, unblocked_failed) are listed only when include_non_primary_failure_jobs is true. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
 	},
 	{
 		toolset: toolsets.ToolsetPipelines,
