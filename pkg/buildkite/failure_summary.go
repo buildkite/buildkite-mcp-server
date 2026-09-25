@@ -3,6 +3,7 @@ package buildkite
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -49,7 +50,7 @@ type GetBuildFailureSummaryArgs struct {
 	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200)"`
 	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum terminal problem or downstream-failed jobs to return (default 10, server may enforce a lower maximum, absolute max 50)"`
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
-	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to scan for failure details of the returned failed tests (default 5, max 20)"`
+	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to scan for failure details of the returned failed tests (default 5, max 20); the runs holding the most returned failed tests are scanned first"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed Test Engine tests to return for the build (default 50, max 100)"`
 	ContentLimitBytes      int    `json:"content_limit_bytes,omitempty" jsonschema:"Maximum bytes for the response payload (default and max 262144); lower it to fit clients with small tool-result limits, combining with log_tail and max_jobs for finer trimming"`
 	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed, timed-out, canceled, and promised-failing jobs (default true)"`
@@ -115,22 +116,31 @@ type FailureSummaryAnnotation struct {
 // (their jobs are not queried) and tests rescued by an in-job framework retry
 // are excluded by the per-job "result:^failed" tag filter. Failure detail
 // fields come from the newest matching failed execution found while scanning
-// the build's Test Engine runs; they stay empty when the bounded scan did not
-// reach an execution for the test, in which case get_failed_executions with
-// test_suite_slug and run_id fetches the detail.
+// the Test Engine runs that hold the returned tests, most affected runs
+// first. When no execution was matched for the test — its run was past the
+// scan cap, past the first page of the run's failed executions, unlisted on
+// the build, or the lookup failed — failure_detail_status says so, and
+// get_failed_executions with test_suite_slug and run_id fetches the detail.
 type FailureSummaryFailedTest struct {
-	TestID           string                      `json:"test_id"`
-	Name             string                      `json:"name,omitempty"`
-	Scope            string                      `json:"scope,omitempty"`
-	Location         string                      `json:"location,omitempty"`
-	FileName         string                      `json:"file_name,omitempty"`
-	WebURL           string                      `json:"web_url,omitempty"`
-	TestSuiteSlug    string                      `json:"test_suite_slug,omitempty"`
-	RunID            string                      `json:"run_id,omitempty"`
-	FailureReason    string                      `json:"failure_reason,omitempty"`
-	FailureExpanded  []buildkite.FailureExpanded `json:"failure_expanded,omitempty"`
-	ContentTruncated bool                        `json:"content_truncated,omitempty"`
+	TestID              string                      `json:"test_id"`
+	Name                string                      `json:"name,omitempty"`
+	Scope               string                      `json:"scope,omitempty"`
+	Location            string                      `json:"location,omitempty"`
+	FileName            string                      `json:"file_name,omitempty"`
+	WebURL              string                      `json:"web_url,omitempty"`
+	TestSuiteSlug       string                      `json:"test_suite_slug,omitempty"`
+	RunID               string                      `json:"run_id,omitempty"`
+	FailureReason       string                      `json:"failure_reason,omitempty"`
+	FailureExpanded     []buildkite.FailureExpanded `json:"failure_expanded,omitempty"`
+	FailureDetailStatus string                      `json:"failure_detail_status,omitempty"`
+	ContentTruncated    bool                        `json:"content_truncated,omitempty"`
 }
+
+// failureDetailStatusNotRetrieved marks a failed-test entry whose
+// failure_reason and failure_expanded were not fetched, so a blank
+// failure_reason is never read as "the test recorded no reason". It is the
+// only value; a retrieved detail leaves the field empty.
+const failureDetailStatusNotRetrieved = "not_retrieved"
 
 // Failed-test statuses distinguish the three reasons a terminally failed job
 // can show no failed tests — the job failed outside its tests, ingestion has
@@ -528,11 +538,19 @@ func failureSummaryTestsIngestionSettled(ctx context.Context, client TestRunsCli
 // warning so a token without the read_suites scope still gets the rest of the
 // summary.
 func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBuildFailureSummaryArgs, build buildkite.Build, sourceJobs []buildkite.Job, jobs []FailureSummaryJob, maxTests, maxRuns int, settled bool) ([]string, error) {
-	runIDBySuite := make(map[string]string, len(build.TestEngine.Runs))
+	// runsBySuite keeps every run the build lists per suite, in build order. A
+	// suite normally has one run per build, but separate uploads with distinct
+	// run keys give it several, and the tests list does not say which one holds
+	// a test's execution.
+	runsBySuite := make(map[string][]buildkite.TestEngineRun, len(build.TestEngine.Runs))
 	for _, run := range build.TestEngine.Runs {
-		if _, exists := runIDBySuite[run.Suite.Slug]; !exists {
-			runIDBySuite[run.Suite.Slug] = run.ID
+		runsBySuite[run.Suite.Slug] = append(runsBySuite[run.Suite.Slug], run)
+	}
+	firstRunID := func(suiteSlug string) string {
+		if runs := runsBySuite[suiteSlug]; len(runs) > 0 {
+			return runs[0].ID
 		}
+		return ""
 	}
 
 	type anchorJobTests struct {
@@ -643,24 +661,31 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 				FileName:      test.FileName,
 				WebURL:        test.WebURL,
 				TestSuiteSlug: suiteSlug,
-				RunID:         runIDBySuite[suiteSlug],
+				RunID:         firstRunID(suiteSlug),
 			}
 			targetsByTestID[test.ID] = append(targetsByTestID[test.ID], failureSummaryFailedTestTarget{jobID: anchor.job.ID, entry: &anchor.result.FailedTests[j]})
 		}
 	}
 
-	if deps.TestExecutionsClient == nil || len(targetsByTestID) == 0 {
+	if len(targetsByTestID) == 0 {
+		return warnings, nil
+	}
+	if deps.TestExecutionsClient == nil {
+		markFailureDetailNotRetrieved(targetsByTestID, nil, runsBySuite, nil)
 		return warnings, nil
 	}
 
-	runs := build.TestEngine.Runs
-	if len(runs) > maxRuns {
-		warnings = append(warnings, fmt.Sprintf("test failure details cover only the first %d of %d Test Engine runs", maxRuns, len(runs)))
-		runs = runs[:maxRuns]
+	runs, affectedRuns := failureSummaryRunsToScan(build.TestEngine.Runs, runsBySuite, targetsByTestID, maxRuns)
+	if affectedRuns > len(runs) {
+		warnings = append(warnings, fmt.Sprintf("test failure details cover only the %d most affected of %d Test Engine runs for suites holding returned failed tests; raise max_test_runs to scan more", len(runs), affectedRuns))
 	}
 
 	executionsByRun := make([][]buildkite.FailedExecution, len(runs))
 	runErrors := make([]error, len(runs))
+	// runExhausted records that a run's first page held all of its failed
+	// executions; a run with more pages was not fully checked, so it stays a
+	// candidate for a not_retrieved entry's drill-down handle.
+	runExhausted := make([]bool, len(runs))
 	var joinGroup sync.WaitGroup
 	for i := range runs {
 		joinGroup.Add(1)
@@ -669,7 +694,7 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			executions, _, executionsErr := deps.TestExecutionsClient.GetFailedExecutions(ctx, args.OrgSlug, runs[index].Suite.Slug, runs[index].ID, &buildkite.FailedExecutionsOptions{
+			executions, response, executionsErr := deps.TestExecutionsClient.GetFailedExecutions(ctx, args.OrgSlug, runs[index].Suite.Slug, runs[index].ID, &buildkite.FailedExecutionsOptions{
 				IncludeFailureExpanded: args.IncludeFailureExpanded,
 				Page:                   1,
 				PerPage:                failureSummaryRunExecutionsPageSize,
@@ -679,6 +704,7 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 				return
 			}
 			executionsByRun[index] = executions
+			runExhausted[index] = response == nil || response.NextPage == 0
 		}(i)
 	}
 	joinGroup.Wait()
@@ -689,9 +715,8 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 	// the test was returned by exactly one job, since there is nothing to
 	// confuse it with; when two jobs returned the test, an untagged execution
 	// is left alone rather than guessed onto both.
-	type detailKey struct{ testID, jobID string }
-	hasDetail := map[detailKey]bool{}
-	detailAt := map[detailKey]*buildkite.Timestamp{}
+	hasDetail := map[failureSummaryDetailKey]bool{}
+	detailAt := map[failureSummaryDetailKey]*buildkite.Timestamp{}
 	for i, run := range runs {
 		if runErrors[i] != nil {
 			if isBuildkiteUnauthorized(runErrors[i]) {
@@ -714,7 +739,7 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 				}
 				executionJobID = targets[0].jobID
 			}
-			key := detailKey{testID: execution.TestID, jobID: executionJobID}
+			key := failureSummaryDetailKey{testID: execution.TestID, jobID: executionJobID}
 			if hasDetail[key] {
 				newer := execution.CreatedAt != nil && (detailAt[key] == nil || execution.CreatedAt.After(detailAt[key].Time))
 				if !newer {
@@ -740,8 +765,123 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 			}
 		}
 	}
+	// Only a run whose failed executions were fetched in full counts as
+	// scanned: a run whose lookup errored, or whose failed executions spill
+	// past the first page, may still hold the execution, so it must stay a
+	// candidate when the drill-down handle is decided.
+	scanned := make(map[string]bool, len(runs))
+	for i, run := range runs {
+		if runErrors[i] == nil && runExhausted[i] {
+			scanned[run.ID] = true
+		}
+	}
+	markFailureDetailNotRetrieved(targetsByTestID, hasDetail, runsBySuite, scanned)
 
 	return warnings, nil
+}
+
+// failureSummaryRunsToScan picks the Test Engine runs whose failed executions
+// are worth fetching for the returned failed tests. Suites are ranked by how
+// many returned tests belong to them, most first (slug order breaks ties, so
+// the choice is stable), and every run the build lists for a ranked suite is
+// taken in build order until maxRuns is reached. A suite can list more than
+// one run in a build (separate uploads with different run keys), and the
+// build tests list does not say which run holds a test's execution, so
+// keeping only one run per suite could leave a test unretrieved while slots
+// sit spare. A run of a suite holding none of the returned tests is never
+// scanned, so a build with many suites and failures in one costs one call
+// instead of maxRuns misses. Tests whose suite could not be read from their
+// URL cannot be ranked, so when any exist and slots remain, the remaining
+// runs fill the slots in build order as a fallback. The second result is the
+// number of runs belonging to suites that hold returned tests, so the caller
+// can say how many were left unscanned.
+func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, runsBySuite map[string][]buildkite.TestEngineRun, targetsByTestID map[string][]failureSummaryFailedTestTarget, maxRuns int) ([]buildkite.TestEngineRun, int) {
+	testsBySuite := map[string]int{}
+	unranked := false
+	for _, targets := range targetsByTestID {
+		slug := ""
+		if len(targets) > 0 {
+			slug = targets[0].entry.TestSuiteSlug
+		}
+		if slug == "" || len(runsBySuite[slug]) == 0 {
+			unranked = true
+			continue
+		}
+		testsBySuite[slug]++
+	}
+
+	ranked := make([]string, 0, len(testsBySuite))
+	affectedRuns := 0
+	for slug := range testsBySuite {
+		ranked = append(ranked, slug)
+		affectedRuns += len(runsBySuite[slug])
+	}
+	slices.SortFunc(ranked, func(a, b string) int {
+		if testsBySuite[a] != testsBySuite[b] {
+			return testsBySuite[b] - testsBySuite[a]
+		}
+		return strings.Compare(a, b)
+	})
+
+	selected := make([]buildkite.TestEngineRun, 0, min(maxRuns, len(runs)))
+	chosen := map[string]bool{}
+	take := func(run buildkite.TestEngineRun) {
+		if len(selected) < maxRuns && !chosen[run.ID] {
+			selected = append(selected, run)
+			chosen[run.ID] = true
+		}
+	}
+	for _, slug := range ranked {
+		for _, run := range runsBySuite[slug] {
+			take(run)
+		}
+	}
+	if unranked {
+		for _, run := range runs {
+			take(run)
+		}
+	}
+	return selected, affectedRuns
+}
+
+// markFailureDetailNotRetrieved labels every returned failed test entry that
+// no scanned execution matched for its job, and makes its run_id handle
+// honest. Detail is tracked per (test, job), so one job's match never hides
+// another job's missing detail for the same test. The entry was built with
+// the suite's first listed run as a guess. When the suite lists one run, the
+// guess stands: the execution may sit past the first page of that run's
+// failed executions, or not be ingested yet, but the run is the right one to
+// query. When the suite lists several runs, the guess is kept only if exactly
+// one of them went unscanned, since that is the only run that could still
+// hold the execution; otherwise run_id is cleared so an agent is not sent to
+// a run the scan already covered. hasDetail and scanned may be nil when no
+// scan ran at all.
+func markFailureDetailNotRetrieved(targetsByTestID map[string][]failureSummaryFailedTestTarget, hasDetail map[failureSummaryDetailKey]bool, runsBySuite map[string][]buildkite.TestEngineRun, scanned map[string]bool) {
+	for testID, targets := range targetsByTestID {
+		for _, target := range targets {
+			if hasDetail[failureSummaryDetailKey{testID: testID, jobID: target.jobID}] {
+				continue
+			}
+			entry := target.entry
+			entry.FailureDetailStatus = failureDetailStatusNotRetrieved
+			listed := runsBySuite[entry.TestSuiteSlug]
+			if len(listed) <= 1 {
+				continue
+			}
+			unscanned := ""
+			for _, run := range listed {
+				if scanned[run.ID] {
+					continue
+				}
+				if unscanned != "" {
+					unscanned = ""
+					break
+				}
+				unscanned = run.ID
+			}
+			entry.RunID = unscanned
+		}
+	}
 }
 
 // failureSummaryJobIDTag is the automatic execution tag naming the job that
@@ -754,6 +894,10 @@ type failureSummaryFailedTestTarget struct {
 	jobID string
 	entry *FailureSummaryFailedTest
 }
+
+// failureSummaryDetailKey identifies one job's entry for one test, the unit
+// at which failure detail is joined and its absence is reported.
+type failureSummaryDetailKey struct{ testID, jobID string }
 
 // failureSummaryTargetsShareOneJob reports whether every entry for a test
 // came from the same anchor job, so an untagged execution can be joined
@@ -1135,7 +1279,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, then jobs that never ran (waiting_failed/blocked_failed/unblocked_failed were stopped by a failed dependency; broken were excluded by pipeline configuration — never a cause of failure; neither has logs), promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, then jobs that never ran (waiting_failed/blocked_failed/unblocked_failed were stopped by a failed dependency; broken were excluded by pipeline configuration — never a cause of failure; neither has logs), promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
