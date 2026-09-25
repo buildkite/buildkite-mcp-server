@@ -58,16 +58,24 @@ type GetBuildFailureSummaryArgs struct {
 	IncludeFailureExpanded bool   `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded test failure details such as stack traces within the summary's bounded test-content budget"`
 }
 
+// FailureSummaryJobStateCounts wraps buildkite.JobStateCounts and adds
+// Truncated, which is always false — the API returns a complete server-side
+// tally, so callers can rely on it without paginating list_jobs.
+type FailureSummaryJobStateCounts struct {
+	buildkite.JobStateCounts
+	Truncated bool `json:"truncated"`
+}
+
 type BuildFailureSummaryBuild struct {
 	BuildSummary
 	Blocked bool `json:"blocked"`
 	// JobStateCounts tallies every job in the build by state, so the jobs
 	// below can be confirmed as the build's only problems without listing
 	// jobs. Omitted when the API does not return it.
-	JobStateCounts *buildkite.JobStateCounts `json:"job_state_counts,omitempty"`
-	ScheduledAt    *buildkite.Timestamp      `json:"scheduled_at,omitempty"`
-	StartedAt      *buildkite.Timestamp      `json:"started_at,omitempty"`
-	FinishedAt     *buildkite.Timestamp      `json:"finished_at,omitempty"`
+	JobStateCounts *FailureSummaryJobStateCounts `json:"job_state_counts,omitempty"`
+	ScheduledAt    *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
+	StartedAt      *buildkite.Timestamp          `json:"started_at,omitempty"`
+	FinishedAt     *buildkite.Timestamp          `json:"finished_at,omitempty"`
 }
 
 type FailureSummaryLogEntry struct {
@@ -192,10 +200,14 @@ func boundedFailureSummaryJobs(value, configuredMax int) int {
 }
 
 func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
+	var jobStateCounts *FailureSummaryJobStateCounts
+	if build.JobStateCounts != nil {
+		jobStateCounts = &FailureSummaryJobStateCounts{JobStateCounts: *build.JobStateCounts}
+	}
 	return BuildFailureSummaryBuild{
 		BuildSummary:   summarizeBuild(build),
 		Blocked:        build.Blocked,
-		JobStateCounts: build.JobStateCounts,
+		JobStateCounts: jobStateCounts,
 		ScheduledAt:    build.ScheduledAt,
 		StartedAt:      build.StartedAt,
 		FinishedAt:     build.FinishedAt,
@@ -1070,7 +1082,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, downstream failed or broken jobs, promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only tests whose every execution within that job failed, with failure_reason joined from the newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, then jobs that never ran (waiting_failed/blocked_failed/unblocked_failed were stopped by a failed dependency; broken were excluded by pipeline configuration — never a cause of failure; neither has logs), promised failures from running jobs, and size-bounded diagnostic content from logs, annotations, and failed Test Engine executions. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
