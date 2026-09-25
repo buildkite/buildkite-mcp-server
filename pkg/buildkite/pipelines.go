@@ -2,6 +2,11 @@ package buildkite
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/go-buildkite/v5"
@@ -33,9 +38,11 @@ type CreatePipelineResult struct {
 }
 
 type WebhookInfo struct {
-	Created bool   `json:"created"`
-	Error   string `json:"error,omitempty"`
-	Note    string `json:"note,omitempty"`
+	Created   bool     `json:"created"`
+	Error     string   `json:"error,omitempty"`
+	Note      string   `json:"note,omitempty"`
+	SetupURL  string   `json:"setup_url,omitempty"`
+	NextSteps []string `json:"next_steps,omitempty"`
 }
 
 func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []string) {
@@ -252,7 +259,7 @@ type CreatePipelineArgs struct {
 	CancelRunningBranchBuilds bool              `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
 	Tags                      []string          `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
 	Teams                     map[string]string `json:"teams,omitempty" jsonschema:"Team UUIDs mapped to their access level on the pipeline: read_only, build_and_read or manage_build_and_read. Organizations with teams enabled require at least one team, unless the user is an organization administrator"`
-	CreateWebhook             bool              `json:"create_webhook,omitempty" jsonschema:"Create a GitHub webhook to trigger builds on pull-request and push events"`
+	CreateWebhook             bool              `json:"create_webhook" jsonschema:"Create a GitHub webhook after creating a pipeline. Set true when GitHub push or pull-request events should trigger this pipeline; if the repository is not connected through a compatible Buildkite GitHub App, the pipeline is created and setup instructions are returned. Set false for non-GitHub repositories, centralized or manually managed webhooks, or pipelines that must not receive events yet."`
 }
 
 func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []string) {
@@ -309,6 +316,31 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 				if err != nil {
 					result.Webhook.Error = err.Error()
 					result.Webhook.Note = "Pipeline created successfully, but webhook creation failed."
+
+					var errResp *buildkite.ErrorResponse
+					var webhookError struct {
+						Code string `json:"code"`
+					}
+					if errors.As(err, &errResp) &&
+						errResp.Response != nil &&
+						errResp.Response.StatusCode == http.StatusUnprocessableEntity &&
+						json.Unmarshal(errResp.RawBody, &webhookError) == nil {
+						switch webhookError.Code {
+						case "github_app_required":
+							result.Webhook.Note = "Pipeline created successfully, but its GitHub webhook could not be created automatically. Do not recreate the pipeline."
+							if pipelineURL, parseErr := url.Parse(pipeline.WebURL); parseErr == nil && pipelineURL.IsAbs() && pipelineURL.Host != "" {
+								result.Webhook.SetupURL = fmt.Sprintf("%s://%s/organizations/%s/repository-providers", pipelineURL.Scheme, pipelineURL.Host, url.PathEscape(args.OrgSlug))
+								result.Webhook.NextSteps = []string{
+									"Open setup_url and connect a compatible Buildkite GitHub App, or grant the existing app access to this repository.",
+									fmt.Sprintf("Open the existing pipeline's repository settings at %s.", pipelineURL.JoinPath("settings", "repository")),
+									"Follow the webhook setup instructions shown there to finish connecting the existing pipeline.",
+									"Do not create another pipeline; the pipeline in this result was created successfully.",
+								}
+							}
+						case "unsupported_repository_provider":
+							result.Webhook.Note = "Pipeline created successfully, but automatic webhook creation is unsupported for this repository provider. Do not recreate the pipeline."
+						}
+					}
 				}
 
 				return mcpTextResult(span, &result)
