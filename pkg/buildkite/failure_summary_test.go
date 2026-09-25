@@ -1581,6 +1581,30 @@ func TestLoadFailureJobTestsNotRetrievedRunIDIsOnlySetWhenUsable(t *testing.T) {
 		entry := load(t, []buildkite.TestEngineRun{run("run-1a"), run("run-1b")}, 5)
 		require.Empty(t, entry.RunID, "every listed run was scanned, so re-querying one of them by run_id would repeat the scan")
 	})
+
+	t.Run("a run whose lookup errored is still a candidate", func(t *testing.T) {
+		depsWithFailingScan := ToolDependencies{
+			BuildTestsClient: depsWithEmptyScan.BuildTestsClient,
+			TestExecutionsClient: &MockTestExecutionsClient{
+				GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, _ *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+					require.Equal(t, "run-1a", runID, "only the first run fits the cap")
+					return nil, nil, errors.New("executions endpoint unavailable")
+				},
+			},
+		}
+		build := buildkite.Build{
+			ID:         "build-uuid",
+			FinishedAt: buildkite.NewTimestamp(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)),
+			TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{run("run-1a"), run("run-1b")}},
+		}
+		jobs := make([]FailureSummaryJob, 1)
+		warnings, err := loadFailureJobTests(context.Background(), depsWithFailingScan, args, build, sourceJobs, jobs, 10, 1, true)
+		require.NoError(t, err)
+		require.Len(t, warnings, 2, "one for the cap, one for the failed lookup")
+		entry := jobs[0].FailedTests[0]
+		require.Equal(t, failureDetailStatusNotRetrieved, entry.FailureDetailStatus)
+		require.Empty(t, entry.RunID, "run-1a errored, so it may still hold the execution and run-1b is not the sole candidate")
+	})
 }
 
 func TestLoadFailureJobTestsMarksNotRetrievedWithoutExecutionsClient(t *testing.T) {

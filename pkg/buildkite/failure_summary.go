@@ -722,9 +722,14 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 			}
 		}
 	}
+	// Only a run whose failed executions were actually fetched counts as
+	// scanned: a run whose lookup errored may still hold the execution, so it
+	// must stay a candidate when the drill-down handle is decided.
 	scanned := make(map[string]bool, len(runs))
-	for _, run := range runs {
-		scanned[run.ID] = true
+	for i, run := range runs {
+		if runErrors[i] == nil {
+			scanned[run.ID] = true
+		}
 	}
 	markFailureDetailNotRetrieved(entriesByTestID, hasDetail, runsBySuite, scanned)
 
