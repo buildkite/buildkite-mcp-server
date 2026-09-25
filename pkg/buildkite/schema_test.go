@@ -76,6 +76,21 @@ func TestGetBuildArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 }
 
+func TestReadExecutionTraceArgsSchema(t *testing.T) {
+	s := schemaFor[ReadExecutionTraceArgs](t)
+	require.Equal(t, []string{"execution_id", "org_slug", "test_suite_slug"}, sortedToolRequired(t, s))
+	require.NotContains(t, s.Properties, "view")
+}
+
+func TestSlowestExecutionsForBuildArgsSchema(t *testing.T) {
+	s := schemaFor[SlowestExecutionsForBuildArgs](t)
+	require.Equal(t, []string{"build_uuid", "org_slug"}, sortedToolRequired(t, s))
+	require.Contains(t, s.Properties, "limit")
+	require.NotContains(t, s.Required, "limit")
+	require.Equal(t, "Buildkite build UUID. This is the build ID, not the pipeline build number.", s.Properties["build_uuid"].Description)
+	require.Equal(t, "Maximum number of executions to return. Defaults to 20 and is capped by the organization's slowest executions quota.", s.Properties["limit"].Description)
+}
+
 func TestWaitForBuildArgsSchema(t *testing.T) {
 	req := sortedRequired[WaitForBuildArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
@@ -97,9 +112,14 @@ func TestGetPipelineArgsSchema(t *testing.T) {
 }
 
 func TestCreatePipelineArgsSchema(t *testing.T) {
-	req := sortedRequired[CreatePipelineArgs](t)
-	// Required: org_slug, name, repository_url, cluster_id, configuration
-	require.Equal(t, []string{"cluster_id", "configuration", "name", "org_slug", "repository_url"}, req)
+	s := schemaFor[CreatePipelineArgs](t)
+	// Required: org_slug, name, repository_url, cluster_id, configuration, create_webhook
+	require.Equal(t, []string{"cluster_id", "configuration", "create_webhook", "name", "org_slug", "repository_url"}, sortedToolRequired(t, s))
+
+	description := s.Properties["create_webhook"].Description
+	require.Contains(t, description, "Set true when GitHub push or pull-request events should trigger this pipeline")
+	require.Contains(t, description, "the pipeline is created and setup instructions are returned")
+	require.Contains(t, description, "Set false for non-GitHub repositories, centralized or manually managed webhooks")
 }
 
 func TestUpdatePipelineArgsSchema(t *testing.T) {

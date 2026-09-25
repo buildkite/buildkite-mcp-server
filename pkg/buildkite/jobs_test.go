@@ -417,6 +417,38 @@ func TestListJobs(t *testing.T) {
 		}, response.Items[0])
 	})
 
+	t.Run("SummaryIncludesBrokenReasonForBrokenJobs", func(t *testing.T) {
+		mockJobs := &MockJobsClient{
+			ListByBuildFunc: func(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				return buildkite.JobsList{Items: []buildkite.Job{{
+					ID:           "job-deploy",
+					Name:         ":rocket: Deploy",
+					State:        "broken",
+					Command:      "scripts/deploy.sh",
+					BrokenReason: "conditional_failed",
+					StepKey:      "deploy",
+				}}}, &buildkite.Response{}, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := ListJobs()
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListJobsArgs{
+			OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", State: "broken",
+		})
+		require.NoError(t, err)
+
+		var response struct {
+			Items []map[string]any `json:"items"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &response))
+		require.Len(t, response.Items, 1)
+		assert.Equal(t, map[string]any{
+			"id": "job-deploy", "name": ":rocket: Deploy", "state": "broken", "command": "scripts/deploy.sh",
+			"exit_status": nil, "broken_reason": "conditional_failed", "step_key": "deploy",
+		}, response.Items[0])
+	})
+
 	t.Run("DetailedExcludesRepeatedInfrastructureFields", func(t *testing.T) {
 		timestamp := buildkite.NewTimestamp(time.Date(2026, 7, 17, 6, 46, 58, 0, time.UTC))
 		mockJobs := &MockJobsClient{

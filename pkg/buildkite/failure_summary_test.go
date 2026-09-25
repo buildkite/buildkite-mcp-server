@@ -155,6 +155,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	require.NotNil(t, summary.Build.JobStateCounts)
 	require.Equal(t, 5, summary.Build.JobStateCounts.Total)
 	require.Equal(t, map[string]int{"passed": 2, "failed": 1, "running": 1, "broken": 1}, summary.Build.JobStateCounts.States)
+	require.Contains(t, text, `"truncated": false`)
 	require.Len(t, summary.Jobs, 3)
 	require.False(t, summary.JobsTruncated)
 
@@ -1605,6 +1606,29 @@ func TestLoadFailureJobTestsNotRetrievedRunIDIsOnlySetWhenUsable(t *testing.T) {
 		require.Equal(t, failureDetailStatusNotRetrieved, entry.FailureDetailStatus)
 		require.Empty(t, entry.RunID, "run-1a errored, so it may still hold the execution and run-1b is not the sole candidate")
 	})
+
+	t.Run("a run with more pages of failed executions is still a candidate", func(t *testing.T) {
+		depsWithPagedScan := ToolDependencies{
+			BuildTestsClient: depsWithEmptyScan.BuildTestsClient,
+			TestExecutionsClient: &MockTestExecutionsClient{
+				GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, _ *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+					require.Equal(t, "run-1a", runID, "only the first run fits the cap")
+					return []buildkite.FailedExecution{{TestID: "someone-else"}}, &buildkite.Response{NextPage: 2}, nil
+				},
+			},
+		}
+		build := buildkite.Build{
+			ID:         "build-uuid",
+			FinishedAt: buildkite.NewTimestamp(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)),
+			TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{run("run-1a"), run("run-1b")}},
+		}
+		jobs := make([]FailureSummaryJob, 1)
+		_, err := loadFailureJobTests(context.Background(), depsWithPagedScan, args, build, sourceJobs, jobs, 10, 1, true)
+		require.NoError(t, err)
+		entry := jobs[0].FailedTests[0]
+		require.Equal(t, failureDetailStatusNotRetrieved, entry.FailureDetailStatus)
+		require.Empty(t, entry.RunID, "run-1a's first page was not exhaustive, so the execution may sit on a later page and run-1b is not the sole candidate")
+	})
 }
 
 func TestLoadFailureJobTestsMarksNotRetrievedWithoutExecutionsClient(t *testing.T) {
@@ -1686,6 +1710,67 @@ func TestFailureSummaryTestsIngestionSettled(t *testing.T) {
 		settled, err := failureSummaryTestsIngestionSettled(context.Background(), client, args, build)
 		require.NoError(t, err)
 		require.False(t, settled)
+	})
+}
+
+func TestLoadFailureJobTestsJoinsDetailPerJob(t *testing.T) {
+	args := GetBuildFailureSummaryArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1"}
+	sourceJobs := []buildkite.Job{{ID: "job-ruby-32", State: "failed"}, {ID: "job-ruby-33", State: "failed"}}
+	testURL := "https://api.buildkite.com/v2/analytics/organizations/org/suites/suite-1/tests/test-a"
+	buildTestsClient := &MockBuildTestsClient{
+		ListFunc: func(_ context.Context, _, _ string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+			require.Contains(t, opt.Tags, "build.job_id:job-ruby-")
+			return []buildkite.TestWithMetrics{{Test: buildkite.Test{ID: "test-a", Name: "a", URL: testURL}}}, &buildkite.Response{}, nil
+		},
+	}
+	load := func(t *testing.T, executions []buildkite.FailedExecution) []FailureSummaryJob {
+		t.Helper()
+		deps := ToolDependencies{
+			BuildTestsClient: buildTestsClient,
+			TestExecutionsClient: &MockTestExecutionsClient{
+				GetFailedExecutionsFunc: func(context.Context, string, string, string, *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+					return executions, &buildkite.Response{}, nil
+				},
+			},
+		}
+		jobs := make([]FailureSummaryJob, 2)
+		warnings, err := loadFailureJobTests(context.Background(), deps, args, failureSummaryTestBuild(true), sourceJobs, jobs, 10, defaultFailureSummaryTestRuns, true)
+		require.NoError(t, err)
+		require.Empty(t, warnings)
+		for _, job := range jobs {
+			require.Equal(t, failedTestsStatusFound, job.FailedTestsStatus)
+			require.Len(t, job.FailedTests, 1)
+		}
+		return jobs
+	}
+
+	t.Run("tagged executions land on their own job's entry", func(t *testing.T) {
+		jobs := load(t, []buildkite.FailedExecution{
+			{TestID: "test-a", FailureReason: "ruby 3.2 reason", Tags: map[string]string{"build.job_id": "job-ruby-32"}},
+			{TestID: "test-a", FailureReason: "ruby 3.3 reason", Tags: map[string]string{"build.job_id": "job-ruby-33"}},
+		})
+		require.Equal(t, "ruby 3.2 reason", jobs[0].FailedTests[0].FailureReason)
+		require.Equal(t, "ruby 3.3 reason", jobs[1].FailedTests[0].FailureReason, "the second job keeps its own reason instead of the newest across jobs")
+	})
+
+	t.Run("an execution from a job that returned no entry is ignored", func(t *testing.T) {
+		older := buildkite.NewTimestamp(time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC))
+		newer := buildkite.NewTimestamp(time.Date(2026, 9, 10, 11, 0, 0, 0, time.UTC))
+		jobs := load(t, []buildkite.FailedExecution{
+			{TestID: "test-a", FailureReason: "ruby 3.2 reason", CreatedAt: older, Tags: map[string]string{"build.job_id": "job-ruby-32"}},
+			{TestID: "test-a", FailureReason: "retried job reason", CreatedAt: newer, Tags: map[string]string{"build.job_id": "job-retried"}},
+			{TestID: "test-a", FailureReason: "ruby 3.3 reason", CreatedAt: older, Tags: map[string]string{"build.job_id": "job-ruby-33"}},
+		})
+		require.Equal(t, "ruby 3.2 reason", jobs[0].FailedTests[0].FailureReason)
+		require.Equal(t, "ruby 3.3 reason", jobs[1].FailedTests[0].FailureReason)
+	})
+
+	t.Run("untagged executions are not guessed onto two jobs", func(t *testing.T) {
+		jobs := load(t, []buildkite.FailedExecution{
+			{TestID: "test-a", FailureReason: "untagged reason"},
+		})
+		require.Empty(t, jobs[0].FailedTests[0].FailureReason, "with two candidate jobs an untagged execution cannot be placed")
+		require.Empty(t, jobs[1].FailedTests[0].FailureReason)
 	})
 }
 
