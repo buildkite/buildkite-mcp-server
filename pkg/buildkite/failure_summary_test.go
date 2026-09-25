@@ -140,10 +140,11 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-		BuildNumber:  "42",
-		LogTail:      2,
+		OrgSlug:               "org",
+		PipelineSlug:          "pipeline",
+		BuildNumber:           "42",
+		LogTail:               2,
+		IncludeNonPrimaryJobs: true,
 	})
 	require.NoError(t, err)
 	require.False(t, callResult.IsError)
@@ -257,6 +258,7 @@ func TestGetBuildFailureSummaryPrioritizesFailuresAndCanceledJobsBeforeDownstrea
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 3,
 		IncludeLogs: &include, IncludeAnnotations: &include,
+		IncludeNonPrimaryJobs: true,
 	})
 	require.NoError(t, err)
 
@@ -412,7 +414,8 @@ func TestGetBuildFailureSummaryIncludesExpiredAndDownstreamFailedJobsWithoutLogs
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
-		IncludeAnnotations: &include,
+		IncludeAnnotations:    &include,
+		IncludeNonPrimaryJobs: true,
 	})
 	require.NoError(t, err)
 
@@ -1085,6 +1088,7 @@ func TestGetBuildFailureSummaryIncludesJobAnchoredFailedTests(t *testing.T) {
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42",
+		IncludeNonPrimaryJobs: true,
 	})
 	require.NoError(t, err)
 	require.False(t, callResult.IsError)
