@@ -35,7 +35,7 @@ func TestGetBuildFailureSummaryIncludesBrokenReasonOnBrokenJobs(t *testing.T) {
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
 		IncludeLogs: &include, IncludeAnnotations: &include, IncludeFailedTests: &include,
-		IncludeNonPrimaryJobs: true,
+		IncludeNeverRanJobs: true,
 	})
 	require.NoError(t, err)
 

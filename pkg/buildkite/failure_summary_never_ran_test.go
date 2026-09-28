@@ -29,7 +29,7 @@ func TestGetBuildFailureSummaryOmitsNeverRanJobsByDefault(t *testing.T) {
 					{ID: "shard-69", State: "failed"},
 				}}, &buildkite.Response{}, nil
 			case "canceled":
-				return buildkite.JobsList{}, &buildkite.Response{}, nil
+				return buildkite.JobsList{Items: []buildkite.Job{{ID: "canceled", State: "canceled"}}}, &buildkite.Response{}, nil
 			default:
 				require.Failf(t, "unexpected job list", "never-ran states must not be fetched by default, got %v", options.State)
 				return buildkite.JobsList{}, nil, nil
@@ -50,7 +50,12 @@ func TestGetBuildFailureSummaryOmitsNeverRanJobsByDefault(t *testing.T) {
 
 	var summary BuildFailureSummary
 	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
-	require.Equal(t, []string{"shard-48", "shard-69"}, []string{summary.Jobs[0].ID, summary.Jobs[1].ID})
+	require.Len(t, summary.Jobs, 3, "canceled jobs still appear; never-ran jobs do not")
+	require.Equal(
+		t,
+		[]string{"shard-48", "shard-69", "canceled"},
+		[]string{summary.Jobs[0].ID, summary.Jobs[1].ID, summary.Jobs[2].ID},
+	)
 	require.False(t, summary.JobsTruncated, "skipped never-ran tiers must not count as truncation")
 	require.NotNil(t, summary.Build.JobStateCounts)
 	require.Equal(t, 153, summary.Build.JobStateCounts.States["broken"], "the census still reports the skipped states")
