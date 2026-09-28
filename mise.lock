@@ -133,56 +133,35 @@ checksum = "sha256:4099b2d1170d3b8a70e049237462efc2dd14d5fa30e9d2e5e108fb4f778cd
 url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_arm64.tar.gz"
 url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171819"
 
-[tools.ko."platforms.linux-arm64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
-
 [tools.ko."platforms.linux-arm64-musl"]
 checksum = "sha256:4099b2d1170d3b8a70e049237462efc2dd14d5fa30e9d2e5e108fb4f778cdd3f"
 url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_arm64.tar.gz"
 url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171819"
-
-[tools.ko."platforms.linux-arm64-musl".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [tools.ko."platforms.linux-x64"]
 checksum = "sha256:635ac6ea3fd376c935fee597fbb29ab2c2449f49ef1655085fe3aa9c25fed7a5"
 url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_x86_64.tar.gz"
 url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171792"
 
-[tools.ko."platforms.linux-x64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
-
 [tools.ko."platforms.linux-x64-musl"]
 checksum = "sha256:635ac6ea3fd376c935fee597fbb29ab2c2449f49ef1655085fe3aa9c25fed7a5"
 url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Linux_x86_64.tar.gz"
 url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171792"
-
-[tools.ko."platforms.linux-x64-musl".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [tools.ko."platforms.macos-arm64"]
 checksum = "sha256:a1338c4140c8c94e789733e21b161a3de177b467cd3c388b634fe1a869574509"
 url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Darwin_arm64.tar.gz"
 url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171820"
 
-[tools.ko."platforms.macos-arm64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
-
 [tools.ko."platforms.macos-x64"]
 checksum = "sha256:1b4ed52a5e506a55b085c7f106eb743ee756c776cc90fa232a539a47ad665310"
 url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Darwin_x86_64.tar.gz"
 url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171805"
 
-[tools.ko."platforms.macos-x64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
-
 [tools.ko."platforms.windows-x64"]
 checksum = "sha256:f70b0c9ea1874e81358a1886d478ebee9eb17d4f07e8dcaa779c4250a2aaea70"
 url = "https://github.com/ko-build/ko/releases/download/v0.19.1/ko_0.19.1_Windows_x86_64.tar.gz"
 url_api = "https://api.github.com/repos/ko-build/ko/releases/assets/461171790"
-
-[tools.ko."platforms.windows-x64".provenance.slsa]
-url = "https://github.com/ko-build/ko/releases/download/v0.19.1/multiple.intoto.jsonl"
 
 [[tools.lefthook]]
 version = "2.1.12"

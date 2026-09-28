@@ -21,7 +21,7 @@ type PaginatedResult[T any] struct {
 
 // ToolInput contains metadata common to every tool invocation.
 type ToolInput struct {
-	Telemetry ToolTelemetry `json:"telemetry" jsonschema:"Analytics metadata describing the tool call's purpose"`
+	Telemetry ToolTelemetry `json:"telemetry,omitempty" jsonschema:"Analytics metadata describing the tool call's purpose"`
 }
 
 // ToolTelemetry describes why a tool is being called.
