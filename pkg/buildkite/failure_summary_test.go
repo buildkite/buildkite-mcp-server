@@ -1485,41 +1485,66 @@ func TestLoadFailureJobTestsFallsBackToBuildOrderForUnrankedTests(t *testing.T) 
 		TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{
 			{ID: "run-1", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
 			{ID: "run-2", Suite: buildkite.TestEngineSuite{Slug: "suite-2"}},
+			{ID: "run-3", Suite: buildkite.TestEngineSuite{Slug: "suite-3"}},
 		}},
 	}
 	sourceJobs := []buildkite.Job{{ID: "job-failed", State: "failed"}}
-	var scannedMu sync.Mutex
-	var scanned []string
-	deps := ToolDependencies{
-		BuildTestsClient: &MockBuildTestsClient{
-			ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
-				return []buildkite.TestWithMetrics{
-					{Test: buildkite.Test{ID: "no-suite", URL: "https://api.buildkite.com/v2/analytics/organizations/org/tests/no-suite"}},
-				}, &buildkite.Response{}, nil
+	// The execution lives in run-2, the second run in build order: a cap that
+	// stops at the first run misses it, and a cap that covers every run finds
+	// it. The returned test's URL names no suite, so it cannot be ranked.
+	load := func(t *testing.T, maxRuns int) ([]string, []string, FailureSummaryFailedTest) {
+		t.Helper()
+		var scannedMu sync.Mutex
+		var scanned []string
+		deps := ToolDependencies{
+			BuildTestsClient: &MockBuildTestsClient{
+				ListFunc: func(context.Context, string, string, *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+					return []buildkite.TestWithMetrics{
+						{Test: buildkite.Test{ID: "no-suite", URL: "https://api.buildkite.com/v2/analytics/organizations/org/tests/no-suite"}},
+					}, &buildkite.Response{}, nil
+				},
 			},
-		},
-		TestExecutionsClient: &MockTestExecutionsClient{
-			GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, _ *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
-				scannedMu.Lock()
-				scanned = append(scanned, runID)
-				scannedMu.Unlock()
-				if runID == "run-2" {
-					return []buildkite.FailedExecution{{TestID: "no-suite", FailureReason: "found in build order"}}, &buildkite.Response{}, nil
-				}
-				return nil, &buildkite.Response{}, nil
+			TestExecutionsClient: &MockTestExecutionsClient{
+				GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, _ *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+					scannedMu.Lock()
+					scanned = append(scanned, runID)
+					scannedMu.Unlock()
+					if runID == "run-2" {
+						return []buildkite.FailedExecution{{TestID: "no-suite", FailureReason: "found in build order"}}, &buildkite.Response{}, nil
+					}
+					return nil, &buildkite.Response{}, nil
+				},
 			},
-		},
+		}
+		jobs := make([]FailureSummaryJob, 1)
+		warnings, err := loadFailureJobTests(context.Background(), deps, args, build, sourceJobs, jobs, 10, maxRuns, true)
+		require.NoError(t, err)
+		require.Len(t, jobs[0].FailedTests, 1)
+		slices.Sort(scanned)
+		return scanned, warnings, jobs[0].FailedTests[0]
 	}
 
-	jobs := make([]FailureSummaryJob, 1)
-	warnings, err := loadFailureJobTests(context.Background(), deps, args, build, sourceJobs, jobs, 10, 5, true)
-	require.NoError(t, err)
-	require.Empty(t, warnings)
-	slices.Sort(scanned)
-	require.Equal(t, []string{"run-1", "run-2"}, scanned, "a test with no readable suite falls back to scanning runs in build order")
-	require.Equal(t, "found in build order", jobs[0].FailedTests[0].FailureReason)
-	require.Equal(t, "suite-2", jobs[0].FailedTests[0].TestSuiteSlug, "the matching run fills in the suite the URL could not")
-	require.Empty(t, jobs[0].FailedTests[0].FailureDetailStatus)
+	t.Run("cap of 1 scans only the first build-order run", func(t *testing.T) {
+		scanned, warnings, entry := load(t, 1)
+		require.Equal(t, []string{"run-1"}, scanned, "with room for one run, the fallback takes the first run listed on the build, not a later one")
+		require.Len(t, warnings, 1, "an unranked test makes every listed run a candidate, so the cap leaving two unscanned is a warning")
+		require.Contains(t, warnings[0], "1 of 3 Test Engine runs")
+		require.Contains(t, warnings[0], "no readable suite")
+		require.Contains(t, warnings[0], "max_test_runs")
+		require.Empty(t, entry.FailureReason)
+		require.Equal(t, failureDetailStatusNotRetrieved, entry.FailureDetailStatus, "the execution sits in an unscanned run, so the entry is marked")
+		require.Empty(t, entry.TestSuiteSlug, "no suite could be read from the URL and no scanned execution filled it in")
+		require.Empty(t, entry.RunID, "no suite means no run to guess")
+	})
+
+	t.Run("cap of 5 scans every run in build order", func(t *testing.T) {
+		scanned, warnings, entry := load(t, 5)
+		require.Equal(t, []string{"run-1", "run-2", "run-3"}, scanned, "a test with no readable suite falls back to scanning every run in build order")
+		require.Empty(t, warnings, "three runs fit within the cap, so nothing is left unscanned")
+		require.Equal(t, "found in build order", entry.FailureReason)
+		require.Equal(t, "suite-2", entry.TestSuiteSlug, "the matching run fills in the suite the URL could not")
+		require.Empty(t, entry.FailureDetailStatus)
+	})
 }
 
 func TestLoadFailureJobTestsNotRetrievedRunIDIsOnlySetWhenUsable(t *testing.T) {

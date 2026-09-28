@@ -117,10 +117,12 @@ type FailureSummaryAnnotation struct {
 // are excluded by the per-job "result:^failed" tag filter. Failure detail
 // fields come from the newest matching failed execution found while scanning
 // the Test Engine runs that hold the returned tests, most affected runs
-// first. When no execution was matched for the test — its run was past the
-// scan cap, past the first page of the run's failed executions, unlisted on
-// the build, or the lookup failed — failure_detail_status says so, and
-// get_failed_executions with test_suite_slug and run_id fetches the detail.
+// first; a test whose suite cannot be read from its URL falls back to the
+// build's runs in listed order. When no execution was matched for the test —
+// its run was past the scan cap, past the first page of the run's failed
+// executions, unlisted on the build, or the lookup failed —
+// failure_detail_status says so, and get_failed_executions with
+// test_suite_slug and run_id fetches the detail.
 type FailureSummaryFailedTest struct {
 	TestID              string                      `json:"test_id"`
 	Name                string                      `json:"name,omitempty"`
@@ -675,9 +677,13 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 		return warnings, nil
 	}
 
-	runs, affectedRuns := failureSummaryRunsToScan(build.TestEngine.Runs, runsBySuite, targetsByTestID, maxRuns)
-	if affectedRuns > len(runs) {
-		warnings = append(warnings, fmt.Sprintf("test failure details cover only the %d most affected of %d Test Engine runs for suites holding returned failed tests; raise max_test_runs to scan more", len(runs), affectedRuns))
+	runs, candidateRuns, unranked := failureSummaryRunsToScan(build.TestEngine.Runs, runsBySuite, targetsByTestID, maxRuns)
+	if candidateRuns > len(runs) {
+		if unranked {
+			warnings = append(warnings, fmt.Sprintf("test failure details cover only %d of %d Test Engine runs; some returned failed tests have no readable suite, so any unscanned run may hold their detail; raise max_test_runs to scan more", len(runs), candidateRuns))
+		} else {
+			warnings = append(warnings, fmt.Sprintf("test failure details cover only the %d most affected of %d Test Engine runs for suites holding returned failed tests; raise max_test_runs to scan more", len(runs), candidateRuns))
+		}
 	}
 
 	executionsByRun := make([][]buildkite.FailedExecution, len(runs))
@@ -793,9 +799,12 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 // instead of maxRuns misses. Tests whose suite could not be read from their
 // URL cannot be ranked, so when any exist and slots remain, the remaining
 // runs fill the slots in build order as a fallback. The second result is the
-// number of runs belonging to suites that hold returned tests, so the caller
-// can say how many were left unscanned.
-func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, runsBySuite map[string][]buildkite.TestEngineRun, targetsByTestID map[string][]failureSummaryFailedTestTarget, maxRuns int) ([]buildkite.TestEngineRun, int) {
+// number of candidate runs: the runs belonging to suites that hold returned
+// tests, or every run the build lists when an unranked test exists, since any
+// run may hold its execution. The caller compares it with the runs returned
+// to say how many candidates were left unscanned. The third result reports
+// whether an unranked test exists, so the caller can word that warning.
+func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, runsBySuite map[string][]buildkite.TestEngineRun, targetsByTestID map[string][]failureSummaryFailedTestTarget, maxRuns int) ([]buildkite.TestEngineRun, int, bool) {
 	testsBySuite := map[string]int{}
 	unranked := false
 	for _, targets := range targetsByTestID {
@@ -811,10 +820,15 @@ func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, runsBySuite map[st
 	}
 
 	ranked := make([]string, 0, len(testsBySuite))
-	affectedRuns := 0
+	candidateRuns := 0
 	for slug := range testsBySuite {
 		ranked = append(ranked, slug)
-		affectedRuns += len(runsBySuite[slug])
+		candidateRuns += len(runsBySuite[slug])
+	}
+	if unranked {
+		// runsBySuite is built from runs, so the ranked suites' runs are a
+		// subset of the build's runs and every listed run is a candidate.
+		candidateRuns = len(runs)
 	}
 	slices.SortFunc(ranked, func(a, b string) int {
 		if testsBySuite[a] != testsBySuite[b] {
@@ -841,7 +855,7 @@ func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, runsBySuite map[st
 			take(run)
 		}
 	}
-	return selected, affectedRuns
+	return selected, candidateRuns, unranked
 }
 
 // markFailureDetailNotRetrieved labels every returned failed test entry that
