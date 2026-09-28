@@ -45,6 +45,22 @@ type WebhookInfo struct {
 	NextSteps []string `json:"next_steps,omitempty"`
 }
 
+func webhookErrorCode(err error) (string, bool) {
+	var errResp *buildkite.ErrorResponse
+	if !errors.As(err, &errResp) || errResp.Response == nil || errResp.Response.StatusCode != http.StatusUnprocessableEntity {
+		return "", false
+	}
+
+	var webhookError struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(errResp.RawBody, &webhookError) != nil || webhookError.Code == "" {
+		return "", false
+	}
+
+	return webhookError.Code, true
+}
+
 func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "list_pipelines",
@@ -317,15 +333,8 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 					result.Webhook.Error = err.Error()
 					result.Webhook.Note = "Pipeline created successfully, but webhook creation failed."
 
-					var errResp *buildkite.ErrorResponse
-					var webhookError struct {
-						Code string `json:"code"`
-					}
-					if errors.As(err, &errResp) &&
-						errResp.Response != nil &&
-						errResp.Response.StatusCode == http.StatusUnprocessableEntity &&
-						json.Unmarshal(errResp.RawBody, &webhookError) == nil {
-						switch webhookError.Code {
+					if code, ok := webhookErrorCode(err); ok {
+						switch code {
 						case "github_app_required":
 							result.Webhook.Note = "Pipeline created successfully, but its GitHub webhook could not be created automatically. Do not recreate the pipeline."
 							if pipelineURL, parseErr := url.Parse(pipeline.WebURL); parseErr == nil && pipelineURL.IsAbs() && pipelineURL.Host != "" {
@@ -386,8 +395,8 @@ func CreatePipelineWebhook() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineWebhook
 			return mcpTextResult(span, &result)
 		}
 
-		var errResp *buildkite.ErrorResponse
-		if !errors.As(err, &errResp) || errResp.Response == nil || errResp.Response.StatusCode != http.StatusUnprocessableEntity {
+		code, ok := webhookErrorCode(err)
+		if !ok {
 			return handleBuildkiteError(err)
 		}
 
@@ -395,20 +404,16 @@ func CreatePipelineWebhook() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineWebhook
 			Created: false,
 			Error:   err.Error(),
 		}
-		switch errResp.Message {
-		case "Auto-creating webhooks is not supported for your repository.":
+		switch code {
+		case "github_app_required":
 			result.Note = "The webhook could not be created automatically because the pipeline is not connected through a compatible Buildkite GitHub App."
 			result.SetupURL = fmt.Sprintf("https://buildkite.com/organizations/%s/repository-providers", args.OrgSlug)
 			result.NextSteps = []string{
 				"Open setup_url and connect a compatible Buildkite GitHub App, or grant the existing app access to this repository.",
 				fmt.Sprintf("Open https://buildkite.com/%s/%s, then open Settings > GitHub > Setup Instructions.", args.OrgSlug, args.PipelineSlug),
 			}
-		case "Webhooks could not be created for your repository.":
-			result.Note = "Buildkite could not create another webhook. A webhook may already exist; inspect the pipeline's GitHub settings before retrying."
-			result.NextSteps = []string{
-				fmt.Sprintf("Open https://buildkite.com/%s/%s, then open Settings > GitHub > Setup Instructions and verify the webhook setup.", args.OrgSlug, args.PipelineSlug),
-				"Do not retry until you have confirmed that the pipeline does not already have a GitHub webhook.",
-			}
+		case "unsupported_repository_provider":
+			result.Note = "The webhook could not be created automatically because automatic webhook creation is unsupported for this repository provider."
 		default:
 			return handleBuildkiteError(err)
 		}

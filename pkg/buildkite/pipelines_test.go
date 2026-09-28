@@ -504,61 +504,100 @@ func TestCreatePipelineWebhook(t *testing.T) {
 	requireJSONPathEqual(t, text, "Webhook created successfully.", "note")
 }
 
-func TestCreatePipelineWebhookWithUnsupportedRepository(t *testing.T) {
-	client := &MockPipelinesClient{
-		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
-			return nil, &buildkite.ErrorResponse{
+func TestCreatePipelineWebhookWithCodedError(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		note     string
+		setupURL string
+	}{
+		{
+			name:     "GitHub App required",
+			body:     `{"message":"Auto-creating webhooks requires a GitHub App to be installed and configured with access to the repository \"example/repo\".","code":"github_app_required"}`,
+			note:     "The webhook could not be created automatically because the pipeline is not connected through a compatible Buildkite GitHub App.",
+			setupURL: "https://buildkite.com/organizations/org/repository-providers",
+		},
+		{
+			name: "unsupported provider",
+			body: `{"message":"Auto-creating webhooks is only supported for GitHub and GitHub Enterprise repositories. The pipeline's repository provider was detected as \"Bitbucket\".","code":"unsupported_repository_provider"}`,
+			note: "The webhook could not be created automatically because automatic webhook creation is unsupported for this repository provider.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			webhookErr := &buildkite.ErrorResponse{
 				Response: &http.Response{
 					StatusCode: http.StatusUnprocessableEntity,
 					Request:    httptest.NewRequest(http.MethodPost, "https://api.buildkite.com/v2/organizations/org/pipelines/pipeline/webhook", nil),
 				},
-				Message: "Auto-creating webhooks is not supported for your repository.",
+				RawBody: []byte(tt.body),
 			}
-		},
+			require.NoError(t, json.Unmarshal(webhookErr.RawBody, webhookErr))
+
+			client := &MockPipelinesClient{
+				AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
+					return nil, webhookErr
+				},
+			}
+			ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+			_, handler, _ := CreatePipelineWebhook()
+
+			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{
+				OrgSlug:      "org",
+				PipelineSlug: "pipeline",
+			})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+
+			text := getTextResult(t, result).Text
+			requireJSONPathEqual(t, text, false, "created")
+			requireJSONPathEqual(t, text, tt.note, "note")
+			if tt.setupURL != "" {
+				requireJSONPathEqual(t, text, tt.setupURL, "setup_url")
+				requireJSONPathEqual(t, text, "Open setup_url and connect a compatible Buildkite GitHub App, or grant the existing app access to this repository.", "next_steps", 0)
+				requireJSONPathEqual(t, text, "Open https://buildkite.com/org/pipeline, then open Settings > GitHub > Setup Instructions.", "next_steps", 1)
+			} else {
+				require.NotContains(t, text, `"setup_url"`)
+				require.NotContains(t, text, `"next_steps"`)
+			}
+		})
 	}
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
-	_, handler, _ := CreatePipelineWebhook()
-
-	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-	})
-	require.NoError(t, err)
-	require.False(t, result.IsError)
-
-	text := getTextResult(t, result).Text
-	requireJSONPathEqual(t, text, false, "created")
-	requireJSONPathEqual(t, text, "https://buildkite.com/organizations/org/repository-providers", "setup_url")
-	requireJSONPathEqual(t, text, "Open setup_url and connect a compatible Buildkite GitHub App, or grant the existing app access to this repository.", "next_steps", 0)
-	requireJSONPathEqual(t, text, "Open https://buildkite.com/org/pipeline, then open Settings > GitHub > Setup Instructions.", "next_steps", 1)
 }
 
-func TestCreatePipelineWebhookWhenWebhookMayExist(t *testing.T) {
-	client := &MockPipelinesClient{
-		AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
-			return nil, &buildkite.ErrorResponse{
+func TestCreatePipelineWebhookWithUnrecognized422(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "uncoded", body: `{"message":"Webhook could not be created for your repository."}`},
+		{name: "unknown code", body: `{"message":"Another failure","code":"other_failure"}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			webhookErr := &buildkite.ErrorResponse{
 				Response: &http.Response{
 					StatusCode: http.StatusUnprocessableEntity,
 					Request:    httptest.NewRequest(http.MethodPost, "https://api.buildkite.com/v2/organizations/org/pipelines/pipeline/webhook", nil),
 				},
-				Message: "Webhooks could not be created for your repository.",
+				RawBody: []byte(tt.body),
 			}
-		},
+			require.NoError(t, json.Unmarshal(webhookErr.RawBody, webhookErr))
+			client := &MockPipelinesClient{
+				AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
+					return nil, webhookErr
+				},
+			}
+			ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+			_, handler, _ := CreatePipelineWebhook()
+
+			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{})
+			require.NoError(t, err)
+			require.True(t, result.IsError)
+			require.JSONEq(t, tt.body, getTextResult(t, result).Text)
+		})
 	}
-	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
-	_, handler, _ := CreatePipelineWebhook()
-
-	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{
-		OrgSlug:      "org",
-		PipelineSlug: "pipeline",
-	})
-	require.NoError(t, err)
-	require.False(t, result.IsError)
-
-	text := getTextResult(t, result).Text
-	requireJSONPathEqual(t, text, false, "created")
-	requireJSONPathEqual(t, text, "Buildkite could not create another webhook. A webhook may already exist; inspect the pipeline's GitHub settings before retrying.", "note")
-	requireJSONPathEqual(t, text, "Do not retry until you have confirmed that the pipeline does not already have a GitHub webhook.", "next_steps", 1)
 }
 
 func TestCreatePipelineWebhookWithForbiddenError(t *testing.T) {
