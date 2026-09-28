@@ -1,6 +1,7 @@
 [settings]
 experimental = true
 lockfile = true
+aqua.slsa = false
 github.github_attestations = false
 github.slsa = false
 
