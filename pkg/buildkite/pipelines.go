@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
@@ -43,6 +45,15 @@ type WebhookInfo struct {
 	Note      string   `json:"note,omitempty"`
 	SetupURL  string   `json:"setup_url,omitempty"`
 	NextSteps []string `json:"next_steps,omitempty"`
+}
+
+var buildkiteSlugPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,99}$`)
+
+func validateBuildkiteSlug(name, slug string) error {
+	if !buildkiteSlugPattern.MatchString(slug) {
+		return fmt.Errorf("%s must be 1-100 characters, start with a letter or number, and contain only letters, numbers, or hyphens", name)
+	}
+	return nil
 }
 
 func webhookErrorCode(err error) (string, bool) {
@@ -384,6 +395,13 @@ func CreatePipelineWebhook() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineWebhook
 			attribute.String("org_slug", args.OrgSlug),
 			attribute.String("pipeline_slug", args.PipelineSlug),
 		)
+
+		if err := validateBuildkiteSlug("org_slug", args.OrgSlug); err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
+		if err := validateBuildkiteSlug("pipeline_slug", args.PipelineSlug); err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
 
 		deps := DepsFromContext(ctx)
 		_, err := deps.PipelinesClient.AddWebhook(ctx, args.OrgSlug, args.PipelineSlug)

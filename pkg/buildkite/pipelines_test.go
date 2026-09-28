@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v5"
@@ -504,6 +505,55 @@ func TestCreatePipelineWebhook(t *testing.T) {
 	requireJSONPathEqual(t, text, "Webhook created successfully.", "note")
 }
 
+func TestCreatePipelineWebhookRejectsInvalidSlugs(t *testing.T) {
+	tests := []struct {
+		name         string
+		orgSlug      string
+		pipelineSlug string
+		errorMessage string
+	}{
+		{
+			name:         "organization path traversal",
+			orgSlug:      "org/pipelines/victim",
+			pipelineSlug: "pipeline",
+			errorMessage: "org_slug must be 1-100 characters, start with a letter or number, and contain only letters, numbers, or hyphens",
+		},
+		{
+			name:         "pipeline endpoint injection",
+			orgSlug:      "org",
+			pipelineSlug: "victim/archive?ignored=",
+			errorMessage: "pipeline_slug must be 1-100 characters, start with a letter or number, and contain only letters, numbers, or hyphens",
+		},
+		{
+			name:         "pipeline slug too long",
+			orgSlug:      "org",
+			pipelineSlug: strings.Repeat("a", 101),
+			errorMessage: "pipeline_slug must be 1-100 characters, start with a letter or number, and contain only letters, numbers, or hyphens",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &MockPipelinesClient{
+				AddWebhookFunc: func(ctx context.Context, org string, slug string) (*buildkite.Response, error) {
+					t.Fatal("AddWebhook must not be called with an invalid slug")
+					return nil, nil
+				},
+			}
+			ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
+			_, handler, _ := CreatePipelineWebhook()
+
+			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{
+				OrgSlug:      tt.orgSlug,
+				PipelineSlug: tt.pipelineSlug,
+			})
+			require.NoError(t, err)
+			require.True(t, result.IsError)
+			require.Equal(t, tt.errorMessage, getTextResult(t, result).Text)
+		})
+	}
+}
+
 func TestCreatePipelineWebhookWithCodedError(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -592,7 +642,10 @@ func TestCreatePipelineWebhookWithUnrecognized422(t *testing.T) {
 			ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
 			_, handler, _ := CreatePipelineWebhook()
 
-			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{})
+			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{
+				OrgSlug:      "org",
+				PipelineSlug: "pipeline",
+			})
 			require.NoError(t, err)
 			require.True(t, result.IsError)
 			require.JSONEq(t, tt.body, getTextResult(t, result).Text)
@@ -612,7 +665,10 @@ func TestCreatePipelineWebhookWithForbiddenError(t *testing.T) {
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
 	_, handler, _ := CreatePipelineWebhook()
 
-	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{})
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+	})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Equal(t, "Forbidden", getTextResult(t, result).Text)
@@ -627,7 +683,10 @@ func TestCreatePipelineWebhookWithGenericError(t *testing.T) {
 	ctx := ContextWithDeps(context.Background(), ToolDependencies{PipelinesClient: client})
 	_, handler, _ := CreatePipelineWebhook()
 
-	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{})
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CreatePipelineWebhookArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+	})
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Equal(t, "request timed out", getTextResult(t, result).Text)
