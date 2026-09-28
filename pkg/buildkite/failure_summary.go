@@ -808,9 +808,14 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 
 // failureSummaryRunsToScan picks the Test Engine runs whose failed executions
 // are worth fetching for the returned failed tests. Suites are ranked by how
-// many returned tests belong to them, most first (slug order breaks ties, so
-// the choice is stable), and every run the build lists for a ranked suite is
-// taken in build order until maxRuns is reached. A suite can list more than
+// many distinct returned tests belong to them, most first. A test that failed
+// in several jobs (a matrix, say) is returned once per job but counted once:
+// distinct tests approximate distinct problems, and ranking by entries would
+// hand the slots to matrix suites whose entries most likely repeat the same
+// detail. Among suites with the same distinct count, the one with more
+// returned entries wins, since one scan of its run fills them all; slug order
+// breaks any remaining tie so the choice is stable. Every run the build lists
+// for a ranked suite is taken in build order until maxRuns is reached. A suite can list more than
 // one run in a build (separate uploads with different run keys), and the
 // build tests list does not say which run holds a test's execution, so
 // keeping only one run per suite could leave a test unretrieved while slots
@@ -826,6 +831,7 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 // whether an unranked test exists, so the caller can word that warning.
 func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, runsBySuite map[string][]buildkite.TestEngineRun, targetsByTestID map[string][]failureSummaryFailedTestTarget, maxRuns int) ([]buildkite.TestEngineRun, int, bool) {
 	testsBySuite := map[string]int{}
+	entriesBySuite := map[string]int{}
 	unranked := false
 	for _, targets := range targetsByTestID {
 		slug := ""
@@ -837,6 +843,7 @@ func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, runsBySuite map[st
 			continue
 		}
 		testsBySuite[slug]++
+		entriesBySuite[slug] += len(targets)
 	}
 
 	ranked := make([]string, 0, len(testsBySuite))
@@ -853,6 +860,9 @@ func failureSummaryRunsToScan(runs []buildkite.TestEngineRun, runsBySuite map[st
 	slices.SortFunc(ranked, func(a, b string) int {
 		if testsBySuite[a] != testsBySuite[b] {
 			return testsBySuite[b] - testsBySuite[a]
+		}
+		if entriesBySuite[a] != entriesBySuite[b] {
+			return entriesBySuite[b] - entriesBySuite[a]
 		}
 		return strings.Compare(a, b)
 	})

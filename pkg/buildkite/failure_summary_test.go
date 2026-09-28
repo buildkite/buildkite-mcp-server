@@ -1496,6 +1496,70 @@ func TestLoadFailureJobTestsScansRunsHoldingTheMostFailedTests(t *testing.T) {
 	require.Contains(t, warnings[0], "max_test_runs")
 }
 
+func TestLoadFailureJobTestsBreaksSuiteTiesByReturnedEntries(t *testing.T) {
+	args := GetBuildFailureSummaryArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1"}
+	build := buildkite.Build{
+		ID:         "build-uuid",
+		FinishedAt: buildkite.NewTimestamp(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)),
+		TestEngine: &buildkite.TestEngineProperty{Runs: []buildkite.TestEngineRun{
+			{ID: "run-1", Suite: buildkite.TestEngineSuite{Slug: "suite-1"}},
+			{ID: "run-2", Suite: buildkite.TestEngineSuite{Slug: "suite-2"}},
+		}},
+	}
+	testURL := func(suite, id string) string {
+		return fmt.Sprintf("https://api.buildkite.com/v2/analytics/organizations/org/suites/%s/tests/%s", suite, id)
+	}
+	// suite-2's one test failed in two matrix jobs, so it is returned twice;
+	// suite-1's one test failed in one job. Both hold one distinct test, and
+	// slug order alone would pick suite-1.
+	sourceJobs := []buildkite.Job{{ID: "job-single", State: "failed"}, {ID: "job-matrix-a", State: "failed"}, {ID: "job-matrix-b", State: "failed"}}
+	var scannedMu sync.Mutex
+	var scanned []string
+	deps := ToolDependencies{
+		BuildTestsClient: &MockBuildTestsClient{
+			ListFunc: func(_ context.Context, _, _ string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
+				if opt.Tags == "build.job_id:job-single,result:^failed" {
+					return []buildkite.TestWithMetrics{{Test: buildkite.Test{ID: "single", URL: testURL("suite-1", "single")}}}, &buildkite.Response{}, nil
+				}
+				return []buildkite.TestWithMetrics{{Test: buildkite.Test{ID: "matrix", URL: testURL("suite-2", "matrix")}}}, &buildkite.Response{}, nil
+			},
+		},
+		TestExecutionsClient: &MockTestExecutionsClient{
+			GetFailedExecutionsFunc: func(_ context.Context, _, _, runID string, _ *buildkite.FailedExecutionsOptions) ([]buildkite.FailedExecution, *buildkite.Response, error) {
+				scannedMu.Lock()
+				scanned = append(scanned, runID)
+				scannedMu.Unlock()
+				if runID != "run-2" {
+					return nil, nil, fmt.Errorf("run %s should lose the tie", runID)
+				}
+				return []buildkite.FailedExecution{
+					{TestID: "matrix", FailureReason: "matrix a reason", Tags: map[string]string{failureSummaryJobIDTag: "job-matrix-a"}},
+					{TestID: "matrix", FailureReason: "matrix b reason", Tags: map[string]string{failureSummaryJobIDTag: "job-matrix-b"}},
+				}, &buildkite.Response{}, nil
+			},
+		},
+	}
+
+	jobs := make([]FailureSummaryJob, 3)
+	warnings, err := loadFailureJobTests(context.Background(), deps, args, build, sourceJobs, jobs, 10, 1, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"run-2"}, scanned, "with one slot, the suite returned in more jobs wins the distinct-test tie, whatever the slug order")
+
+	byJob := map[string]FailureSummaryFailedTest{}
+	for i, job := range jobs {
+		require.Len(t, job.FailedTests, 1)
+		byJob[sourceJobs[i].ID] = job.FailedTests[0]
+	}
+	require.Equal(t, "matrix a reason", byJob["job-matrix-a"].FailureReason)
+	require.Equal(t, "matrix b reason", byJob["job-matrix-b"].FailureReason, "one scan of the run fills every matrix entry")
+	require.Empty(t, byJob["job-single"].FailureReason)
+	require.Equal(t, failureDetailStatusNotRetrieved, byJob["job-single"].FailureDetailStatus)
+	require.Equal(t, "run-1", byJob["job-single"].RunID, "the losing suite keeps its drill-down handle")
+
+	require.Len(t, warnings, 1)
+	require.Contains(t, warnings[0], "1 most affected of 2 Test Engine runs")
+}
+
 func TestLoadFailureJobTestsScansEveryRunOfAnAffectedSuite(t *testing.T) {
 	args := GetBuildFailureSummaryArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1"}
 	build := buildkite.Build{
