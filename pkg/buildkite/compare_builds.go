@@ -225,7 +225,7 @@ func loadComparisonJobs(ctx context.Context, client JobsClient, args CompareBuil
 	includeRetried := false
 	options := &buildkite.JobsListOptions{PerPage: 100, IncludeRetriedJobs: &includeRetried}
 	var jobs []buildkite.Job
-	for page := 0; page < comparisonJobPages; page++ {
+	for range comparisonJobPages {
 		list, _, err := client.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, number, options)
 		if err != nil {
 			return nil, err

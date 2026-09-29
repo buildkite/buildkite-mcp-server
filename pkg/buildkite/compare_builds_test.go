@@ -175,7 +175,7 @@ func TestCompareBuildJobsUnkeyedPipeline(t *testing.T) {
 
 func TestCompareBuildJobsOutputLimit(t *testing.T) {
 	var jobs []buildkite.Job
-	for i := 0; i < 110; i++ {
+	for i := range 110 {
 		jobs = append(jobs, buildkite.Job{StepKey: fmt.Sprint(i), State: "passed"})
 	}
 	result := BuildComparison{Baseline: &BuildSummary{}, ChangeCounts: map[string]int{}}
@@ -345,7 +345,7 @@ func TestCompareBuildsLogEvidence(t *testing.T) {
 	}}
 	jobs := &MockJobsClient{ListByBuildFunc: func(_ context.Context, _, _, number string, _ *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
 		var list buildkite.JobsList
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			state := "passed"
 			if number == "42" {
 				state = "failed"
