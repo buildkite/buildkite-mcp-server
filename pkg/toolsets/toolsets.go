@@ -237,25 +237,27 @@ func NewTool(tool mcp.Tool, register func(s *mcp.Server), scopes []string) ToolD
 }
 
 const (
-	ToolsetAll            = "all" // Special name to enable all toolsets
-	ToolsetClusters       = "clusters"
-	ToolsetClusterSecrets = "cluster_secrets"
-	ToolsetAgents         = "agents"
-	ToolsetPipelines      = "pipelines"
-	ToolsetBuilds         = "builds"
-	ToolsetArtifacts      = "artifacts"
-	ToolsetLogs           = "logs"
-	ToolsetTests          = "tests"
-	ToolsetAnnotations    = "annotations"
-	ToolsetInvestigations = "investigations"
-	ToolsetUser           = "user"
-	ToolsetSkills         = "skills"
+	ToolsetAll             = "all" // Special name to enable all toolsets
+	ToolsetClusters        = "clusters"
+	ToolsetClusterSecrets  = "cluster_secrets"
+	ToolsetCacheRegistries = "cache_registries"
+	ToolsetAgents          = "agents"
+	ToolsetPipelines       = "pipelines"
+	ToolsetBuilds          = "builds"
+	ToolsetArtifacts       = "artifacts"
+	ToolsetLogs            = "logs"
+	ToolsetTests           = "tests"
+	ToolsetAnnotations     = "annotations"
+	ToolsetInvestigations  = "investigations"
+	ToolsetUser            = "user"
+	ToolsetSkills          = "skills"
 )
 
 var ValidToolsets = []string{
 	ToolsetAll,
 	ToolsetClusters,
 	ToolsetClusterSecrets,
+	ToolsetCacheRegistries,
 	ToolsetAgents,
 	ToolsetPipelines,
 	ToolsetBuilds,
@@ -349,6 +351,18 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.GetClusterSecret),
 				newToolDef(buildkite.ListClusterSecrets),
 				newToolDef(buildkite.CreateClusterSecret),
+			},
+		},
+		ToolsetCacheRegistries: {
+			Name:        "Cache Registry Management",
+			Description: "Tools for managing Buildkite cache registries",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListCacheRegistries),
+				newToolDef(buildkite.GetCacheRegistry),
+				newToolDef(buildkite.CreateCacheRegistry),
+				newToolDef(buildkite.UpdateCacheRegistry),
+				newToolDef(buildkite.SetDefaultCacheRegistry),
+				newToolDef(buildkite.DeleteCacheRegistry),
 			},
 		},
 		ToolsetAgents: {

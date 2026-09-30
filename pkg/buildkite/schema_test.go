@@ -168,6 +168,27 @@ func TestUpdatePipelineScheduleArgsSchema(t *testing.T) {
 	}
 }
 
+func TestCacheRegistryArgsSchemas(t *testing.T) {
+	require.Equal(t, []string{"cluster_id", "org_slug"}, sortedRequired[ListCacheRegistriesArgs](t))
+	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[GetCacheRegistryArgs](t))
+	require.Equal(t, []string{"cluster_id", "name", "org_slug"}, sortedRequired[CreateCacheRegistryArgs](t))
+	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[UpdateCacheRegistryArgs](t))
+	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[SetDefaultCacheRegistryArgs](t))
+	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[DeleteCacheRegistryArgs](t))
+
+	for _, schema := range []*jsonschema.Schema{schemaFor[CreateCacheRegistryArgs](t), schemaFor[UpdateCacheRegistryArgs](t)} {
+		require.Contains(t, schema.Properties["policy"].Types, "object")
+		require.Contains(t, schema.Properties["policy"].Types, "null")
+		for _, optional := range []string{"description", "emoji", "color", "policy"} {
+			require.NotContains(t, schema.Required, optional)
+		}
+	}
+
+	updateSchema := schemaFor[UpdateCacheRegistryArgs](t)
+	require.Equal(t, "string", updateSchema.Properties["name"].Type)
+	require.Empty(t, updateSchema.Properties["name"].Types)
+}
+
 func TestCreateBuildArgsSchema(t *testing.T) {
 	req := sortedRequired[CreateBuildArgs](t)
 	require.Equal(t, []string{"branch", "commit", "message", "org_slug", "pipeline_slug"}, req)
