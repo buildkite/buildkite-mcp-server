@@ -26,7 +26,7 @@ func TestGetBuildFailureSummaryToolDefinition(t *testing.T) {
 	require.Equal(t, "get_build_failure_summary", tool.Name)
 	require.True(t, tool.Annotations.ReadOnlyHint)
 	require.Contains(t, tool.Description, "one call")
-	require.Equal(t, []string{"read_builds", "read_build_logs", "read_suites"}, scopes)
+	require.Equal(t, []string{"read_builds", "read_build_logs", "read_suites", "read_job_errors"}, scopes)
 	require.NotNil(t, handler)
 }
 

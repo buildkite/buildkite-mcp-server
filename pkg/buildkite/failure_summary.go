@@ -53,6 +53,7 @@ type GetBuildFailureSummaryArgs struct {
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to scan for failure details of the returned failed tests (default 5, max 20); the runs holding the most returned failed tests are scanned first"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed Test Engine tests to return for the build (default 50, max 100)"`
 	ContentLimitBytes      int    `json:"content_limit_bytes,omitempty" jsonschema:"Maximum bytes for the response payload (default and max 262144); lower it to fit clients with small tool-result limits, combining with log_tail and max_jobs for finer trimming"`
+	IncludeJobErrors       *bool  `json:"include_job_errors,omitempty" jsonschema:"Include the first five structured error records per problem job (default true); requires read_job_errors. Records may contain multiple findings. Set include_logs false for errors-first diagnosis without logs"`
 	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed, timed-out, canceled, and promised-failing jobs (default true)"`
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include Test Engine tests whose executions in this build all failed, when the build has Test Engine runs (default true)"`
@@ -87,6 +88,7 @@ type FailureSummaryLogEntry struct {
 
 type FailureSummaryJob struct {
 	JobSummary
+	JobErrors            *FailureSummaryJobErrors `json:"job_errors,omitempty"`
 	PromisedExitStatus   *int                     `json:"promised_exit_status,omitempty"`
 	PromisedExitStatusAt *buildkite.Timestamp     `json:"promised_exit_status_at,omitempty"`
 	ExpiredAt            *buildkite.Timestamp     `json:"expired_at,omitempty"`
@@ -1076,6 +1078,11 @@ func limitFailureTest(test *FailureSummaryFailedTest, limit int, sectionRemainin
 
 func applyFailureSummaryContentLimits(result *BuildFailureSummary) {
 	result.ContentLimitBytes = failureSummaryContentByteLimit
+	for _, job := range result.Jobs {
+		if job.JobErrors != nil && job.JobErrors.ContentTruncated {
+			result.ContentTruncated = true
+		}
+	}
 
 	logRemaining := failureSummaryLogContentByteLimit
 	logItemsRemaining := 0
@@ -1286,6 +1293,18 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 		return err
 	}
 
+	// Drop whole capture records rather than rewriting tool-specific context or
+	// silently shortening a file path, rule, or grouped finding.
+	errorRecords := 0
+	for _, job := range result.Jobs {
+		if job.JobErrors != nil {
+			errorRecords = max(errorRecords, len(job.JobErrors.Items))
+		}
+	}
+	if err := shrinkFailureSummaryToFit(result, limit, errorRecords, failureSummaryWithJobErrorLimit, failureSummaryPayloadBytes); err != nil {
+		return err
+	}
+
 	structureReductions := []struct {
 		maxEntries func(*BuildFailureSummary) int
 		withLimit  func(*BuildFailureSummary, int) BuildFailureSummary
@@ -1324,7 +1343,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Start with include_logs=false for structured errors without raw logs. Failed, timed-out, expired, canceled, and promised-failing jobs include job_errors with status found, none_recorded, or unavailable; missing capture never means success. Records preserve tool-specific context, including grouped file/line/rule/message findings. If job_errors.content_truncated is true, read job_errors.url to recover omitted records on the first page; next_url continues after that page. Check soft_failed before attributing the build failure to a job. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
@@ -1350,6 +1369,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			attribute.Int("max_test_runs", maxTestRuns),
 			attribute.Int("max_failed_tests", maxFailedTests),
 			attribute.Int("content_limit_bytes", contentLimit),
+			attribute.Bool("include_job_errors", defaultTrue(args.IncludeJobErrors)),
 			attribute.Bool("include_logs", defaultTrue(args.IncludeLogs)),
 			attribute.Bool("include_annotations", defaultTrue(args.IncludeAnnotations)),
 			attribute.Bool("include_failed_tests", defaultTrue(args.IncludeFailedTests)),
@@ -1447,6 +1467,12 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		}
 		result.JobsTruncated = jobsTruncated
 
+		if defaultTrue(args.IncludeJobErrors) {
+			if err := loadFailureJobErrors(ctx, deps.JobErrorsClient, args, result.Jobs); err != nil {
+				return nil, nil, err
+			}
+		}
+
 		if defaultTrue(args.IncludeLogs) && deps.BuildkiteLogsClient != nil {
 			if err := loadFailureLogs(ctx, deps.BuildkiteLogsClient, args, sourceJobs, result.Jobs, logTail); err != nil {
 				return nil, nil, err
@@ -1496,5 +1522,5 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		)
 
 		return mcpTextResultWithByteLimit(span, &result, contentLimit)
-	}, []string{"read_builds", "read_build_logs", "read_suites"}
+	}, []string{"read_builds", "read_build_logs", "read_suites", "read_job_errors"}
 }
