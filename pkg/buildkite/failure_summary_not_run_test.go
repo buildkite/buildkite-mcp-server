@@ -47,7 +47,7 @@ func TestGetBuildFailureSummaryFetchesDependencyFailedJobsBeforeBroken(t *testin
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 2,
 		IncludeLogs: &include, IncludeAnnotations: &include, IncludeFailedTests: &include,
-		IncludeNeverRanJobs: true,
+		IncludeNeverRanJobs: boolPtr(true),
 	})
 	require.NoError(t, err)
 

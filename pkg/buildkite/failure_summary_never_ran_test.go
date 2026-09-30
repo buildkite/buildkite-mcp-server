@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetBuildFailureSummaryOmitsNeverRanJobsByDefault(t *testing.T) {
+func TestGetBuildFailureSummaryOmitsNeverRanJobsWhenDisabled(t *testing.T) {
 	buildsClient := &MockBuildsClient{
 		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 			return buildkite.Build{
@@ -31,7 +31,7 @@ func TestGetBuildFailureSummaryOmitsNeverRanJobsByDefault(t *testing.T) {
 			case "canceled":
 				return buildkite.JobsList{Items: []buildkite.Job{{ID: "canceled", State: "canceled"}}}, &buildkite.Response{}, nil
 			default:
-				require.Failf(t, "unexpected job list", "never-ran states must not be fetched by default, got %v", options.State)
+				require.Failf(t, "unexpected job list", "never-ran states must not be fetched when include_never_ran_jobs is false, got %v", options.State)
 				return buildkite.JobsList{}, nil, nil
 			}
 		},
@@ -43,6 +43,7 @@ func TestGetBuildFailureSummaryOmitsNeverRanJobsByDefault(t *testing.T) {
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 10,
 		IncludeLogs: &include, IncludeAnnotations: &include, IncludeFailedTests: &include,
+		IncludeNeverRanJobs: &include,
 	})
 	require.NoError(t, err)
 
@@ -59,6 +60,61 @@ func TestGetBuildFailureSummaryOmitsNeverRanJobsByDefault(t *testing.T) {
 	require.False(t, summary.JobsTruncated, "skipped never-ran tiers must not count as truncation")
 	require.NotNil(t, summary.Build.JobStateCounts)
 	require.Equal(t, 153, summary.Build.JobStateCounts.States["broken"], "the census still reports the skipped states")
+}
+
+// With include_never_ran_jobs omitted, the never-ran tiers fill whatever
+// max_jobs budget the failed and canceled jobs left, dependency-failed first.
+func TestGetBuildFailureSummaryIncludesNeverRanJobsByDefault(t *testing.T) {
+	buildsClient := &MockBuildsClient{
+		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+			return buildkite.Build{
+				Number: 1, State: "failed",
+				JobStateCounts: &buildkite.JobStateCounts{Total: 156, States: map[string]int{"failed": 2, "waiting_failed": 1, "broken": 153}},
+			}, &buildkite.Response{}, nil
+		},
+	}
+	var calls []string
+	jobsClient := &MockJobsClient{
+		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+			calls = append(calls, options.State[0])
+			switch options.State[0] {
+			case "failed":
+				return buildkite.JobsList{Items: []buildkite.Job{
+					{ID: "shard-48", State: "failed"},
+					{ID: "shard-69", State: "failed"},
+				}}, &buildkite.Response{}, nil
+			case "canceled":
+				return buildkite.JobsList{Items: []buildkite.Job{{ID: "canceled", State: "canceled"}}}, &buildkite.Response{}, nil
+			case "waiting_failed":
+				return buildkite.JobsList{Items: []buildkite.Job{{ID: "verify", State: "waiting_failed"}}}, &buildkite.Response{}, nil
+			case "broken":
+				return buildkite.JobsList{Items: []buildkite.Job{{ID: "docs", State: "broken"}}}, &buildkite.Response{}, nil
+			default:
+				require.Failf(t, "unexpected job list", "unexpected job states %v", options.State)
+				return buildkite.JobsList{}, nil, nil
+			}
+		},
+	}
+	include := false
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: buildsClient, JobsClient: jobsClient})
+
+	_, handler, _ := GetBuildFailureSummary()
+	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 10,
+		IncludeLogs: &include, IncludeAnnotations: &include, IncludeFailedTests: &include,
+	})
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"failed", "canceled", "waiting_failed", "broken"}, calls)
+
+	var summary BuildFailureSummary
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
+	require.Equal(
+		t,
+		[]string{"shard-48", "shard-69", "canceled", "verify", "docs"},
+		[]string{summary.Jobs[0].ID, summary.Jobs[1].ID, summary.Jobs[2].ID, summary.Jobs[3].ID, summary.Jobs[4].ID},
+	)
+	require.False(t, summary.JobsTruncated)
 }
 
 // A further page of primary failures must keep jobs_truncated true even when
@@ -87,7 +143,7 @@ func TestGetBuildFailureSummaryPrimaryPageWithMoreOutranksShortJobList(t *testin
 			case "canceled":
 				return buildkite.JobsList{}, &buildkite.Response{}, nil
 			default:
-				require.Failf(t, "unexpected job list", "never-ran states must not be fetched by default, got %v", options.State)
+				require.Failf(t, "unexpected job list", "never-ran states must not be fetched when include_never_ran_jobs is false, got %v", options.State)
 				return buildkite.JobsList{}, nil, nil
 			}
 		},
@@ -99,6 +155,7 @@ func TestGetBuildFailureSummaryPrimaryPageWithMoreOutranksShortJobList(t *testin
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 3,
 		IncludeLogs: &include, IncludeAnnotations: &include, IncludeFailedTests: &include,
+		IncludeNeverRanJobs: &include,
 	})
 	require.NoError(t, err)
 
