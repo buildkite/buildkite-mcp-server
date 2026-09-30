@@ -263,7 +263,7 @@ func TestSetDefaultCacheRegistry(t *testing.T) {
 	tool, handler, scopes := SetDefaultCacheRegistry()
 	require.Equal(t, "set_default_cache_registry", tool.Name)
 	require.False(t, tool.Annotations.ReadOnlyHint)
-	require.Equal(t, boolPtr(false), tool.Annotations.DestructiveHint)
+	require.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
 	require.True(t, tool.Annotations.IdempotentHint)
 	require.Equal(t, []string{"write_clusters"}, scopes)
 

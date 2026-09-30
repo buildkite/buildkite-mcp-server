@@ -211,7 +211,7 @@ func SetDefaultCacheRegistry() (mcp.Tool, mcp.ToolHandlerFor[SetDefaultCacheRegi
 		Description: "Set a cluster's default cache registry by UUID. A cluster always has a default, so this switches it to another registry in the same cluster rather than clearing it. Returns the updated cluster",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Set Default Cache Registry",
-			DestructiveHint: boolPtr(false),
+			DestructiveHint: boolPtr(true),
 			IdempotentHint:  true,
 		},
 	}, func(ctx context.Context, request *mcp.CallToolRequest, args SetDefaultCacheRegistryArgs) (*mcp.CallToolResult, any, error) {
