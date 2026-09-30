@@ -18,6 +18,7 @@ type ToolDependencies struct {
 	PipelineSchedulesClient PipelineSchedulesClient
 	ClustersClient          ClustersClient
 	ClusterSecretsClient    ClusterSecretsClient
+	CacheRegistriesClient   CacheRegistriesClient
 	ClusterQueuesClient     ClusterQueuesClient
 	AgentsClient            AgentsClient
 	ArtifactsClient         ArtifactsClient

@@ -657,7 +657,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered
-	expectedToolsets := []string{"clusters", "cluster_secrets", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
+	expectedToolsets := []string{"clusters", "cluster_secrets", "cache_registries", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "skills"}
 	for _, name := range expectedToolsets {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
@@ -794,4 +794,31 @@ func TestClusterSecretsToolset(t *testing.T) {
 			true,
 		),
 	)
+}
+
+func TestCacheRegistriesToolset(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+
+	cacheRegistries, exists := registry.Get(ToolsetCacheRegistries)
+	require.True(t, exists)
+	toolNames := make([]string, 0, len(cacheRegistries.Tools))
+	for _, tool := range cacheRegistries.Tools {
+		toolNames = append(toolNames, tool.Tool.Name)
+	}
+	require.Equal(t, []string{
+		"list_cache_registries",
+		"get_cache_registry",
+		"create_cache_registry",
+		"update_cache_registry",
+		"set_default_cache_registry",
+		"delete_cache_registry",
+	}, toolNames)
+	require.Equal(t, []string{"read_clusters", "write_clusters"}, cacheRegistries.GetRequiredScopes())
+
+	readOnlyTools := registry.GetEnabledTools([]string{ToolsetCacheRegistries}, true)
+	require.Len(t, readOnlyTools, 2)
+	require.Equal(t, "list_cache_registries", readOnlyTools[0].Tool.Name)
+	require.Equal(t, "get_cache_registry", readOnlyTools[1].Tool.Name)
+	require.Equal(t, []string{"read_clusters"}, registry.GetRequiredScopes([]string{ToolsetCacheRegistries}, true))
 }
