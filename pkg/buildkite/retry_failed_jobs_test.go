@@ -81,7 +81,7 @@ func TestRetryFailedJobs(t *testing.T) {
 		tool, _, scopes := RetryFailedJobs()
 		assert.Equal(t, "retry_failed_jobs", tool.Name)
 		assert.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
-		assert.Equal(t, []string{"write_builds"}, scopes)
+		assert.Equal(t, []string{"read_builds", "write_builds"}, scopes)
 	})
 
 	t.Run("RetriesOnlySafeJobs", func(t *testing.T) {
