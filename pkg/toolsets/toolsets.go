@@ -362,7 +362,6 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CreateCacheRegistry),
 				newToolDef(buildkite.UpdateCacheRegistry),
 				newToolDef(buildkite.SetDefaultCacheRegistry),
-				newToolDef(buildkite.DeleteCacheRegistry),
 			},
 		},
 		ToolsetAgents: {

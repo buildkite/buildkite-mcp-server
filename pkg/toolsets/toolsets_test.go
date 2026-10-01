@@ -812,7 +812,6 @@ func TestCacheRegistriesToolset(t *testing.T) {
 		"create_cache_registry",
 		"update_cache_registry",
 		"set_default_cache_registry",
-		"delete_cache_registry",
 	}, toolNames)
 	require.Equal(t, []string{"read_clusters", "write_clusters"}, cacheRegistries.GetRequiredScopes())
 
