@@ -235,7 +235,7 @@ func limitJSONValue(value any, stringLimit int, context string) (any, bool) {
 				continue
 			}
 			switch {
-			case context == "annotations" && key == "body_html":
+			case context == "annotations" && (key == "body" || key == "body_html"):
 				bodyTruncated = true
 			case context == "jobs" && (key == "log_tail" || key == "log_error"):
 				logContentTruncated = true
