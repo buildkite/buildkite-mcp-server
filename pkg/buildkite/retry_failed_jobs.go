@@ -61,15 +61,17 @@ func classifyRetry(job buildkite.Job) (bool, string) {
 	if job.State == "expired" {
 		return true, "expired"
 	}
-	if job.ExitStatus != nil && *job.ExitStatus == -1 {
+	if job.State == "timed_out" {
+		return false, "timed_out"
+	}
+	// The agent also reports -1 when it kills or can't start the process, so
+	// only -1 without a signal reason means Buildkite lost the agent.
+	if job.ExitStatus != nil && *job.ExitStatus == -1 && job.SignalReason == "" {
 		return true, "agent_lost"
 	}
 	switch job.SignalReason {
 	case "agent_stop", "agent_refused", "stack_error":
 		return true, job.SignalReason
-	}
-	if job.State == "timed_out" {
-		return false, "timed_out"
 	}
 	if job.SignalReason != "" {
 		return false, job.SignalReason
@@ -120,7 +122,7 @@ func listFailedJobs(ctx context.Context, client JobsClient, args RetryFailedJobs
 func RetryFailedJobs() (mcp.Tool, mcp.ToolHandlerFor[RetryFailedJobsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "retry_failed_jobs",
-			Description: "Retry the failed jobs in a build that are safe to retry, and report every job retried or skipped with a reason. Only infrastructure failures are retried: expired, agent_lost (exit status -1), agent_stop, agent_refused and stack_error. Soft-failed, canceled and timed-out jobs, command failures and other signal reasons are skipped because a retry would likely fail again or undo a deliberate stop. Use retry_job to retry a skipped job after inspecting it",
+			Description: "Retry the failed jobs in a build that are safe to retry, and report every job retried or skipped with a reason. Only infrastructure failures are retried: expired, agent_lost (exit status -1 with no signal reason), agent_stop, agent_refused and stack_error. Soft-failed, canceled and timed-out jobs, command failures and other signal reasons are skipped because a retry would likely fail again or undo a deliberate stop. Use retry_job to retry a skipped job after inspecting it",
 			Annotations: &mcp.ToolAnnotations{
 				Title:           "Retry Failed Jobs",
 				DestructiveHint: boolPtr(true),

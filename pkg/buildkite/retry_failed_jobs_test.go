@@ -22,7 +22,8 @@ func TestClassifyRetry(t *testing.T) {
 	}{
 		{"expired", buildkite.Job{Type: "script", State: "expired"}, true, "expired"},
 		{"agent lost", buildkite.Job{Type: "script", State: "failed", ExitStatus: intPtr(-1)}, true, "agent_lost"},
-		{"agent lost while timing out", buildkite.Job{Type: "script", State: "timed_out", ExitStatus: intPtr(-1)}, true, "agent_lost"},
+		{"timeout killed by agent", buildkite.Job{Type: "script", State: "timed_out", ExitStatus: intPtr(-1), Signal: "SIGKILL", SignalReason: "cancel"}, false, "timed_out"},
+		{"process run error", buildkite.Job{Type: "script", State: "failed", ExitStatus: intPtr(-1), SignalReason: "process_run_error"}, false, "process_run_error"},
 		{"agent stop", buildkite.Job{Type: "script", State: "failed", ExitStatus: intPtr(255), SignalReason: "agent_stop"}, true, "agent_stop"},
 		{"agent refused", buildkite.Job{Type: "script", State: "failed", SignalReason: "agent_refused"}, true, "agent_refused"},
 		{"stack error", buildkite.Job{Type: "script", State: "failed", SignalReason: "stack_error"}, true, "stack_error"},
