@@ -8,6 +8,49 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Diagnosing builds with structured errors
+
+> Job Errors is not yet publicly available. This integration is a draft for
+> internal dogfooding and MCP team review, not for customer use.
+
+`get_build_failure_summary` includes structured Job Errors by default, alongside
+build status, job-state counts, and bounded problem jobs (including soft failures).
+It does not fetch the complete job inventory. For an errors-first response without
+logs or other diagnostic sections, call it with:
+
+```json
+{
+  "org_slug": "example-org",
+  "pipeline_slug": "example-pipeline",
+  "build_number": "123",
+  "include_logs": false,
+  "include_annotations": false,
+  "include_failed_tests": false,
+  "include_never_ran_jobs": false
+}
+```
+
+Each returned failed, timed-out, expired, canceled, or promised-failing job has
+`job_errors.status`: `found`, `none_recorded`, or `unavailable`. Empty capture is
+not evidence of success; use logs when capture is missing or unavailable. Job
+state and `soft_failed` remain independent of capture (`soft_failed` is omitted
+when false). Broken and dependency-failed jobs have no error lookup.
+
+The tool reads one page of at most five records per problem job, with at most four
+concurrent lookups. A record may contain many findings: tool-specific `context`
+is preserved, including file, line, rule, and message fields where captured. It
+retains at most 64 KiB of records per job and stays within the existing overall
+response budget. Whole records are omitted when needed, with `content_truncated`
+and `truncated` set. Read `job_errors.url` to recover omitted records on the first
+page; `next_url` continues after that page, not after the last displayed record.
+`truncated` also indicates more API pages. `jobs_truncated` separately reports
+the existing problem-job limit.
+
+The token needs `read_job_errors` for this section. HTTP 403/404 and other lookup
+errors leave the job visible with status `unavailable`; HTTP 401 propagates for
+reauthentication. Set `include_job_errors: false` to skip these requests. Existing
+log, annotation, and test defaults are unchanged.
+
 ## Comparing builds
 
 The read-only `compare_builds` tool in the `investigations` toolset answers questions such as “What changed since this build last worked on main?” Supply `org_slug`, `pipeline_slug`, and the target `build_number`. It selects the most recently created earlier build that is currently passed on the same pipeline and exact branch. It does not require that the baseline had already passed when the target started. Supply `baseline_build_number` to compare against a specific build in that pipeline instead, including a failed build or one on another branch.
