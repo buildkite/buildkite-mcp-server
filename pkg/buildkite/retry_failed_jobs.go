@@ -158,6 +158,12 @@ func RetryFailedJobs() (mcp.Tool, mcp.ToolHandlerFor[RetryFailedJobsArgs, any], 
 					result.Retried = append(result.Retried, item)
 				default:
 					retryJob, _, err := deps.JobsClient.RetryJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, job.ID)
+					if isBuildkiteUnauthorized(err) {
+						// Later retries would fail with the same token; surface the 401 so
+						// clients can reauthenticate. Rerunning is safe because retried jobs
+						// are excluded from the failed job list.
+						return nil, nil, ErrUnauthorized
+					}
 					if err != nil {
 						item.Error = err.Error()
 						result.Errors = append(result.Errors, item)

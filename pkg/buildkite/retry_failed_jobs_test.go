@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v5"
@@ -182,6 +183,24 @@ func TestRetryFailedJobs(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, result.IsError)
 		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "no jobs were retried")
+	})
+
+	t.Run("RetryUnauthorizedStops", func(t *testing.T) {
+		var retriedIDs []string
+		mockJobs := &MockJobsClient{
+			ListByBuildFunc: listJobs(t),
+			RetryJobFunc: func(_ context.Context, _, _, _, jobID string) (buildkite.Job, *buildkite.Response, error) {
+				retriedIDs = append(retriedIDs, jobID)
+				return buildkite.Job{}, nil, &buildkite.ErrorResponse{Response: &http.Response{StatusCode: http.StatusUnauthorized}}
+			},
+		}
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := RetryFailedJobs()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), args)
+		require.ErrorIs(t, err, ErrUnauthorized)
+		assert.Nil(t, result)
+		assert.Equal(t, []string{"lost"}, retriedIDs)
 	})
 
 	t.Run("ListError", func(t *testing.T) {
