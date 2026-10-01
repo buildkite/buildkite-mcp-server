@@ -715,6 +715,119 @@ func TestGetBuildFailureSummaryDefaultLimitPreservesCollectionsForStringOverage(
 	require.Len(t, summary.Annotations, 1)
 }
 
+func TestGetBuildFailureSummarySkipsContentOverTokenLimit(t *testing.T) {
+	lines := make([]string, maxFailureSummaryLogTail)
+	for i := range lines {
+		lines[i] = strings.Repeat("ab ", 300)
+	}
+	logPath := t.TempDir() + "/noisy.parquet"
+	writeTestParquetFile(t, logPath, lines)
+
+	jobs := []buildkite.Job{{ID: "job-1", State: "failed"}, {ID: "job-2", State: "failed"}, {ID: "job-3", State: "failed"}, {ID: "job-4", State: "failed"}}
+	include := false
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{
+		BuildsClient: &MockBuildsClient{
+			GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{}, nil
+			},
+		},
+		JobsClient: &MockJobsClient{
+			ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				if options.State[0] == "failed" {
+					return buildkite.JobsList{Items: jobs}, &buildkite.Response{}, nil
+				}
+				return buildkite.JobsList{}, &buildkite.Response{}, nil
+			},
+		},
+		BuildkiteLogsClient: &MockBuildkiteLogsClient{
+			NewReaderFunc: func(context.Context, string, string, string, string, time.Duration, bool) (*buildkitelogs.ParquetReader, error) {
+				return buildkitelogs.NewParquetReader(logPath), nil
+			},
+		},
+	})
+	_, handler, _ := GetBuildFailureSummary()
+	call := func(logTail int) BuildFailureSummary {
+		t.Helper()
+		callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+			LogTail: logTail, IncludeAnnotations: &include,
+		})
+		require.NoError(t, err)
+		require.False(t, callResult.IsError)
+		var summary BuildFailureSummary
+		require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
+		return summary
+	}
+
+	t.Run("skips every log tail and explains how to read them", func(t *testing.T) {
+		summary := call(maxFailureSummaryLogTail)
+
+		require.True(t, summary.ContentSkipped)
+		require.True(t, summary.ContentTruncated)
+		require.Len(t, summary.Jobs, len(jobs))
+		for _, job := range summary.Jobs {
+			require.Empty(t, job.LogTail)
+			require.True(t, job.LogTruncated)
+			require.Positive(t, job.LogEntriesOmitted)
+			require.NotNil(t, job.LogTotalRows)
+			require.Equal(t, int64(len(lines)), *job.LogTotalRows)
+		}
+		require.Len(t, summary.Warnings, 1)
+		require.Contains(t, summary.Warnings[0], "tail_logs")
+	})
+
+	t.Run("returns log tails when a lower log_tail fits", func(t *testing.T) {
+		summary := call(5)
+
+		require.False(t, summary.ContentSkipped)
+		require.Empty(t, summary.Warnings)
+		for _, job := range summary.Jobs {
+			require.Len(t, job.LogTail, 5)
+		}
+	})
+}
+
+func TestSkipFailureSummaryContentOverTokenLimit(t *testing.T) {
+	newResult := func(expandedLines int) BuildFailureSummary {
+		return BuildFailureSummary{Jobs: []FailureSummaryJob{{
+			LogTail: []FailureSummaryLogEntry{{TerseLogEntry: TerseLogEntry{C: "boom"}}},
+			FailedTests: []FailureSummaryFailedTest{{
+				TestID:          "test-a",
+				FailureReason:   "expected true",
+				FailureExpanded: []buildkite.FailureExpanded{{Expanded: slices.Repeat([]string{"frame in spec"}, expandedLines)}},
+			}},
+		}}}
+	}
+
+	t.Run("leaves content under the limit untouched", func(t *testing.T) {
+		result := newResult(1)
+		estimated, err := skipFailureSummaryContentOverTokenLimit(&result)
+
+		require.NoError(t, err)
+		require.Positive(t, estimated)
+		require.LessOrEqual(t, estimated, failureSummaryContentTokenLimit)
+		require.Equal(t, newResult(1), result)
+	})
+
+	t.Run("drops failure_expanded but keeps the failure_reason", func(t *testing.T) {
+		result := newResult(failureSummaryContentTokenLimit)
+		estimated, err := skipFailureSummaryContentOverTokenLimit(&result)
+
+		require.NoError(t, err)
+		require.Greater(t, estimated, failureSummaryContentTokenLimit)
+		require.True(t, result.ContentSkipped)
+		job := result.Jobs[0]
+		require.Empty(t, job.LogTail)
+		require.Equal(t, 1, job.LogEntriesOmitted)
+		test := job.FailedTests[0]
+		require.Empty(t, test.FailureExpanded)
+		require.True(t, test.ContentTruncated)
+		require.Equal(t, "expected true", test.FailureReason)
+		require.Len(t, result.Warnings, 1)
+		require.Contains(t, result.Warnings[0], "get_failed_executions")
+	})
+}
+
 func TestGetBuildFailureSummaryPreservesPartialResultForForbiddenOptionalSections(t *testing.T) {
 	forbidden := &buildkite.ErrorResponse{
 		Response: &http.Response{

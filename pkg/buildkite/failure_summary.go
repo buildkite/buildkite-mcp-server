@@ -8,6 +8,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
@@ -36,7 +37,11 @@ const (
 	failureSummaryAnnotationContentLimit = 64 * 1024
 	failureSummaryTestContentByteLimit   = 64 * 1024
 	failureSummaryContentByteLimit       = failureSummaryLogContentByteLimit + failureSummaryAnnotationContentLimit + failureSummaryTestContentByteLimit
-	failureSummaryConcurrency            = 4
+	// failureSummaryContentTokenLimit is the estimated size above which the
+	// summary drops log tails and expanded test failures instead of trimming
+	// them, so agents get complete metadata rather than a truncated mix.
+	failureSummaryContentTokenLimit = 50_000
+	failureSummaryConcurrency       = 4
 )
 
 // GetBuildFailureSummaryArgs controls the amount of diagnostic context returned
@@ -190,6 +195,7 @@ type BuildFailureSummary struct {
 	ContentBytes      int      `json:"content_bytes"`
 	ContentLimitBytes int      `json:"content_limit_bytes"`
 	ContentTruncated  bool     `json:"content_truncated,omitempty"`
+	ContentSkipped    bool     `json:"content_skipped,omitempty"`
 	Warnings          []string `json:"warnings,omitempty"`
 }
 
@@ -1074,6 +1080,48 @@ func limitFailureTest(test *FailureSummaryFailedTest, limit int, sectionRemainin
 	return truncated
 }
 
+// skipFailureSummaryContentOverTokenLimit drops every log tail and expanded
+// test failure when the untrimmed summary's estimated size exceeds
+// failureSummaryContentTokenLimit. Trimming that much content leaves the agent
+// a truncated mix it cannot rely on, so it gets the job, test, and annotation
+// metadata plus a warning naming the tools that read the skipped content. It
+// returns the estimate measured before skipping.
+func skipFailureSummaryContentOverTokenLimit(result *BuildFailureSummary) (int, error) {
+	payload, err := marshalSanitizedJSON(result)
+	if err != nil {
+		return 0, err
+	}
+	estimated := tokens.EstimateTokens(string(payload))
+	if estimated <= failureSummaryContentTokenLimit {
+		return estimated, nil
+	}
+
+	for i := range result.Jobs {
+		job := &result.Jobs[i]
+		if len(job.LogTail) > 0 {
+			job.LogEntriesOmitted += len(job.LogTail)
+			job.LogTail = nil
+			job.LogTruncated = true
+		}
+		for j := range job.FailedTests {
+			test := &job.FailedTests[j]
+			if len(test.FailureExpanded) > 0 {
+				test.FailureExpanded = nil
+				test.ContentTruncated = true
+			}
+		}
+	}
+	result.ContentSkipped = true
+	result.ContentTruncated = true
+	result.Warnings = append(result.Warnings, fmt.Sprintf(
+		"Log tails and failure_expanded were skipped: the full summary was an estimated %d tokens, over the %d-token limit. "+
+			"Read a job's log with tail_logs or search_logs, fetch test failure detail with get_failed_executions, "+
+			"or re-call with a lower log_tail or max_jobs.",
+		estimated, failureSummaryContentTokenLimit,
+	))
+	return estimated, nil
+}
+
 func applyFailureSummaryContentLimits(result *BuildFailureSummary) {
 	result.ContentLimitBytes = failureSummaryContentByteLimit
 
@@ -1324,7 +1372,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. When the full summary would exceed an estimated 50,000 tokens, every log_tail and failure_expanded is skipped, content_skipped is true, and a warning names the tools that read them. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
@@ -1479,6 +1527,15 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 				result.Warnings = append(result.Warnings, testWarnings...)
 			}
 		}
+
+		estimatedTokens, err := skipFailureSummaryContentOverTokenLimit(&result)
+		if err != nil {
+			return utils.NewToolResultError(fmt.Sprintf("failed to estimate failure summary size: %v", err)), nil, nil
+		}
+		span.SetAttributes(
+			attribute.Int("estimated_content_tokens", estimatedTokens),
+			attribute.Bool("content_skipped", result.ContentSkipped),
+		)
 
 		applyFailureSummaryContentLimits(&result)
 		if err := limitFailureSummaryCollections(&result, contentLimit); err != nil {
