@@ -10,6 +10,9 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ## Diagnosing builds with structured errors
 
+> Job Errors is not yet publicly available. This integration is a draft for
+> internal dogfooding and MCP team review, not for customer use.
+
 `get_build_failure_summary` includes structured Job Errors by default, alongside
 build status, job-state counts, and bounded problem jobs (including soft failures).
 It does not fetch the complete job inventory. For an errors-first response without
