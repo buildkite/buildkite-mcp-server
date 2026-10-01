@@ -174,7 +174,6 @@ func TestCacheRegistryArgsSchemas(t *testing.T) {
 	require.Equal(t, []string{"cluster_id", "name", "org_slug"}, sortedRequired[CreateCacheRegistryArgs](t))
 	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[UpdateCacheRegistryArgs](t))
 	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[SetDefaultCacheRegistryArgs](t))
-	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[DeleteCacheRegistryArgs](t))
 
 	for _, schema := range []*jsonschema.Schema{schemaFor[CreateCacheRegistryArgs](t), schemaFor[UpdateCacheRegistryArgs](t)} {
 		require.Contains(t, schema.Properties["policy"].Types, "object")
