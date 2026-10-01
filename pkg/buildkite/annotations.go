@@ -14,6 +14,9 @@ import (
 const (
 	annotationScopeBuild = "build"
 	annotationScopeJob   = "job"
+
+	annotationBodyFormatRaw  = "raw"
+	annotationBodyFormatHTML = "html"
 )
 
 // AnnotationsClient describes the subset of the Buildkite client we need for annotations.
@@ -33,6 +36,7 @@ type ListAnnotationsArgs struct {
 	JobID        string `json:"job_id,omitempty" jsonschema:"Job ID required when scope is job"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
+	BodyFormat   string `json:"body_format,omitempty" jsonschema:"'raw' (default) returns the body as submitted in body; 'html' returns the rendered HTML in body_html instead"`
 }
 
 type CreateAnnotationArgs struct {
@@ -63,11 +67,22 @@ func normalizeAnnotationScope(scope, jobID string) (string, error) {
 	}
 }
 
+func normalizeAnnotationBodyFormat(format string) (string, error) {
+	switch format {
+	case "", annotationBodyFormatRaw:
+		return annotationBodyFormatRaw, nil
+	case annotationBodyFormatHTML:
+		return annotationBodyFormatHTML, nil
+	default:
+		return "", errors.New("body_format must be 'raw' or 'html'")
+	}
+}
+
 // ListAnnotations returns an MCP tool + handler pair that lists annotations for a build or job.
 func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "list_annotations",
-		Description: "List annotations for a build or a specific job. Use scope='build' (default) or scope='job' with job_id. Annotation content is in the body_html field; there is no body field",
+		Description: "List annotations for a build or a specific job. Use scope='build' (default) or scope='job' with job_id. By default each annotation's content is in the body field exactly as submitted (Markdown or HTML, unrendered); artifact:// references in it name artifacts of this build, which you can fetch with list_artifacts_for_build and get_artifact. Set body_format='html' to get the rendered HTML in body_html instead",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "List Annotations",
 			ReadOnlyHint: true,
@@ -81,6 +96,11 @@ func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], 
 			return utils.NewToolResultError(scopeErr.Error()), nil, nil
 		}
 
+		bodyFormat, bodyFormatErr := normalizeAnnotationBodyFormat(args.BodyFormat)
+		if bodyFormatErr != nil {
+			return utils.NewToolResultError(bodyFormatErr.Error()), nil, nil
+		}
+
 		paginationParams := paginationFromArgs(args.Page, args.PerPage)
 
 		span.SetAttributes(
@@ -89,6 +109,7 @@ func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], 
 			attribute.String("build_number", args.BuildNumber),
 			attribute.String("scope", scope),
 			attribute.String("job_id", args.JobID),
+			attribute.String("body_format", bodyFormat),
 			attribute.Int("page", paginationParams.Page),
 			attribute.Int("per_page", paginationParams.PerPage),
 		)
@@ -101,14 +122,14 @@ func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], 
 			err         error
 		)
 
+		options := &buildkite.AnnotationListOptions{
+			ListOptions: paginationParams,
+			BodyFormat:  bodyFormat,
+		}
 		if scope == annotationScopeJob {
-			annotations, resp, err = deps.AnnotationsClient.ListByJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, &buildkite.AnnotationListOptions{
-				ListOptions: paginationParams,
-			})
+			annotations, resp, err = deps.AnnotationsClient.ListByJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID, options)
 		} else {
-			annotations, resp, err = deps.AnnotationsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
-				ListOptions: paginationParams,
-			})
+			annotations, resp, err = deps.AnnotationsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
 		}
 		if err != nil {
 			return handleBuildkiteError(err)

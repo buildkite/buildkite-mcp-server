@@ -51,9 +51,10 @@ func TestListAnnotations(t *testing.T) {
 
 	client := &MockAnnotationsClient{
 		ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+			assert.Equal("raw", opts.BodyFormat)
 			return []buildkite.Annotation{
-				{ID: "1", BodyHTML: "Test annotation 1"},
-				{ID: "2", BodyHTML: "Test annotation 2"},
+				{ID: "1", Body: "Test annotation 1"},
+				{ID: "2", Body: "![chart](artifact://chart.png)"},
 			}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
 		},
 	}
@@ -72,7 +73,49 @@ func TestListAnnotations(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"1","body_html":"Test annotation 1"},{"id":"2","body_html":"Test annotation 2"}]}`, textContent.Text)
+	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"1","body":"Test annotation 1"},{"id":"2","body":"![chart](artifact://chart.png)"}]}`, textContent.Text)
+}
+
+func TestListAnnotationsHTMLBodyFormat(t *testing.T) {
+	assert := require.New(t)
+
+	client := &MockAnnotationsClient{
+		ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
+			assert.Equal("html", opts.BodyFormat)
+			return []buildkite.Annotation{{ID: "1", BodyHTML: "<p>Test annotation</p>"}}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+		},
+	}
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{AnnotationsClient: client})
+
+	_, handler, _ := ListAnnotations()
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListAnnotationsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
+		BodyFormat:   "html",
+	})
+	assert.NoError(err)
+
+	textContent := getTextResult(t, result)
+	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"1","body_html":"<p>Test annotation</p>"}]}`, textContent.Text)
+}
+
+func TestListAnnotationsRejectsUnknownBodyFormat(t *testing.T) {
+	assert := require.New(t)
+
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{AnnotationsClient: &MockAnnotationsClient{}})
+
+	_, handler, _ := ListAnnotations()
+	result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListAnnotationsArgs{
+		OrgSlug:      "org",
+		PipelineSlug: "pipeline",
+		BuildNumber:  "1",
+		BodyFormat:   "text",
+	})
+	assert.NoError(err)
+	assert.True(result.IsError)
+	assert.Contains(getTextResult(t, result).Text, "body_format must be 'raw' or 'html'")
 }
 
 func TestListAnnotationsForJobScope(t *testing.T) {
@@ -81,7 +124,8 @@ func TestListAnnotationsForJobScope(t *testing.T) {
 	client := &MockAnnotationsClient{
 		ListByJobFunc: func(ctx context.Context, org, pipelineSlug, buildNumber, jobID string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
 			assert.Equal("job-1", jobID)
-			return []buildkite.Annotation{{ID: "1", Scope: "job", BodyHTML: "Job annotation"}}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+			assert.Equal("raw", opts.BodyFormat)
+			return []buildkite.Annotation{{ID: "1", Scope: "job", Body: "Job annotation"}}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
 		},
 	}
 
@@ -101,7 +145,7 @@ func TestListAnnotationsForJobScope(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"1","scope":"job","body_html":"Job annotation"}]}`, textContent.Text)
+	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"1","scope":"job","body":"Job annotation"}]}`, textContent.Text)
 }
 
 func TestListAnnotationsRequiresJobIDForJobScope(t *testing.T) {

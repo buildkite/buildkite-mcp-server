@@ -114,8 +114,8 @@ func TestGetBuild(t *testing.T) {
 				assert.Equal("pipeline", pipelineSlug)
 				assert.Equal("1", buildNumber)
 				return []buildkite.Annotation{
-					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, BodyHTML: "<p>large body</p>"},
-					{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, BodyHTML: "<p>another large body</p>"},
+					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, Body: "large body", BodyHTML: "<p>large body</p>"},
+					{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, Body: "another large body", BodyHTML: "<p>another large body</p>"},
 				}, &buildkite.Response{
 					Response: &http.Response{StatusCode: 200},
 					NextPage: 2,
@@ -151,6 +151,7 @@ func TestGetBuild(t *testing.T) {
 		requireJSONPathEqual(t, text, true, "annotations_truncated")
 		assert.NotContains(text, "large body")
 		assert.NotContains(text, "body_html")
+		assert.NotContains(text, `"body"`)
 
 		// The handler must exclude jobs and pipeline detail from the API request.
 		require.NotNil(t, capturedOptions)
@@ -874,7 +875,7 @@ func TestWaitForBuild(t *testing.T) {
 			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
 				annotationCalls++
 				return []buildkite.Annotation{
-					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", BodyHTML: "<p>large body</p>"},
+					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Body: "large body", BodyHTML: "<p>large body</p>"},
 				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
 			},
 		}
