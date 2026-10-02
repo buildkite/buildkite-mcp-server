@@ -36,7 +36,13 @@ const (
 	failureSummaryAnnotationContentLimit = 64 * 1024
 	failureSummaryTestContentByteLimit   = 64 * 1024
 	failureSummaryContentByteLimit       = failureSummaryLogContentByteLimit + failureSummaryAnnotationContentLimit + failureSummaryTestContentByteLimit
-	failureSummaryConcurrency            = 4
+	// failureSummaryDefaultContentByteLimit keeps the default response near
+	// 50,000 tokens. Measured with the o200k tokenizer, real failure summaries
+	// run 2.3–2.8 bytes per token (log-heavy summaries are densest), so 125,000
+	// bytes is about 44,000–54,000 tokens. Callers can raise content_limit_bytes
+	// to failureSummaryContentByteLimit.
+	failureSummaryDefaultContentByteLimit = 125_000
+	failureSummaryConcurrency             = 4
 )
 
 // GetBuildFailureSummaryArgs controls the amount of diagnostic context returned
@@ -52,7 +58,7 @@ type GetBuildFailureSummaryArgs struct {
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to scan for failure details of the returned failed tests (default 5, max 20); the runs holding the most returned failed tests are scanned first"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed Test Engine tests to return for the build (default 50, max 100)"`
-	ContentLimitBytes      int    `json:"content_limit_bytes,omitempty" jsonschema:"Maximum bytes for the response payload (default and max 262144); lower it to fit clients with small tool-result limits, combining with log_tail and max_jobs for finer trimming"`
+	ContentLimitBytes      int    `json:"content_limit_bytes,omitempty" jsonschema:"Maximum bytes for the response payload (default 125000, about 50,000 tokens; max 262144); lower it to fit clients with small tool-result limits, or raise it when the client accepts larger results and the summary reports content_truncated. Annotations and failed tests each get up to a quarter of the budget; logs get the rest"`
 	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed, timed-out, canceled, and promised-failing jobs (default true)"`
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include Test Engine tests whose executions in this build all failed, when the build has Test Engine runs (default true)"`
@@ -1074,10 +1080,56 @@ func limitFailureTest(test *FailureSummaryFailedTest, limit int, sectionRemainin
 	return truncated
 }
 
-func applyFailureSummaryContentLimits(result *BuildFailureSummary) {
-	result.ContentLimitBytes = failureSummaryContentByteLimit
+// scaledFailureSummarySectionLimit shares contentLimit between sections in
+// the same 2:1:1 proportions as the maximum budgets, so a lower cap shrinks
+// annotations and failed tests along with logs instead of letting their fixed
+// budgets crowd logs out during whole-payload trimming.
+func scaledFailureSummarySectionLimit(sectionLimit, contentLimit int) int {
+	return sectionLimit * contentLimit / failureSummaryContentByteLimit
+}
 
-	logRemaining := failureSummaryLogContentByteLimit
+func applyFailureSummaryContentLimits(result *BuildFailureSummary, contentLimit int) {
+	result.ContentLimitBytes = contentLimit
+
+	annotationLimit := scaledFailureSummarySectionLimit(failureSummaryAnnotationContentLimit, contentLimit)
+	annotationRemaining := annotationLimit
+	for i := range result.Warnings {
+		entryRemaining := failureSummaryEntryContentByteLimit
+		var truncated bool
+		result.Warnings[i], truncated = limitFailureSummaryString(result.Warnings[i], failureSummaryEntryContentByteLimit, &entryRemaining, &annotationRemaining)
+		result.ContentTruncated = result.ContentTruncated || truncated
+	}
+	for i := range result.Annotations {
+		annotation := &result.Annotations[i]
+		entryRemaining := failureSummaryEntryContentByteLimit
+		var truncated bool
+		annotation.BodyHTML, truncated = limitFailureSummaryString(annotation.BodyHTML, failureSummaryEntryContentByteLimit, &entryRemaining, &annotationRemaining)
+		annotation.BodyTruncated = annotation.BodyTruncated || truncated
+		result.ContentTruncated = result.ContentTruncated || annotation.BodyTruncated
+	}
+	annotationUsed := annotationLimit - annotationRemaining
+
+	testLimit := scaledFailureSummarySectionLimit(failureSummaryTestContentByteLimit, contentLimit)
+	testRemaining := testLimit
+	testItemsRemaining := 0
+	for _, job := range result.Jobs {
+		testItemsRemaining += len(job.FailedTests)
+	}
+	for i := range result.Jobs {
+		for j := range result.Jobs[i].FailedTests {
+			itemLimit := min(failureSummaryTestByteLimit, testRemaining/testItemsRemaining)
+			truncated := limitFailureTest(&result.Jobs[i].FailedTests[j], itemLimit, &testRemaining)
+			result.ContentTruncated = result.ContentTruncated || truncated
+			testItemsRemaining--
+		}
+	}
+	testUsed := testLimit - testRemaining
+
+	// Logs take what annotations and failed tests left, up to their own
+	// maximum, so a build without tests or annotations keeps its full share
+	// of log lines. limitFailureSummaryCollections trims log entries further
+	// if JSON structure pushes the payload past contentLimit.
+	logRemaining := min(failureSummaryLogContentByteLimit, max(0, contentLimit-annotationUsed-testUsed))
 	logItemsRemaining := 0
 	for _, job := range result.Jobs {
 		if len(job.LogTail) > 0 || job.LogError != "" {
@@ -1106,36 +1158,6 @@ func applyFailureSummaryContentLimits(result *BuildFailureSummary) {
 		job.LogContentTruncated = job.LogContentTruncated || truncated
 		result.ContentTruncated = result.ContentTruncated || job.LogContentTruncated
 		logItemsRemaining--
-	}
-
-	annotationRemaining := failureSummaryAnnotationContentLimit
-	for i := range result.Warnings {
-		entryRemaining := failureSummaryEntryContentByteLimit
-		var truncated bool
-		result.Warnings[i], truncated = limitFailureSummaryString(result.Warnings[i], failureSummaryEntryContentByteLimit, &entryRemaining, &annotationRemaining)
-		result.ContentTruncated = result.ContentTruncated || truncated
-	}
-	for i := range result.Annotations {
-		annotation := &result.Annotations[i]
-		entryRemaining := failureSummaryEntryContentByteLimit
-		var truncated bool
-		annotation.BodyHTML, truncated = limitFailureSummaryString(annotation.BodyHTML, failureSummaryEntryContentByteLimit, &entryRemaining, &annotationRemaining)
-		annotation.BodyTruncated = annotation.BodyTruncated || truncated
-		result.ContentTruncated = result.ContentTruncated || annotation.BodyTruncated
-	}
-
-	testRemaining := failureSummaryTestContentByteLimit
-	testItemsRemaining := 0
-	for _, job := range result.Jobs {
-		testItemsRemaining += len(job.FailedTests)
-	}
-	for i := range result.Jobs {
-		for j := range result.Jobs[i].FailedTests {
-			itemLimit := min(failureSummaryTestByteLimit, testRemaining/testItemsRemaining)
-			truncated := limitFailureTest(&result.Jobs[i].FailedTests[j], itemLimit, &testRemaining)
-			result.ContentTruncated = result.ContentTruncated || truncated
-			testItemsRemaining--
-		}
 	}
 }
 
@@ -1339,7 +1361,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		maxAnnotations := boundedValue(args.MaxAnnotations, defaultFailureSummaryAnnotations, maxFailureSummaryAnnotations)
 		maxTestRuns := boundedValue(args.MaxTestRuns, defaultFailureSummaryTestRuns, maxFailureSummaryTestRuns)
 		maxFailedTests := boundedValue(args.MaxFailedTests, defaultFailureSummaryFailedTests, maxFailureSummaryFailedTests)
-		contentLimit := boundedValue(args.ContentLimitBytes, failureSummaryContentByteLimit, failureSummaryContentByteLimit)
+		contentLimit := boundedValue(args.ContentLimitBytes, failureSummaryDefaultContentByteLimit, failureSummaryContentByteLimit)
 
 		span.SetAttributes(
 			attribute.String("org_slug", args.OrgSlug),
@@ -1480,7 +1502,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			}
 		}
 
-		applyFailureSummaryContentLimits(&result)
+		applyFailureSummaryContentLimits(&result, contentLimit)
 		if err := limitFailureSummaryCollections(&result, contentLimit); err != nil {
 			return utils.NewToolResultError(fmt.Sprintf("failed to limit failure summary logs: %v", err)), nil, nil
 		}
