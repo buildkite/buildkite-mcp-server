@@ -530,12 +530,12 @@ func TestGetBuildFailureSummaryLimitsFinalEscapedJSONPayload(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, callResult.IsError)
 	text := getTextResult(t, callResult).Text
-	require.LessOrEqual(t, len(text), failureSummaryContentByteLimit)
+	require.LessOrEqual(t, len(text), failureSummaryDefaultContentByteLimit)
 
 	var summary BuildFailureSummary
 	require.NoError(t, json.Unmarshal([]byte(text), &summary))
 	require.Equal(t, len(text), summary.ContentBytes)
-	require.Equal(t, failureSummaryContentByteLimit, summary.ContentLimitBytes)
+	require.Equal(t, failureSummaryDefaultContentByteLimit, summary.ContentLimitBytes)
 	require.True(t, summary.ContentTruncated)
 	require.Less(t, len(summary.Build.Message), len(escapeHeavy))
 	require.Less(t, len(summary.Jobs[0].Command), len(escapeHeavy))
@@ -645,6 +645,26 @@ func TestGetBuildFailureSummaryHonorsContentLimitBytesArg(t *testing.T) {
 		require.Contains(t, job.LogTail[len(job.LogTail)-1].C, "line-59")
 	})
 
+	t.Run("raises the cap above the default", func(t *testing.T) {
+		requested := 200_000
+		callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+			OrgSlug:           "org",
+			PipelineSlug:      "pipeline",
+			BuildNumber:       "1",
+			ContentLimitBytes: requested,
+		})
+
+		require.NoError(t, err)
+		require.False(t, callResult.IsError)
+		text := getTextResult(t, callResult).Text
+		require.Greater(t, len(text), failureSummaryDefaultContentByteLimit)
+		require.LessOrEqual(t, len(text), requested)
+
+		var summary BuildFailureSummary
+		require.NoError(t, json.Unmarshal([]byte(text), &summary))
+		require.Equal(t, requested, summary.ContentLimitBytes)
+	})
+
 	t.Run("clamps values above the server maximum", func(t *testing.T) {
 		callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 			OrgSlug:           "org",
@@ -706,7 +726,7 @@ func TestGetBuildFailureSummaryDefaultLimitPreservesCollectionsForStringOverage(
 	require.NoError(t, err)
 	require.False(t, callResult.IsError)
 	text := getTextResult(t, callResult).Text
-	require.LessOrEqual(t, len(text), failureSummaryContentByteLimit)
+	require.LessOrEqual(t, len(text), failureSummaryDefaultContentByteLimit)
 
 	var summary BuildFailureSummary
 	require.NoError(t, json.Unmarshal([]byte(text), &summary))
@@ -873,7 +893,7 @@ func TestApplyFailureSummaryContentLimitsBoundsAggregateContent(t *testing.T) {
 		result.Annotations[i].BodyHTML = content
 	}
 
-	applyFailureSummaryContentLimits(&result)
+	applyFailureSummaryContentLimits(&result, failureSummaryContentByteLimit)
 
 	require.Equal(t, failureSummaryContentByteLimit, result.ContentLimitBytes)
 	require.True(t, result.ContentTruncated)
@@ -900,7 +920,7 @@ func TestLimitFailureSummaryLogCollectionsRetainsNewestRowsAndUpdatesMetadata(t 
 			}
 		}
 	}
-	applyFailureSummaryContentLimits(&result)
+	applyFailureSummaryContentLimits(&result, failureSummaryContentByteLimit)
 	for _, job := range result.Jobs {
 		require.Len(t, job.LogTail, entriesPerJob)
 	}
@@ -943,7 +963,7 @@ func TestApplyFailureSummaryContentLimitsPreservesWarnings(t *testing.T) {
 		result.Annotations[i].BodyHTML = content
 	}
 
-	applyFailureSummaryContentLimits(&result)
+	applyFailureSummaryContentLimits(&result, failureSummaryContentByteLimit)
 
 	require.Equal(t, "annotations unavailable after partial scan: request failed", result.Warnings[0])
 	require.True(t, result.ContentTruncated)
@@ -2060,6 +2080,74 @@ func TestGetBuildFailureSummaryLoweredContentLimitFlagsTruncatedFailedTest(t *te
 	require.True(t, entry.ContentTruncated, "a failure_reason cut by content_limit_bytes must be flagged")
 }
 
+func TestApplyFailureSummaryContentLimitsScalesSectionsToContentLimit(t *testing.T) {
+	// Every section holds far more than its maximum budget, so each fills
+	// whatever share of the lowered cap it is given.
+	result := BuildFailureSummary{Jobs: make([]FailureSummaryJob, 10), Annotations: make([]FailureSummaryAnnotation, 20)}
+	for i := range result.Jobs {
+		result.Jobs[i].LogTail = make([]FailureSummaryLogEntry, 200)
+		for j := range result.Jobs[i].LogTail {
+			result.Jobs[i].LogTail[j].C = strings.Repeat("l", 100)
+		}
+		result.Jobs[i].FailedTests = make([]FailureSummaryFailedTest, 5)
+		for j := range result.Jobs[i].FailedTests {
+			result.Jobs[i].FailedTests[j].FailureReason = strings.Repeat("r", failureSummaryEntryContentByteLimit)
+		}
+	}
+	for i := range result.Annotations {
+		result.Annotations[i].BodyHTML = strings.Repeat("a", failureSummaryEntryContentByteLimit)
+	}
+
+	contentLimit := failureSummaryContentByteLimit / 4
+	applyFailureSummaryContentLimits(&result, contentLimit)
+
+	logBytes, testBytes, annotationBytes := 0, 0, 0
+	for _, job := range result.Jobs {
+		logBytes += failureSummaryLogContentBytes(job.LogTail)
+		for _, test := range job.FailedTests {
+			testBytes += len(test.FailureReason)
+		}
+	}
+	for _, annotation := range result.Annotations {
+		annotationBytes += len(annotation.BodyHTML)
+	}
+
+	require.Equal(t, contentLimit, result.ContentLimitBytes)
+	require.True(t, result.ContentTruncated)
+	for _, section := range []struct {
+		name       string
+		used, full int
+	}{
+		{"logs", logBytes, failureSummaryLogContentByteLimit},
+		{"failed tests", testBytes, failureSummaryTestContentByteLimit},
+		{"annotations", annotationBytes, failureSummaryAnnotationContentLimit},
+	} {
+		share := section.full / 4
+		require.LessOrEqual(t, section.used, share, section.name)
+		require.Greater(t, section.used, share*9/10, "%s should fill its share, not be crowded out", section.name)
+	}
+}
+
+func TestApplyFailureSummaryContentLimitsGivesLogsUnusedSectionBudget(t *testing.T) {
+	result := BuildFailureSummary{Jobs: make([]FailureSummaryJob, 10)}
+	for i := range result.Jobs {
+		result.Jobs[i].LogTail = make([]FailureSummaryLogEntry, 200)
+		for j := range result.Jobs[i].LogTail {
+			result.Jobs[i].LogTail[j].C = strings.Repeat("l", 100)
+		}
+	}
+
+	contentLimit := failureSummaryContentByteLimit / 4
+	applyFailureSummaryContentLimits(&result, contentLimit)
+
+	logBytes := 0
+	for _, job := range result.Jobs {
+		logBytes += failureSummaryLogContentBytes(job.LogTail)
+	}
+	require.LessOrEqual(t, logBytes, contentLimit)
+	require.Greater(t, logBytes, contentLimit*9/10, "with no annotations or failed tests, logs should use their unused budget")
+}
+
 func TestApplyFailureSummaryContentLimitsBoundsFailedTestContent(t *testing.T) {
 	summary := &BuildFailureSummary{
 		Jobs: []FailureSummaryJob{{
@@ -2074,7 +2162,7 @@ func TestApplyFailureSummaryContentLimitsBoundsFailedTestContent(t *testing.T) {
 		}},
 	}
 
-	applyFailureSummaryContentLimits(summary)
+	applyFailureSummaryContentLimits(summary, failureSummaryContentByteLimit)
 
 	limited := summary.Jobs[0].FailedTests[0]
 	require.True(t, summary.ContentTruncated)
