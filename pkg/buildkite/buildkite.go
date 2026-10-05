@@ -75,7 +75,13 @@ func mcpStructuredResult[T any](span trace.Span, result *T) (*mcp.CallToolResult
 	if err := decoder.Decode(&output); err != nil {
 		return utils.NewToolResultError(err.Error()), nil, nil
 	}
-	text, _, err := mcpSanitizedTextResult(span, sanitized)
+	// Apply the same typed serialization as the SDK: sanitization may have
+	// emptied an omitempty field that must now be omitted in both payloads.
+	formatted, err := marshalMultilineJSON(&output)
+	if err != nil {
+		return utils.NewToolResultError(err.Error()), nil, nil
+	}
+	text, _, err := mcpSanitizedTextResult(span, formatted)
 	return text, &output, err
 }
 

@@ -720,7 +720,7 @@ func TestBuildContractsOverHTTP(t *testing.T) {
 		case strings.Contains(r.URL.Path, "minimal"):
 			_, _ = fmt.Fprint(w, `{"id":"b2","state":"scheduled","created_at":null}`)
 		default:
-			build := `{"id":"b1","number":17,"state":"future_state","message":"hello\u200b<script>bad()</script>","created_at":"2026-01-02T03:04:05.000Z","creator":{"created_at":"2026-01-01T00:00:00.000Z"},"blocked":true,"meta_data":{"text":"safe\u200b"},"env":{"SECRET":"excluded"},"jobs":[{"id":"excluded"}]}`
+			build := `{"id":"b1","number":17,"state":"future_state","message":"hello\u200b<script>bad()</script>","author":{"name":"<script>bad()</script>","email":"author@example.com"},"created_at":"2026-01-02T03:04:05.000Z","creator":{"created_at":"2026-01-01T00:00:00.000Z"},"blocked":true,"meta_data":{"text":"safe\u200b"},"env":{"SECRET":"excluded"},"jobs":[{"id":"excluded"}]}`
 			if strings.HasSuffix(r.URL.Path, "/builds") {
 				w.Header().Set("Link", `<https://example.com/builds?page=2>; rel="next"`)
 				_, _ = fmt.Fprintf(w, "[%s]", build)
@@ -814,6 +814,11 @@ func TestBuildContractsOverHTTP(t *testing.T) {
 				require.NotContains(t, text, "bad()")
 				require.NotContains(t, text, "\u200b")
 				require.NotContains(t, text, "excluded")
+				if name == "get_build" {
+					var payload map[string]any
+					require.NoError(t, json.Unmarshal([]byte(text), &payload))
+					require.Equal(t, map[string]any{"email": "author@example.com"}, payload["author"])
+				}
 			})
 		}
 	}
