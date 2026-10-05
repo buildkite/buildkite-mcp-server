@@ -119,10 +119,15 @@ func listFailedJobs(ctx context.Context, client JobsClient, args RetryFailedJobs
 	return nil, fmt.Errorf("build %s has more than %d failed jobs; no jobs were retried. Use list_jobs and retry_job instead", args.BuildNumber, retryFailedJobsPageLimit*100)
 }
 
+// RetryFailedJobs deliberately doesn't use the REST API's bulk retry_failed_jobs
+// endpoint (https://buildkite.com/docs/apis/rest-api/builds#retry-failed-jobs-for-a-build).
+// That endpoint only filters by job state, and lost agents and command failures
+// share the failed state, so it would retry both. Instead each job is
+// classified and retried individually with the retry job endpoint.
 func RetryFailedJobs() (mcp.Tool, mcp.ToolHandlerFor[RetryFailedJobsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "retry_failed_jobs",
-			Description: "Retry the failed jobs in a build that are safe to retry, and report every job retried or skipped with a reason. Only infrastructure failures are retried: expired, agent_lost (exit status -1 with no signal reason), agent_stop, agent_refused and stack_error. Soft-failed, canceled and timed-out jobs, command failures and other signal reasons are skipped because a retry would likely fail again or undo a deliberate stop. Use retry_job to retry a skipped job after inspecting it",
+			Description: "Retry the failed jobs in a build that are safe to retry, and report every job retried or skipped with a reason. Unlike the Buildkite REST API's retry_failed_jobs endpoint, which retries every job in the chosen failure states, this classifies each job and retries it individually. Only infrastructure failures are retried: expired, agent_lost (exit status -1 with no signal reason), agent_stop, agent_refused and stack_error. Soft-failed, canceled and timed-out jobs, command failures and other signal reasons are skipped because a retry would likely fail again or undo a deliberate stop. Use retry_job to retry a skipped job after inspecting it",
 			Annotations: &mcp.ToolAnnotations{
 				Title:           "Retry Failed Jobs",
 				DestructiveHint: boolPtr(true),
