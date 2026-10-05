@@ -13,30 +13,31 @@ type FailureSummaryConfig struct {
 
 // ToolDependencies holds all client interfaces needed by tool handlers.
 type ToolDependencies struct {
-	BuildsClient            BuildsClient
-	PipelinesClient         PipelinesClient
-	PipelineSchedulesClient PipelineSchedulesClient
-	ClustersClient          ClustersClient
-	ClusterSecretsClient    ClusterSecretsClient
-	CacheRegistriesClient   CacheRegistriesClient
-	ClusterQueuesClient     ClusterQueuesClient
-	AgentsClient            AgentsClient
-	ArtifactsClient         ArtifactsClient
-	AnnotationsClient       AnnotationsClient
-	OrganizationsClient     OrganizationsClient
-	UserClient              UserClient
-	AccessTokensClient      AccessTokenClient
-	JobsClient              JobsClient
-	StepUploadsClient       StepUploadsClient
-	TestRunsClient          TestRunsClient
-	TestSuitesClient        TestSuitesClient
-	TestExecutionsClient    TestExecutionsClient
-	ExecutionTraceClient    ExecutionTraceClient
-	SlowestExecutionsClient SlowestExecutionsClient
-	TestsClient             TestsClient
-	BuildTestsClient        BuildTestsClient
-	BuildkiteLogsClient     BuildkiteLogsClient
-	FailureSummary          FailureSummaryConfig
+	BuildsClient                BuildsClient
+	PipelinesClient             PipelinesClient
+	PipelineSchedulesClient     PipelineSchedulesClient
+	ClustersClient              ClustersClient
+	ClusterSecretsClient        ClusterSecretsClient
+	CacheRegistriesClient       CacheRegistriesClient
+	ClusterQueuesClient         ClusterQueuesClient
+	AgentsClient                AgentsClient
+	ArtifactsClient             ArtifactsClient
+	AnnotationsClient           AnnotationsClient
+	OrganizationsClient         OrganizationsClient
+	RepositoryConnectionsClient RepositoryConnectionsClient
+	UserClient                  UserClient
+	AccessTokensClient          AccessTokenClient
+	JobsClient                  JobsClient
+	StepUploadsClient           StepUploadsClient
+	TestRunsClient              TestRunsClient
+	TestSuitesClient            TestSuitesClient
+	TestExecutionsClient        TestExecutionsClient
+	ExecutionTraceClient        ExecutionTraceClient
+	SlowestExecutionsClient     SlowestExecutionsClient
+	TestsClient                 TestsClient
+	BuildTestsClient            BuildTestsClient
+	BuildkiteLogsClient         BuildkiteLogsClient
+	FailureSummary              FailureSummaryConfig
 }
 
 type contextKey struct{}
