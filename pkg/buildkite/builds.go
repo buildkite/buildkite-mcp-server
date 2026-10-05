@@ -92,17 +92,21 @@ type BuildDetail struct {
 	AnnotationsTruncated bool                          `json:"annotations_truncated,omitempty"`
 }
 
+// BuildStateFilter is a list-builds filter, not a returned build state.
+// In particular, "finished" is an API shortcut for several states.
+type BuildStateFilter string
+
 // ListBuildsArgs struct with enhanced filtering
 type ListBuildsArgs struct {
 	ToolInput
-	OrgSlug      string `json:"org_slug"`
-	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Filter builds by pipeline. When omitted, lists builds across all pipelines in the organization"`
-	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
-	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled, running, passed, failed, canceled, skipped)"`
-	Commit       string `json:"commit,omitempty" jsonschema:"Full commit SHA"`
-	Creator      string `json:"creator,omitempty" jsonschema:"Filter builds by build creator"`
-	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
+	OrgSlug      string           `json:"org_slug"`
+	PipelineSlug string           `json:"pipeline_slug,omitempty" jsonschema:"Filter builds by pipeline. When omitted, lists builds across all pipelines in the organization"`
+	Branch       string           `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
+	State        BuildStateFilter `json:"state,omitempty" jsonschema:"Omit to include all states; an empty string is also accepted. finished includes passed, failed, blocked, and canceled builds"`
+	Commit       string           `json:"commit,omitempty" jsonschema:"Full commit SHA"`
+	Creator      string           `json:"creator,omitempty" jsonschema:"Filter builds by build creator"`
+	Page         int              `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
+	PerPage      int              `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
 
 // GetBuildArgs struct
@@ -185,7 +189,7 @@ func createPaginatedBuildResult[T any](builds []buildkite.Build, converter func(
 	}
 }
 
-func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) {
+func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, *PaginatedResult[BuildSummary]], []string) {
 	return mcp.Tool{
 			Name:        "list_builds",
 			Description: "List builds for a pipeline or across all pipelines in an organization, returning a lightweight summary of each build. When pipeline_slug is omitted, lists builds across all pipelines in the organization. Jobs are not included — use list_jobs or get_job for job detail",
@@ -194,7 +198,7 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				ReadOnlyHint: true,
 			},
 		},
-		func(ctx context.Context, request *mcp.CallToolRequest, args ListBuildsArgs) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, request *mcp.CallToolRequest, args ListBuildsArgs) (*mcp.CallToolResult, *PaginatedResult[BuildSummary], error) {
 			ctx, span := trace.Start(ctx, "buildkite.ListBuilds")
 			defer span.End()
 
@@ -202,7 +206,7 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				attribute.String("org_slug", args.OrgSlug),
 				attribute.String("pipeline_slug", args.PipelineSlug),
 				attribute.String("branch", args.Branch),
-				attribute.String("state", args.State),
+				attribute.String("state", string(args.State)),
 				attribute.String("commit", args.Commit),
 				attribute.String("creator", args.Creator),
 				attribute.Int("page", args.Page),
@@ -235,7 +239,7 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				options.Branch = []string{args.Branch}
 			}
 			if args.State != "" {
-				options.State = []string{args.State}
+				options.State = []string{string(args.State)}
 			}
 			if args.Commit != "" {
 				options.Commit = args.Commit
@@ -254,7 +258,8 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				builds, resp, err = deps.BuildsClient.ListByOrg(ctx, args.OrgSlug, options)
 			}
 			if err != nil {
-				return handleBuildkiteError(err)
+				result, _, callErr := handleBuildkiteError(err)
+				return result, nil, callErr
 			}
 
 			headers := map[string]string{
@@ -263,7 +268,7 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 
 			result := createPaginatedBuildResult(builds, summarizeBuild, headers)
 
-			return mcpTextResult(span, result)
+			return mcpStructuredResult(span, &result)
 		}, []string{"read_builds"}
 }
 
@@ -308,7 +313,7 @@ func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRu
 		}, []string{"read_builds"}
 }
 
-func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
+func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, *BuildDetail], []string) {
 	return mcp.Tool{
 			Name:        "get_build",
 			Description: "Get a single build with lightweight annotation summaries. Annotation bodies and jobs are not included — use list_annotations to read annotations, list_jobs or get_job for job detail, and list_step_uploads to see the dynamic pipeline configuration the build received via `buildkite-agent pipeline upload`",
@@ -317,7 +322,7 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 				ReadOnlyHint: true,
 			},
 		},
-		func(ctx context.Context, request *mcp.CallToolRequest, args GetBuildArgs) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetBuildArgs) (*mcp.CallToolResult, *BuildDetail, error) {
 			ctx, span := trace.Start(ctx, "buildkite.GetBuild")
 			defer span.End()
 
@@ -339,12 +344,14 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 			deps := DepsFromContext(ctx)
 			build, _, err := deps.BuildsClient.Get(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
 			if err != nil {
-				return handleBuildkiteError(err)
+				result, _, callErr := handleBuildkiteError(err)
+				return result, nil, callErr
 			}
 
 			annotations, annotationsTruncated, err := listAnnotationSummaries(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber)
 			if err != nil {
-				return handleBuildkiteError(err)
+				result, _, callErr := handleBuildkiteError(err)
+				return result, nil, callErr
 			}
 
 			span.SetAttributes(
@@ -353,7 +360,7 @@ func GetBuild() (mcp.Tool, mcp.ToolHandlerFor[GetBuildArgs, any], []string) {
 			)
 
 			result := detailBuild(build, annotations, annotationsTruncated)
-			return mcpTextResult(span, &result)
+			return mcpStructuredResult(span, &result)
 		}, []string{"read_builds"}
 }
 

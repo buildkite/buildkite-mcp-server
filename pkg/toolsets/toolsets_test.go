@@ -2,9 +2,18 @@ package toolsets
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	buildkiteapi "github.com/buildkite/go-buildkite/v5"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -689,6 +698,145 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 		toolNames = append(toolNames, tool.Tool.Name)
 	}
 	assert.Contains(toolNames, "create_pipeline_webhook")
+}
+
+func TestBuildContractsOverHTTP(t *testing.T) {
+	var apiCalls atomic.Int64
+	var lastState atomic.Value
+	var hasState atomic.Bool
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalls.Add(1)
+		lastState.Store(r.URL.Query().Get("state[]"))
+		hasState.Store(r.URL.Query().Has("state[]") || r.URL.Query().Has("state"))
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "unauthorized"):
+			w.WriteHeader(http.StatusUnauthorized)
+		case strings.Contains(r.URL.Path, "missing"):
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"message":"Build not found"}`)
+		case strings.HasSuffix(r.URL.Path, "/annotations"), strings.Contains(r.URL.Path, "empty"):
+			_, _ = fmt.Fprint(w, `[]`)
+		case strings.Contains(r.URL.Path, "minimal"):
+			_, _ = fmt.Fprint(w, `{"id":"b2","state":"scheduled","created_at":null}`)
+		default:
+			build := `{"id":"b1","number":17,"state":"future_state","message":"hello\u200b<script>bad()</script>","created_at":"2026-01-02T03:04:05.000Z","creator":{"created_at":"2026-01-01T00:00:00.000Z"},"blocked":true,"meta_data":{"text":"safe\u200b"},"env":{"SECRET":"excluded"},"jobs":[{"id":"excluded"}]}`
+			if strings.HasSuffix(r.URL.Path, "/builds") {
+				w.Header().Set("Link", `<https://example.com/builds?page=2>; rel="next"`)
+				_, _ = fmt.Fprintf(w, "[%s]", build)
+			} else {
+				_, _ = fmt.Fprint(w, build)
+			}
+		}
+	}))
+	t.Cleanup(api.Close)
+	apiClient, err := buildkiteapi.NewOpts(buildkiteapi.WithBaseURL(api.URL + "/"))
+	require.NoError(t, err)
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	server.AddReceivingMiddleware(buildkite.InjectDepsMiddleware(buildkite.ToolDependencies{
+		BuildsClient: apiClient.Builds, AnnotationsClient: apiClient.Annotations,
+	}))
+	newToolDef(buildkite.ListBuilds).Register(server)
+	newToolDef(buildkite.GetBuild).Register(server)
+	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+		return server
+	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true}))
+	t.Cleanup(httpServer.Close)
+	ctx := context.Background()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close() })
+	tools, err := session.ListTools(ctx, nil)
+	require.NoError(t, err)
+	schemas := map[string]*jsonschema.Resolved{}
+	for _, tool := range tools.Tools {
+		require.NotNil(t, tool.OutputSchema)
+		data, err := json.Marshal(tool.OutputSchema)
+		require.NoError(t, err)
+		var schema jsonschema.Schema
+		require.NoError(t, json.Unmarshal(data, &schema))
+		require.Equal(t, "object", schema.Type)
+		resolved, err := schema.Resolve(nil)
+		require.NoError(t, err)
+		schemas[tool.Name] = resolved
+		if tool.Name == "list_builds" {
+			input := tool.InputSchema.(map[string]any)
+			state := input["properties"].(map[string]any)["state"].(map[string]any)
+			require.Contains(t, state["description"], "Omit to include all states")
+			require.Contains(t, state["description"], "an empty string is also accepted")
+			require.ElementsMatch(t, []any{"", "creating", "scheduled", "running", "passed", "failing", "failed", "blocked", "canceling", "canceled", "skipped", "not_run", "finished"}, state["enum"])
+		}
+	}
+	minimal, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_build", Arguments: map[string]any{"org_slug": "minimal", "pipeline_slug": "pipeline", "build_number": "17"}})
+	require.NoError(t, err)
+	require.False(t, minimal.IsError)
+	require.NoError(t, schemas["get_build"].Validate(minimal.StructuredContent))
+	minimalBuild := minimal.StructuredContent.(map[string]any)
+	require.Nil(t, minimalBuild["created_at"])
+	require.Equal(t, []any{}, minimalBuild["annotations"])
+	require.NotContains(t, minimalBuild, "started_at")
+	for _, state := range []string{"success", "timed_out", "PASSED"} {
+		before := apiCalls.Load()
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_builds", Arguments: map[string]any{"org_slug": "org", "state": state}})
+		require.NoError(t, err)
+		require.True(t, result.IsError, "state %q", state)
+		require.Equal(t, before, apiCalls.Load(), "invalid input must not reach the API")
+	}
+	for _, name := range []string{"list_builds", "get_build"} {
+		for _, org := range []string{"org", "missing", "unauthorized"} {
+			t.Run(name+"/"+org, func(t *testing.T) {
+				args := map[string]any{"org_slug": org}
+				if name == "get_build" {
+					args["pipeline_slug"], args["build_number"] = "pipeline", "17"
+				}
+				result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+				if org == "unauthorized" {
+					require.Error(t, err)
+					require.Contains(t, err.Error(), "unauthorized")
+					return
+				}
+				require.NoError(t, err)
+				if org == "missing" {
+					require.True(t, result.IsError)
+					require.Nil(t, result.StructuredContent)
+					return
+				}
+				require.False(t, result.IsError, "%+v", result.Content[0])
+				require.NoError(t, schemas[name].Validate(result.StructuredContent))
+				require.Len(t, result.Content, 1)
+				text := result.Content[0].(*mcp.TextContent).Text
+				structured, err := json.Marshal(result.StructuredContent)
+				require.NoError(t, err)
+				require.JSONEq(t, text, string(structured))
+				require.Contains(t, text, "future_state")
+				require.Contains(t, text, "2026-01-02T03:04:05")
+				require.NotContains(t, text, "bad()")
+				require.NotContains(t, text, "\u200b")
+				require.NotContains(t, text, "excluded")
+			})
+		}
+	}
+	for _, args := range []map[string]any{
+		{"org_slug": "empty"},
+		{"org_slug": "empty", "state": ""},
+	} {
+		before := apiCalls.Load()
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_builds", Arguments: args})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		require.Equal(t, before+1, apiCalls.Load())
+		require.False(t, hasState.Load(), "omitted or empty state must not send an API filter")
+	}
+	for _, state := range []string{"passed", "failing", "finished"} {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_builds", Arguments: map[string]any{"org_slug": "empty", "state": state}})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		require.True(t, hasState.Load())
+		require.Equal(t, state, lastState.Load())
+		require.NoError(t, schemas["list_builds"].Validate(result.StructuredContent))
+		require.JSONEq(t, `{"items":[],"headers":{"Link":""}}`, result.Content[0].(*mcp.TextContent).Text)
+	}
 }
 
 func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
