@@ -49,6 +49,34 @@ func TestListRepositoryConnections(t *testing.T) {
 	requireJSONPathEqual(t, text, "gitlab_self_managed", 1, "type")
 }
 
+func TestListRepositoryConnectionsReturnsEmptyArray(t *testing.T) {
+	client := &mockRepositoryConnectionsClient{
+		list: func(context.Context, string) ([]buildkite.RepositoryConnection, *buildkite.Response, error) {
+			return nil, nil, nil
+		},
+	}
+
+	_, handler, _ := ListRepositoryConnections()
+	result, _, err := handler(repositoryConnectionsContext(client), createMCPRequest(t, map[string]any{}), ListRepositoryConnectionsArgs{OrgSlug: "acme"})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.JSONEq(t, "[]", getTextResult(t, result).Text)
+}
+
+func TestListRepositoryConnectionsHandlesAPIError(t *testing.T) {
+	client := &mockRepositoryConnectionsClient{
+		list: func(context.Context, string) ([]buildkite.RepositoryConnection, *buildkite.Response, error) {
+			return nil, nil, errors.New("API error")
+		},
+	}
+
+	_, handler, _ := ListRepositoryConnections()
+	result, _, err := handler(repositoryConnectionsContext(client), createMCPRequest(t, map[string]any{}), ListRepositoryConnectionsArgs{OrgSlug: "acme"})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, getTextResult(t, result).Text, "API error")
+}
+
 func TestGetRepositoryConnectionReturnsProviderRateLimit(t *testing.T) {
 	client := &mockRepositoryConnectionsClient{
 		get: func(_ context.Context, org, id string) (buildkite.RepositoryConnection, *buildkite.Response, error) {
@@ -73,6 +101,7 @@ func TestGetRepositoryConnectionReturnsProviderRateLimit(t *testing.T) {
 	require.Equal(t, "get_repository_connection", tool.Name)
 	require.True(t, tool.Annotations.ReadOnlyHint)
 	require.Contains(t, tool.Description, "not the Buildkite API rate limit")
+	require.Contains(t, tool.Description, "treat used and remaining as stale")
 	require.Equal(t, []string{"read_organization_repository_connections"}, scopes)
 
 	result, _, err := handler(repositoryConnectionsContext(client), createMCPRequest(t, map[string]any{}), GetRepositoryConnectionArgs{

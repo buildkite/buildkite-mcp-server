@@ -22,7 +22,7 @@ type ListRepositoryConnectionsArgs struct {
 func ListRepositoryConnections() (mcp.Tool, mcp.ToolHandlerFor[ListRepositoryConnectionsArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "list_repository_connections",
-		Description: "List an organization's source control repository connections, such as GitHub apps, Bitbucket Server, and GitLab Self-Managed. Returns all connections unpaginated with id, type, and display_name only; use get_repository_connection for host details and GitHub provider rate limits. Requires organization administrator access",
+		Description: "List an organization's source control repository connections, such as GitHub apps, Bitbucket Server, and GitLab Self-Managed. Returns all connections unpaginated with id, type, display_name, and url only; use get_repository_connection for host details and GitHub provider rate limits. Requires organization administrator access",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "List Repository Connections",
 			ReadOnlyHint: true,
@@ -37,6 +37,10 @@ func ListRepositoryConnections() (mcp.Tool, mcp.ToolHandlerFor[ListRepositoryCon
 		connections, _, err := deps.RepositoryConnectionsClient.List(ctx, args.OrgSlug)
 		if err != nil {
 			return handleBuildkiteError(err)
+		}
+
+		if connections == nil {
+			connections = []buildkite.RepositoryConnection{}
 		}
 
 		span.SetAttributes(attribute.Int("item_count", len(connections)))
@@ -60,7 +64,7 @@ type repositoryConnectionResult struct {
 func GetRepositoryConnection() (mcp.Tool, mcp.ToolHandlerFor[GetRepositoryConnectionArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_repository_connection",
-		Description: "Get a repository connection's service account, host, and provider rate limit. rate_limit is the cached GitHub installation core API quota for this connection (limit, used, remaining, reset_at), not the Buildkite API rate limit; it is null when the quota is unavailable or does not apply to the connection type. Requires organization administrator access",
+		Description: "Get a repository connection's service account, host, and provider rate limit. rate_limit is the cached GitHub installation core API quota for this connection (limit, used, remaining, reset_at), not the Buildkite API rate limit; it is null when the quota is unavailable or does not apply to the connection type. If reset_at is in the past, the quota has reset since it was cached, so treat used and remaining as stale. Requires organization administrator access",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Repository Connection",
 			ReadOnlyHint: true,
