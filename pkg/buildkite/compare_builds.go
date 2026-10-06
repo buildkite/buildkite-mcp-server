@@ -120,12 +120,14 @@ func compareJobOutcomes(target, baseline *ComparisonJob) string {
 		return "added"
 	case target == nil:
 		return "removed"
+	// Checked before newly_failing so a soft failure, which never blocks the
+	// build, is not reported as a new failure or a recovery.
+	case target.SoftFailed != baseline.SoftFailed:
+		return "state_changed"
 	case comparisonFailed(target) && baseline.State == "passed":
 		return "newly_failing"
 	case target.State == "passed" && comparisonFailed(baseline):
 		return "recovered"
-	case target.SoftFailed != baseline.SoftFailed:
-		return "state_changed"
 	case comparisonFailed(target) && comparisonFailed(baseline):
 		return "still_failing"
 	case target.State != baseline.State:
@@ -251,7 +253,7 @@ func loadComparisonJobs(ctx context.Context, client JobsClient, args CompareBuil
 func CompareBuilds() (mcp.Tool, mcp.ToolHandlerFor[CompareBuildsArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "compare_builds",
-		Description: "Compare step outcomes, final-attempt retry counts and execution/scheduling times between builds in one pipeline. Defaults to the most recently created earlier successful build on the same branch; baseline_build_number overrides this. Matches step keys or, for unkeyed jobs, unique exact names with matching type, group, matrix and parallel coordinates. match_method identifies heuristic name_fallback matches; ambiguous or unnamed unkeyed jobs remain unmatched. Returns at most 100 comparisons, prioritizing failures, and optional bounded log evidence for three newly failing jobs. Scans at most 1000 jobs per build; refuses incomplete inventories. Historical co-occurrence does not prove a cause or that retrying is safe. Use get_build_failure_summary for deeper failure diagnosis.",
+		Description: "Compare step outcomes, final-attempt retry counts and execution/scheduling times between builds in one pipeline. Defaults to the most recently created earlier successful build on the same branch; baseline_build_number overrides this. Matches step keys or, for unkeyed jobs, unique exact names with matching type, group, matrix and parallel coordinates. match_method identifies heuristic name_fallback matches; ambiguous or unnamed unkeyed jobs remain unmatched. A change in soft_failed (a failure allowed by soft_fail, which does not block the build) is state_changed, never newly_failing or recovered. Returns at most 100 comparisons, prioritizing failures, and optional bounded log evidence for three newly failing jobs. Scans at most 1000 jobs per build; refuses incomplete inventories. Historical co-occurrence does not prove a cause or that retrying is safe. Use get_build_failure_summary for deeper failure diagnosis.",
 		Annotations: &mcp.ToolAnnotations{Title: "Compare Builds", ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args CompareBuildsArgs) (*mcp.CallToolResult, any, error) {
 		ctx, span := trace.Start(ctx, "buildkite.CompareBuilds")

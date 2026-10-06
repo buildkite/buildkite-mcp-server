@@ -5,6 +5,7 @@ This guide explains how to effectively use the Buildkite MCP server's log tools 
 ## Table of Contents
 - [Tools Overview](#tools-overview)
 - [Debugging Workflow](#debugging-workflow)
+  - [Soft Failures](#soft-failures)
 - [Optimizing LLM Usage](#optimizing-llm-usage)
 - [Common Error Patterns](#common-error-patterns)
 
@@ -13,7 +14,7 @@ This guide explains how to effectively use the Buildkite MCP server's log tools 
 The server provides a composite investigation tool and lower-level log tools:
 
 ### 1. get_build_failure_summary - Start Here
-**Best first step for diagnosing a build failure** — combines build state, failed and canceled jobs, promised failures from still-running jobs, bounded log tails, error/warning annotations, and failed Test Engine tests in one call. Jobs that never ran (`broken`, `waiting_failed`, `blocked_failed`, `unblocked_failed`) fill the remaining `max_jobs` slots unless `include_never_ran_jobs` is false.
+**Best first step for diagnosing a build failure** — combines build state, failed and canceled jobs, promised failures from still-running jobs, bounded log tails, error/warning annotations, and failed Test Engine tests in one call. Blocking failures fill `max_jobs` first, then canceled jobs, then soft-failed jobs (`soft_failed: true`). Jobs that never ran (`broken`, `waiting_failed`, `blocked_failed`, `unblocked_failed`) fill the remaining `max_jobs` slots unless `include_never_ran_jobs` is false.
 
 The default 50-line tail per failed job is usually enough for an initial diagnosis. Use the lower-level tools only when the summary identifies an area that needs deeper inspection. You can reduce output with `log_tail`, `max_jobs`, `max_annotations`, `max_test_runs`, and `max_failed_tests`, or disable optional sections with `include_logs`, `include_annotations`, and `include_failed_tests`. Failed tests default to at most 50 per build, and failure details (`failure_reason`) are scanned from at most 5 Test Engine runs, choosing the runs that hold the most returned failed tests first. A test whose suite cannot be read from its URL falls back to the build's runs in listed order, and a `warnings` entry says when the cap left candidate runs unscanned.
 
@@ -51,12 +52,24 @@ Always set `limit` — logs can be very large.
 Call `get_build_failure_summary` with the organization slug, pipeline slug, and build number. In most cases this is enough to identify the root cause without additional calls.
 
 Interpret its jobs as follows:
-- **`failed`** jobs actually ran and exited non-zero — these are the root cause, start here
+- **`failed`**, **`timed_out`** and **`expired`** jobs without `soft_failed: true` are blocking failures (an `expired` job never reached an agent). These are the root cause candidates, start here
+- **`soft_failed: true`** jobs (see [Soft Failures](#soft-failures)) ran and failed, but the step's `soft_fail` setting allowed that exit status, so they did not block the build
 - **`broken`** jobs never ran because the pipeline configuration excluded them (`if`/`branches` did not match, `parallelism: 0`, or `skip`). They are never caused by a failed job, never fail the build, and are normal in passing builds
-- **`waiting_failed` / `blocked_failed` / `unblocked_failed`** jobs never ran because a job they depend on failed. They have no logs
+- **`waiting_failed` / `blocked_failed` / `unblocked_failed`** jobs never ran because a job they depend on failed. They are consequences of that upstream failure, not root causes, and have no logs — investigate the blocking failure instead
 - **`running` with a non-zero `promised_exit_status`** has declared an early failure but may still produce more logs, artifacts, or test results before it finishes
 
-If you need more context, take a failed job's `id` as the `job_id` for the lower-level log tools.
+If you need more context, take a blocking failed job's `id` as the `job_id` for the lower-level log tools.
+
+### Soft Failures
+A soft-failed job is a real, unsuccessful execution whose exit status the pipeline author explicitly allowed through `soft_fail`. Rules for handling them:
+
+- **Identify them by `soft_failed: true`**, not by step names (a "security audit" step is not automatically soft-failing) or by a non-zero `exit_status` alone.
+- **`soft_fail` may allow only particular exit statuses** (for example `soft_fail: [{exit_status: 1}]`). The same step exiting with a different status is a blocking failure.
+- **Describe them as non-blocking, allowed failures** — not as passing or successful tests, and not as proof the problem is harmless.
+- **Deprioritize them** when explaining a red build: do not read their logs, retry them, or propose fixes unless the user asks about them or evidence connects them to the reported problem.
+- **Non-blocking does not mean irrelevant**: a soft-failed step still ran, can still be a dependency of later steps, and still contributes to build duration.
+- `build.job_state_counts` tallies jobs by state only, so a `failed` count can include soft-failed jobs.
+- `retry_failed_jobs` skips soft-failed jobs, and `compare_builds` reports a change in `soft_failed` as `state_changed`, never `newly_failing` or `recovered`.
 
 ### Step 1: Quick Assessment
 Use `tail_logs` with `tail: 50-100` to see the most recent output. Most failures surface here.

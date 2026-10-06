@@ -39,6 +39,10 @@ func TestCompareJobOutcomes(t *testing.T) {
 	}
 	require.Equal(t, "retries_changed", compareJobOutcomes(&ComparisonJob{State: "passed", RetriesCount: 1}, &ComparisonJob{State: "passed"}))
 	require.Equal(t, "state_changed", compareJobOutcomes(&ComparisonJob{State: "passed", SoftFailed: true}, &ComparisonJob{State: "passed"}))
+	// A soft failure never blocks the build, so it is neither a new failure nor a recovery.
+	softFailed := &ComparisonJob{State: "failed", SoftFailed: true}
+	require.Equal(t, "state_changed", compareJobOutcomes(softFailed, &ComparisonJob{State: "passed"}))
+	require.Equal(t, "state_changed", compareJobOutcomes(&ComparisonJob{State: "passed"}, softFailed))
 }
 
 func TestCompareBuildJobsSoftFailureTransitions(t *testing.T) {
