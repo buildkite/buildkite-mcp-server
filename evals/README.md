@@ -1,6 +1,6 @@
 ## What is this?
 
-Under certain conditions, e.g., branch being pushed/created in repo, PR created, etc., this pipeline will run, kicking-off a specified LLM agent backed by a specified model to exercise a specified buildkite-mcp-server against preset scenarios to evaluate the performance of the buildkite-mcp-server.
+There is a [pipeline](https://buildkite.com/buildkite/buildkite-mcp-server-evals-framework) that kicks-off a specified LLM agent backed by a specified model to exercise a specified buildkite-mcp-server against preset scenarios to evaluate the performance of the buildkite-mcp-server.
 
 ## What is the output?
 
@@ -12,6 +12,8 @@ A set of artifacts, and annotations in the Buildkite build showing:
 * Comparison reports
   * LLM agent metrics
   * High-level steps taken by LLM agent to complete scenarios
+* Datadog dashboard
+  * Charts the LLM agent metrics (see above) over runs
 
 ## Supported agents
 
@@ -35,8 +37,6 @@ A set of artifacts, and annotations in the Buildkite build showing:
   * Ops notes: the launch endpoint is strictly rate-limited (~1/user/min; the script retries a 429 once per attempt cycle), runs are capped at `CURSOR_CLOUD_TIMEOUT_MINS` (default 90 — reconnects get the *remaining* budget) and cancelled best-effort on abort/timeout, and dropped SSE connections reconnect with `Last-Event-ID` resume plus a status-poll fallback that synthesizes the terminal `result` record if the stream missed it (if the server ignores the resume header and replays events, tool audits stay correct — calls dedupe by `callId`).
 
 The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
-
-Cursor's Slack bot (`@Cursor`) and BugBot are further Cursor entry points, but they're interactive/review-oriented and a poor fit for a scripted matrix.
 
 ## Permission posture
 
@@ -90,9 +90,12 @@ All new code are mostly in `evals/` folder
       * `LOCAL_BYPASS_PERMISSION`: See "Permission posture" above. Required, no default.
     * Running locally: from this repo's root, with `./buildkite-mcp-server` built
       (`make build`), `jq` and `yq` (mikefarah) installed, and your git
-      credentials able to push to the eval repo:
+      credentials able to push to the eval repo. The MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_XXXX_API_TOKEN
+      is optional and only required if you are asking the agent to perform evaluation on a build
+      that does not belong to buildkite; it holds the API token of the organization, e.g., XXXX, which owns the buiild.
       ```bash
       BUILDKITE_API_TOKEN=... \
+      MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_XXXX_API_TOKEN=... \
       LOCAL_CI=false \
       DEBUG_PERMISSIONS=false \
       LOCAL_BYPASS_PERMISSION=false \
