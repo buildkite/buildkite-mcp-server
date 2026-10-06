@@ -237,20 +237,21 @@ func NewTool(tool mcp.Tool, register func(s *mcp.Server), scopes []string) ToolD
 }
 
 const (
-	ToolsetAll             = "all" // Special name to enable all toolsets
-	ToolsetClusters        = "clusters"
-	ToolsetClusterSecrets  = "cluster_secrets"
-	ToolsetCacheRegistries = "cache_registries"
-	ToolsetAgents          = "agents"
-	ToolsetPipelines       = "pipelines"
-	ToolsetBuilds          = "builds"
-	ToolsetArtifacts       = "artifacts"
-	ToolsetLogs            = "logs"
-	ToolsetTests           = "tests"
-	ToolsetAnnotations     = "annotations"
-	ToolsetInvestigations  = "investigations"
-	ToolsetUser            = "user"
-	ToolsetSkills          = "skills"
+	ToolsetAll                   = "all" // Special name to enable all toolsets
+	ToolsetClusters              = "clusters"
+	ToolsetClusterSecrets        = "cluster_secrets"
+	ToolsetCacheRegistries       = "cache_registries"
+	ToolsetAgents                = "agents"
+	ToolsetPipelines             = "pipelines"
+	ToolsetBuilds                = "builds"
+	ToolsetArtifacts             = "artifacts"
+	ToolsetLogs                  = "logs"
+	ToolsetTests                 = "tests"
+	ToolsetAnnotations           = "annotations"
+	ToolsetInvestigations        = "investigations"
+	ToolsetUser                  = "user"
+	ToolsetRepositoryConnections = "repository_connections"
+	ToolsetSkills                = "skills"
 )
 
 var ValidToolsets = []string{
@@ -267,6 +268,7 @@ var ValidToolsets = []string{
 	ToolsetAnnotations,
 	ToolsetInvestigations,
 	ToolsetUser,
+	ToolsetRepositoryConnections,
 	ToolsetSkills,
 }
 
@@ -465,6 +467,14 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CurrentUser),
 				newToolDef(buildkite.UserTokenOrganization),
 				newToolDef(buildkite.AccessToken),
+			},
+		},
+		ToolsetRepositoryConnections: {
+			Name:        "Repository Connections",
+			Description: "Tools for inspecting source control repository connections and their GitHub provider rate limits",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListRepositoryConnections),
+				newToolDef(buildkite.GetRepositoryConnection),
 			},
 		},
 		ToolsetSkills: {

@@ -193,6 +193,11 @@ func TestCacheRegistryArgsSchemas(t *testing.T) {
 	require.Empty(t, updateSchema.Properties["name"].Types)
 }
 
+func TestRepositoryConnectionArgsSchemas(t *testing.T) {
+	require.Equal(t, []string{"org_slug"}, sortedRequired[ListRepositoryConnectionsArgs](t))
+	require.Equal(t, []string{"connection_id", "org_slug"}, sortedRequired[GetRepositoryConnectionArgs](t))
+}
+
 func TestCreateBuildArgsSchema(t *testing.T) {
 	req := sortedRequired[CreateBuildArgs](t)
 	require.Equal(t, []string{"branch", "commit", "message", "org_slug", "pipeline_slug"}, req)
