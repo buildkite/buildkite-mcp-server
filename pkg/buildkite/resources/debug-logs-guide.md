@@ -64,7 +64,7 @@ If you need more context, take a blocking failed job's `id` as the `job_id` for 
 A soft-failed job is a real, unsuccessful execution whose exit status the pipeline author explicitly allowed through `soft_fail`. Rules for handling them:
 
 - **Identify them by `soft_failed: true`**, not by step names (a "security audit" step is not automatically soft-failing) or by a non-zero `exit_status` alone.
-- **`soft_fail` may allow only particular exit statuses** (for example `soft_fail: [{exit_status: 1}]`). The same step exiting with a different status is a blocking failure.
+- **`soft_fail` in the pipeline configuration may allow only particular exit statuses** (for example `soft_fail: [{exit_status: 1}]`). The same step exiting with a different status has `soft_failed: false` and is a blocking failure. The job's `soft_failed` field is authoritative, so you do not need the pipeline configuration to tell the two apart.
 - **Describe them as non-blocking, allowed failures** — not as passing or successful tests, and not as proof the problem is harmless.
 - **Deprioritize them** when explaining a red build: do not read their logs, retry them, or propose fixes unless the user asks about them or evidence connects them to the reported problem.
 - **Non-blocking does not mean irrelevant**: a soft-failed step still ran, can still be a dependency of later steps, and still contributes to build duration.
