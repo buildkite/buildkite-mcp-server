@@ -382,6 +382,50 @@ func TestCompareBuildsLogEvidence(t *testing.T) {
 	require.Contains(t, strings.Join(result.Warnings, " "), "limited to three")
 }
 
+// A job that soft-failed in the baseline and now hard-fails is state_changed,
+// but it blocks the build, so it gets log evidence; new soft failures do not.
+func TestCompareBuildsLogEvidenceForNewlyBlockingStateChange(t *testing.T) {
+	path := t.TempDir() + "/logs.parquet"
+	writeTestParquetFile(t, path, []string{"hard failure evidence"})
+	builds := &MockBuildsClient{GetFunc: func(_ context.Context, _, _, number string, _ *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+		if number == "42" {
+			return buildkite.Build{Number: 42, Branch: "main"}, nil, nil
+		}
+		return buildkite.Build{Number: 40, Branch: "main"}, nil, nil
+	}}
+	jobs := &MockJobsClient{ListByBuildFunc: func(_ context.Context, _, _, number string, _ *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+		baseline := number == "40"
+		passedToSoftState := "failed"
+		if baseline {
+			passedToSoftState = "passed"
+		}
+		return buildkite.JobsList{Items: []buildkite.Job{
+			{ID: "soft-to-hard-" + number, StepKey: "soft-to-hard", State: "failed", SoftFailed: baseline},
+			{ID: "hard-to-soft-" + number, StepKey: "hard-to-soft", State: "failed", SoftFailed: !baseline},
+			{ID: "passed-to-soft-" + number, StepKey: "passed-to-soft", State: passedToSoftState, SoftFailed: !baseline},
+		}}, nil, nil
+	}}
+	var logJobs []string
+	logs := &MockBuildkiteLogsClient{NewReaderFunc: func(_ context.Context, _, _, _, job string, _ time.Duration, _ bool) (*buildkitelogs.ParquetReader, error) {
+		logJobs = append(logJobs, job)
+		return buildkitelogs.NewParquetReader(path), nil
+	}}
+	_, handler, _ := CompareBuilds()
+	res, _, err := handler(ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: builds, JobsClient: jobs, BuildkiteLogsClient: logs}), nil, CompareBuildsArgs{BuildNumber: "42", BaselineBuildNumber: "40"})
+	require.NoError(t, err)
+	var result BuildComparison
+	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, res).Text), &result))
+	require.Equal(t, map[string]int{"state_changed": 3}, result.ChangeCounts)
+	require.Equal(t, []string{"soft-to-hard-42"}, logJobs)
+	for _, step := range result.Steps {
+		if step.StepKey == "soft-to-hard" {
+			require.Equal(t, "hard failure evidence", step.Target.LogTail[0].C)
+		} else {
+			require.Empty(t, step.Target.LogTail, step.StepKey)
+		}
+	}
+}
+
 func TestCompareBuildsLogAuthenticationErrors(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "https://api.buildkite.com/log", nil)
 	for _, tc := range []struct {
