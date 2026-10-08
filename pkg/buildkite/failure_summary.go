@@ -123,7 +123,8 @@ type FailureSummaryAnnotation struct {
 // its run was past the scan cap, past the first page of the run's failed
 // executions, unlisted on the build, or the lookup failed —
 // failure_detail_status says so, and get_failed_executions with
-// test_suite_slug and run_id fetches the detail.
+// test_suite_slug and run_id fetches the detail. Labels are the test's Test
+// Engine labels, such as "flaky"; the list call already returns them.
 type FailureSummaryFailedTest struct {
 	TestID              string                      `json:"test_id"`
 	Name                string                      `json:"name,omitempty"`
@@ -131,6 +132,7 @@ type FailureSummaryFailedTest struct {
 	Location            string                      `json:"location,omitempty"`
 	FileName            string                      `json:"file_name,omitempty"`
 	WebURL              string                      `json:"web_url,omitempty"`
+	Labels              []string                    `json:"labels,omitempty"`
 	TestSuiteSlug       string                      `json:"test_suite_slug,omitempty"`
 	RunID               string                      `json:"run_id,omitempty"`
 	FailureReason       string                      `json:"failure_reason,omitempty"`
@@ -683,6 +685,7 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 				Location:      test.Location,
 				FileName:      test.FileName,
 				WebURL:        test.WebURL,
+				Labels:        test.Labels,
 				TestSuiteSlug: suiteSlug,
 				RunID:         firstRunID(suiteSlug),
 			}
@@ -1324,7 +1327,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Each failed test also carries its Test Engine labels, so there is no need to call a test tool for them; for its reliability history, call get_test with its test_suite_slug and test_id. " + flakyTestGuidance + " Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,

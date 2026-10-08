@@ -19,6 +19,10 @@ type BuildTestsClient interface {
 	List(ctx context.Context, org, buildUUID string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error)
 }
 
+// flakyTestGuidance tells agents how to treat a test labeled flaky: the label
+// is a hint, not a diagnosis, and retrying is a user decision.
+const flakyTestGuidance = "If a failed test is labeled 'flaky', do not stop at the label: trace the actual error (failure_reason, failure_expanded, or the job log) and propose a permanent fix. Never conclude a failure is flaky from a PR or commit title alone. Retry the job with retry_job only when the user explicitly permits it."
+
 type ListTestsArgs struct {
 	ToolInput
 	OrgSlug       string    `json:"org_slug"`
@@ -66,7 +70,7 @@ type GetTestArgs struct {
 func ListTests() (mcp.Tool, mcp.ToolHandlerFor[ListTestsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_tests",
-			Description: "List tests in a Buildkite Test Engine suite with execution metrics aggregated over a selected time window. Supports filtering, metric sorting, and pagination.",
+			Description: "List tests in a Buildkite Test Engine suite with execution metrics aggregated over a selected time window. Supports filtering, metric sorting, and pagination. Each test carries its labels, such as 'flaky'. " + flakyTestGuidance,
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Tests",
 				ReadOnlyHint: true,
@@ -137,7 +141,7 @@ func ListTests() (mcp.Tool, mcp.ToolHandlerFor[ListTestsArgs, any], []string) {
 func ListTestsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListTestsForBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_tests_for_build",
-			Description: "List tests and their execution metrics for a Buildkite build. Requires the build UUID (the build ID, not the pipeline build number) and supports filtering, metric sorting, and pagination.",
+			Description: "List tests and their execution metrics for a Buildkite build. Requires the build UUID (the build ID, not the pipeline build number) and supports filtering, metric sorting, and pagination. Each test carries its labels, such as 'flaky'. " + flakyTestGuidance,
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Tests for Build",
 				ReadOnlyHint: true,
@@ -195,7 +199,7 @@ func ListTestsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListTestsForBuildArgs, an
 func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_test",
-			Description: "Get a specific test in Buildkite Test Engine, including execution metrics aggregated over a selected time window. This provides additional metadata for failed test executions.",
+			Description: "Get a specific test in Buildkite Test Engine, including execution metrics aggregated over a selected time window. This provides additional metadata for failed test executions, including the test's labels, such as 'flaky', and its reliability. " + flakyTestGuidance,
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Test",
 				ReadOnlyHint: true,
