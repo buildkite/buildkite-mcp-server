@@ -1,8 +1,10 @@
 package buildkite
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -30,6 +32,7 @@ const (
 	maxFailureSummaryFailedTests         = 100
 	defaultFailureSummaryArtifacts       = 10
 	maxFailureSummaryArtifacts           = 100
+	failureSummaryArtifactPageSize       = 100
 	failureSummaryRunExecutionsPageSize  = 100
 	failureSummaryEntryContentByteLimit  = 4 * 1024
 	failureSummaryTestByteLimit          = 16 * 1024
@@ -192,7 +195,8 @@ type BuildFailureSummary struct {
 	// section is disabled or unconfigured.
 	TestEngine string `json:"test_engine,omitempty"`
 	// Artifacts lists up to max_artifacts artifacts uploaded by the returned
-	// jobs that ran, in job order, using the same projection as
+	// jobs that ran, grouped in job order and ranked within each job by
+	// failureArtifactRank, using the same projection as
 	// list_artifacts_for_build; fetch one with get_artifact using its id and
 	// job_id.
 	Artifacts          []artifactListItem `json:"artifacts,omitempty"`
@@ -394,14 +398,57 @@ func isFailureSummaryArtifactJob(job buildkite.Job) bool {
 	}
 }
 
+// failedTestStems returns the lower-cased file stems of a job's failed tests
+// ("./spec/features/foo_spec.rb" -> "foo_spec"), the names test frameworks
+// reuse for per-test artifacts such as "log/test/.../foo_spec_line_30.log".
+// Line numbers are not matched: an artifact can be named after its example
+// group's line rather than the failing example's.
+func failedTestStems(tests []FailureSummaryFailedTest) []string {
+	var stems []string
+	for _, test := range tests {
+		base := path.Base(strings.ToLower(test.FileName))
+		stem := strings.TrimSuffix(base, path.Ext(base))
+		if stem == "" || stem == "." || stem == "/" || slices.Contains(stems, stem) {
+			continue
+		}
+		stems = append(stems, stem)
+	}
+	return stems
+}
+
+// failureArtifactRank orders a job's artifacts by how likely they are to
+// explain its failure; lower ranks come first.
+func failureArtifactRank(artifact buildkite.Artifact, stems []string) int {
+	artifactPath := strings.ToLower(artifact.Path)
+	isLog := strings.HasSuffix(artifactPath, ".log")
+	for _, stem := range stems {
+		if strings.Contains(artifactPath, stem) {
+			if isLog {
+				return 0 // the failed test's own log
+			}
+			return 1 // other per-test output, e.g. a database state dump
+		}
+	}
+	switch {
+	case strings.HasPrefix(artifact.MimeType, "image/") || strings.Contains(artifactPath, "screenshot"):
+		return 2 // screenshots are named by time, not by test
+	case isLog:
+		return 3
+	default:
+		return 4
+	}
+}
+
 // loadFailureArtifacts lists the first page of artifacts of each returned job
 // that ran, one ListByJob call per job (the build-wide list cannot filter by
-// job), and keeps up to limit of them shared round-robin across the jobs,
-// grouped in job order. Truncated reports that a listed job has more
-// artifacts than were returned. A failed lookup becomes a
-// warning so the other jobs' artifacts are kept; a 401 is returned as
-// ErrUnauthorized.
-func loadFailureArtifacts(ctx context.Context, client ArtifactsClient, args GetBuildFailureSummaryArgs, sourceJobs []buildkite.Job, limit int) ([]artifactListItem, bool, []string, error) {
+// job). Each job's page is ranked by failureArtifactRank, keeping upload
+// order within a rank, and up to limit artifacts are then shared round-robin
+// across the jobs, grouped in job order. jobs carries the failed tests whose
+// file stems drive the ranking, index-aligned with sourceJobs. Truncated
+// reports that a listed job has more artifacts than were returned. A failed
+// lookup becomes a warning so the other jobs' artifacts are kept; a 401 is
+// returned as ErrUnauthorized.
+func loadFailureArtifacts(ctx context.Context, client ArtifactsClient, args GetBuildFailureSummaryArgs, sourceJobs []buildkite.Job, jobs []FailureSummaryJob, limit int) ([]artifactListItem, bool, []string, error) {
 	type jobArtifacts struct {
 		artifacts []buildkite.Artifact
 		hasMore   bool
@@ -422,8 +469,10 @@ func loadFailureArtifacts(ctx context.Context, client ArtifactsClient, args GetB
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
+			// Fetch a full page, not just limit, so ranking can lift a useful
+			// artifact uploaded after the job's first few.
 			artifacts, response, err := client.ListByJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, sourceJobs[index].ID, &buildkite.ArtifactListOptions{
-				ListOptions: buildkite.ListOptions{Page: 1, PerPage: limit},
+				ListOptions: buildkite.ListOptions{Page: 1, PerPage: failureSummaryArtifactPageSize},
 			})
 			fetched[index] = jobArtifacts{
 				artifacts: artifacts,
@@ -444,6 +493,16 @@ func loadFailureArtifacts(ctx context.Context, client ArtifactsClient, args GetB
 		}
 		warnings = append(warnings, fmt.Sprintf("artifacts unavailable for job %s: %v", sourceJobs[i].ID, job.err))
 		fetched[i].artifacts = nil
+	}
+
+	for i := range fetched {
+		var stems []string
+		if i < len(jobs) {
+			stems = failedTestStems(jobs[i].FailedTests)
+		}
+		slices.SortStableFunc(fetched[i].artifacts, func(a, b buildkite.Artifact) int {
+			return cmp.Compare(failureArtifactRank(a, stems), failureArtifactRank(b, stems))
+		})
 	}
 
 	// Share limit round-robin so one job with many artifacts cannot crowd
@@ -1441,7 +1500,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), size-bounded diagnostic content from logs, annotations, and failed Test Engine tests, and up to max_artifacts artifacts uploaded by the returned failed, timed-out, and canceled jobs (artifacts, each with its job_id, and artifacts_truncated when a job has more; uploaded test logs and screenshots often hold the server-side error a job log lacks — fetch one with get_artifact using its id and job_id, or page further with list_artifacts_for_job). Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), size-bounded diagnostic content from logs, annotations, and failed Test Engine tests, and up to max_artifacts artifacts uploaded by the returned failed, timed-out, and canceled jobs (artifacts, each with its job_id, most useful first within each job — files named after a failed test, then screenshots, then logs — and artifacts_truncated when a job has more; uploaded test logs and screenshots often hold the server-side error a job log lacks — fetch one with get_artifact using its id and job_id, or page further with list_artifacts_for_job). Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
@@ -1601,7 +1660,7 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		}
 
 		if defaultTrue(args.IncludeArtifacts) && deps.ArtifactsClient != nil {
-			artifacts, artifactsTruncated, artifactWarnings, artifactsErr := loadFailureArtifacts(ctx, deps.ArtifactsClient, args, sourceJobs, maxArtifacts)
+			artifacts, artifactsTruncated, artifactWarnings, artifactsErr := loadFailureArtifacts(ctx, deps.ArtifactsClient, args, sourceJobs, result.Jobs, maxArtifacts)
 			if artifactsErr != nil {
 				return nil, nil, artifactsErr
 			}

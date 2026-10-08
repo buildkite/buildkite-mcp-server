@@ -66,7 +66,7 @@ func failureSummaryTestArtifacts(jobID string, count int) []buildkite.Artifact {
 
 // perJobArtifactsClient serves counts[jobID] artifacts per job, records the
 // jobs it was asked about, and fails the test on any build-wide listing.
-func perJobArtifactsClient(t *testing.T, counts map[string]int, nextPage map[string]bool, wantPerPage int) (*MockArtifactsClient, func() []string) {
+func perJobArtifactsClient(t *testing.T, counts map[string]int, nextPage map[string]bool) (*MockArtifactsClient, func() []string) {
 	var mu sync.Mutex
 	var requested []string
 	client := &MockArtifactsClient{
@@ -79,7 +79,7 @@ func perJobArtifactsClient(t *testing.T, counts map[string]int, nextPage map[str
 			require.Equal(t, "pipeline", pipeline)
 			require.Equal(t, "1", number)
 			require.Equal(t, 1, opts.Page)
-			require.Equal(t, wantPerPage, opts.PerPage)
+			require.Equal(t, failureSummaryArtifactPageSize, opts.PerPage)
 			mu.Lock()
 			requested = append(requested, jobID)
 			mu.Unlock()
@@ -120,7 +120,7 @@ func callFailureSummaryForArtifacts(t *testing.T, deps ToolDependencies, args Ge
 func TestGetBuildFailureSummaryListsArtifactsOfJobsThatRan(t *testing.T) {
 	client, requested := perJobArtifactsClient(t, map[string]int{
 		"job-failed": 2, "job-timed-out": 1, "job-canceled": 1,
-	}, nil, defaultFailureSummaryArtifacts)
+	}, nil)
 
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
@@ -145,7 +145,7 @@ func TestGetBuildFailureSummaryListsArtifactsOfJobsThatRan(t *testing.T) {
 func TestGetBuildFailureSummaryArtifactBudgetIsSharedRoundRobin(t *testing.T) {
 	// Build 204234 shape: the first failed job alone fills the default budget,
 	// and the second job's useful log is its 4th artifact.
-	client, _ := perJobArtifactsClient(t, map[string]int{"job-failed": 10, "job-timed-out": 10}, nil, defaultFailureSummaryArtifacts)
+	client, _ := perJobArtifactsClient(t, map[string]int{"job-failed": 10, "job-timed-out": 10}, nil)
 
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
@@ -157,7 +157,7 @@ func TestGetBuildFailureSummaryArtifactBudgetIsSharedRoundRobin(t *testing.T) {
 }
 
 func TestGetBuildFailureSummaryArtifactBudgetFlowsToJobsWithMore(t *testing.T) {
-	client, _ := perJobArtifactsClient(t, map[string]int{"job-failed": 1, "job-timed-out": 5, "job-canceled": 1}, nil, 4)
+	client, _ := perJobArtifactsClient(t, map[string]int{"job-failed": 1, "job-timed-out": 5, "job-canceled": 1}, nil)
 
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{MaxArtifacts: 4})
 
@@ -168,7 +168,7 @@ func TestGetBuildFailureSummaryArtifactBudgetFlowsToJobsWithMore(t *testing.T) {
 }
 
 func TestGetBuildFailureSummaryArtifactsTruncatedWhenAJobHasMorePages(t *testing.T) {
-	client, _ := perJobArtifactsClient(t, map[string]int{"job-canceled": 1}, map[string]bool{"job-canceled": true}, defaultFailureSummaryArtifacts)
+	client, _ := perJobArtifactsClient(t, map[string]int{"job-canceled": 1}, map[string]bool{"job-canceled": true})
 
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
@@ -178,27 +178,27 @@ func TestGetBuildFailureSummaryArtifactsTruncatedWhenAJobHasMorePages(t *testing
 
 func TestGetBuildFailureSummaryBoundsMaxArtifacts(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		requested   int
-		wantPerPage int
+		name      string
+		requested int
+		wantKept  int
 	}{
-		{name: "custom", requested: 3, wantPerPage: 3},
-		{name: "capped", requested: 500, wantPerPage: maxFailureSummaryArtifacts},
-		{name: "default for negative", requested: -1, wantPerPage: defaultFailureSummaryArtifacts},
+		{name: "custom", requested: 3, wantKept: 3},
+		{name: "capped", requested: 500, wantKept: maxFailureSummaryArtifacts},
+		{name: "default for negative", requested: -1, wantKept: defaultFailureSummaryArtifacts},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			client, requested := perJobArtifactsClient(t, nil, nil, tc.wantPerPage)
+			client, requested := perJobArtifactsClient(t, map[string]int{"job-failed": 50, "job-timed-out": 50, "job-canceled": 50}, nil)
 
 			summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{MaxArtifacts: tc.requested})
 			require.Len(t, requested(), 3)
-			require.Empty(t, summary.Artifacts)
-			require.False(t, summary.ArtifactsTruncated)
+			require.Len(t, summary.Artifacts, tc.wantKept)
+			require.True(t, summary.ArtifactsTruncated)
 		})
 	}
 }
 
 func TestGetBuildFailureSummaryCanDisableArtifacts(t *testing.T) {
-	client, requested := perJobArtifactsClient(t, nil, nil, defaultFailureSummaryArtifacts)
+	client, requested := perJobArtifactsClient(t, nil, nil)
 
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{IncludeArtifacts: boolPtr(false)})
 
@@ -250,8 +250,77 @@ func TestLoadFailureArtifactsPropagatesUnauthorized(t *testing.T) {
 		},
 	}
 
-	_, _, _, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{}, []buildkite.Job{{ID: "job", State: "failed"}}, 1)
+	_, _, _, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{}, []buildkite.Job{{ID: "job", State: "failed"}}, make([]FailureSummaryJob, 1), 1)
 	require.ErrorIs(t, err, ErrUnauthorized)
+}
+
+// build204234WaterfallJobArtifacts is the second failed job of build 204234
+// in upload order: its per-test log is 4th and its screenshots 7th to 10th,
+// behind runner noise.
+func build204234WaterfallJobArtifacts() []buildkite.Artifact {
+	artifact := func(id, path, mimeType string) buildkite.Artifact {
+		return buildkite.Artifact{ID: id, JobID: "job-waterfall", Path: path, MimeType: mimeType}
+	}
+	return []buildkite.Artifact{
+		artifact("development-log", "log/development.log", "text/plain"),
+		artifact("ci-timing", "tmp/ci-timing-rspec-run-019f891f-b5b7-4ef3-a4db-731869dc5fa2.log", "text/plain"),
+		artifact("rspec-json", "tmp/rspec-019f891f-b5b7-4ef3-a4db-731869dc5fa2-node-69-20260722092030.json", "application/json"),
+		artifact("spec-log", "log/test/spec/features/viewing_build_waterfall_spec_line_30.log", "text/plain"),
+		artifact("collector", "tmp/buildkite-test-collector-rspec-4ac2728d-e74a-4824-8e4c-54b224cbf6de.json.gz", "application/gzip"),
+		artifact("state-json", "tmp/state/database/spec/features/viewing_build_waterfall_spec_line_30.json", "application/json"),
+		artifact("screenshot-1-html", "tmp/capybara/screenshot_2026-07-22-09-23-49.262.html", "text/html"),
+		artifact("screenshot-1-png", "tmp/capybara/screenshot_2026-07-22-09-23-49.262.png", "image/png"),
+		artifact("screenshot-2-html", "tmp/capybara/screenshot_2026-07-22-09-24-04.365.html", "text/html"),
+		artifact("screenshot-2-png", "tmp/capybara/screenshot_2026-07-22-09-24-04.365.png", "image/png"),
+		artifact("test-log", "log/test.log", "text/plain"),
+	}
+}
+
+func rankedFailureArtifactIDs(t *testing.T, failedTests []FailureSummaryFailedTest, limit int) []string {
+	t.Helper()
+	client := &MockArtifactsClient{
+		ListByJobFunc: func(context.Context, string, string, string, string, *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
+			return build204234WaterfallJobArtifacts(), &buildkite.Response{}, nil
+		},
+	}
+	artifacts, _, _, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{},
+		[]buildkite.Job{{ID: "job-waterfall", State: "failed"}},
+		[]FailureSummaryJob{{FailedTests: failedTests}}, limit)
+	require.NoError(t, err)
+	return artifactIDs(artifacts)
+}
+
+func TestLoadFailureArtifactsRanksFailedTestOutputFirst(t *testing.T) {
+	failedTests := []FailureSummaryFailedTest{{FileName: "./spec/features/viewing_build_waterfall_spec.rb"}}
+
+	require.Equal(t, []string{
+		"spec-log", "state-json",
+		"screenshot-1-html", "screenshot-1-png", "screenshot-2-html", "screenshot-2-png",
+		"development-log", "ci-timing", "test-log",
+		"rspec-json", "collector",
+	}, rankedFailureArtifactIDs(t, failedTests, maxFailureSummaryArtifacts))
+	// The eval's 5-per-job share now keeps the screenshot the agent needed.
+	require.Equal(t, []string{"spec-log", "state-json", "screenshot-1-html", "screenshot-1-png", "screenshot-2-html"},
+		rankedFailureArtifactIDs(t, failedTests, 5))
+}
+
+func TestLoadFailureArtifactsRanksWithoutFailedTests(t *testing.T) {
+	// Without Test Engine data there are no stems: screenshots still lead,
+	// then logs, keeping upload order within each rank.
+	require.Equal(t, []string{
+		"screenshot-1-html", "screenshot-1-png", "screenshot-2-html", "screenshot-2-png",
+		"development-log", "ci-timing", "spec-log", "test-log",
+		"rspec-json", "collector", "state-json",
+	}, rankedFailureArtifactIDs(t, nil, maxFailureSummaryArtifacts))
+}
+
+func TestFailedTestStems(t *testing.T) {
+	require.Equal(t, []string{"search_records_spec", "viewing_build_waterfall_spec"}, failedTestStems([]FailureSummaryFailedTest{
+		{FileName: "./spec/features/admin/search_records_spec.rb"},
+		{FileName: "./spec/features/Viewing_Build_Waterfall_Spec.rb"},
+		{FileName: "spec/features/admin/search_records_spec.rb"},
+		{FileName: ""},
+	}))
 }
 
 func TestLimitFailureSummaryCollectionsDropsArtifactsBeforeAnnotations(t *testing.T) {
