@@ -6,12 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/stretchr/testify/require"
 )
 
+// failureSummaryArtifactsTestDeps returns a build whose problem jobs cover
+// every artifact eligibility case: job-failed, job-timed-out and job-canceled
+// ran; job-expired never reached an agent; job-broken never ran.
 func failureSummaryArtifactsTestDeps(artifactsClient ArtifactsClient) ToolDependencies {
 	return ToolDependencies{
 		BuildsClient: &MockBuildsClient{
@@ -20,20 +25,33 @@ func failureSummaryArtifactsTestDeps(artifactsClient ArtifactsClient) ToolDepend
 			},
 		},
 		JobsClient: &MockJobsClient{
-			ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
-				return buildkite.JobsList{}, &buildkite.Response{}, nil
+			ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				switch options.State[0] {
+				case "failed":
+					return buildkite.JobsList{Items: []buildkite.Job{
+						{ID: "job-failed", State: "failed"},
+						{ID: "job-timed-out", State: "timed_out"},
+						{ID: "job-expired", State: "expired"},
+					}}, &buildkite.Response{}, nil
+				case "canceled":
+					return buildkite.JobsList{Items: []buildkite.Job{{ID: "job-canceled", State: "canceled"}}}, &buildkite.Response{}, nil
+				case "broken":
+					return buildkite.JobsList{Items: []buildkite.Job{{ID: "job-broken", State: "broken"}}}, &buildkite.Response{}, nil
+				default:
+					return buildkite.JobsList{}, &buildkite.Response{}, nil
+				}
 			},
 		},
 		ArtifactsClient: artifactsClient,
 	}
 }
 
-func failureSummaryTestArtifacts(count int) []buildkite.Artifact {
+func failureSummaryTestArtifacts(jobID string, count int) []buildkite.Artifact {
 	artifacts := make([]buildkite.Artifact, count)
 	for i := range artifacts {
 		artifacts[i] = buildkite.Artifact{
-			ID:          fmt.Sprintf("artifact-%d", i),
-			JobID:       "job-failed",
+			ID:          fmt.Sprintf("%s-artifact-%d", jobID, i),
+			JobID:       jobID,
 			State:       "finished",
 			Path:        fmt.Sprintf("log/test/spec_%d.log", i),
 			Filename:    fmt.Sprintf("spec_%d.log", i),
@@ -44,6 +62,47 @@ func failureSummaryTestArtifacts(count int) []buildkite.Artifact {
 		}
 	}
 	return artifacts
+}
+
+// perJobArtifactsClient serves counts[jobID] artifacts per job, records the
+// jobs it was asked about, and fails the test on any build-wide listing.
+func perJobArtifactsClient(t *testing.T, counts map[string]int, nextPage map[string]bool, wantPerPage int) (*MockArtifactsClient, func() []string) {
+	var mu sync.Mutex
+	var requested []string
+	client := &MockArtifactsClient{
+		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
+			t.Error("artifacts must be listed per job, not per build")
+			return nil, nil, nil
+		},
+		ListByJobFunc: func(_ context.Context, org, pipeline, number, jobID string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
+			require.Equal(t, "org", org)
+			require.Equal(t, "pipeline", pipeline)
+			require.Equal(t, "1", number)
+			require.Equal(t, 1, opts.Page)
+			require.Equal(t, wantPerPage, opts.PerPage)
+			mu.Lock()
+			requested = append(requested, jobID)
+			mu.Unlock()
+			response := &buildkite.Response{}
+			if nextPage[jobID] {
+				response.NextPage = 2
+			}
+			return failureSummaryTestArtifacts(jobID, counts[jobID]), response, nil
+		},
+	}
+	return client, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Sorted(slices.Values(requested))
+	}
+}
+
+func artifactIDs(artifacts []artifactListItem) []string {
+	ids := make([]string, len(artifacts))
+	for i, artifact := range artifacts {
+		ids[i] = artifact.ID
+	}
+	return ids
 }
 
 func callFailureSummaryForArtifacts(t *testing.T, deps ToolDependencies, args GetBuildFailureSummaryArgs) BuildFailureSummary {
@@ -58,27 +117,20 @@ func callFailureSummaryForArtifacts(t *testing.T, deps ToolDependencies, args Ge
 	return summary
 }
 
-func TestGetBuildFailureSummaryListsFirstPageOfArtifacts(t *testing.T) {
-	var calls int
-	artifactsClient := &MockArtifactsClient{
-		ListByBuildFunc: func(_ context.Context, org, pipeline, number string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
-			calls++
-			require.Equal(t, "org", org)
-			require.Equal(t, "pipeline", pipeline)
-			require.Equal(t, "1", number)
-			require.Equal(t, 1, opts.Page)
-			require.Equal(t, defaultFailureSummaryArtifacts, opts.PerPage)
-			return failureSummaryTestArtifacts(defaultFailureSummaryArtifacts), &buildkite.Response{NextPage: 2}, nil
-		},
-	}
+func TestGetBuildFailureSummaryListsArtifactsOfJobsThatRan(t *testing.T) {
+	client, requested := perJobArtifactsClient(t, map[string]int{
+		"job-failed": 2, "job-timed-out": 1, "job-canceled": 1,
+	}, nil, defaultFailureSummaryArtifacts)
 
-	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(artifactsClient), GetBuildFailureSummaryArgs{})
+	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
-	require.Equal(t, 1, calls)
-	require.Len(t, summary.Artifacts, defaultFailureSummaryArtifacts)
-	require.True(t, summary.ArtifactsTruncated)
+	require.Equal(t, []string{"job-canceled", "job-failed", "job-timed-out"}, requested())
+	require.Equal(t, []string{
+		"job-failed-artifact-0", "job-failed-artifact-1", "job-timed-out-artifact-0", "job-canceled-artifact-0",
+	}, artifactIDs(summary.Artifacts))
+	require.False(t, summary.ArtifactsTruncated)
 	require.Equal(t, artifactListItem{
-		ID:       "artifact-0",
+		ID:       "job-failed-artifact-0",
 		JobID:    "job-failed",
 		State:    "finished",
 		Path:     "log/test/spec_0.log",
@@ -90,17 +142,38 @@ func TestGetBuildFailureSummaryListsFirstPageOfArtifacts(t *testing.T) {
 	require.Empty(t, summary.Warnings)
 }
 
-func TestGetBuildFailureSummaryArtifactsNotTruncatedOnLastPage(t *testing.T) {
-	artifactsClient := &MockArtifactsClient{
-		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
-			return failureSummaryTestArtifacts(2), &buildkite.Response{}, nil
-		},
-	}
+func TestGetBuildFailureSummaryArtifactBudgetIsSharedRoundRobin(t *testing.T) {
+	// Build 204234 shape: the first failed job alone fills the default budget,
+	// and the second job's useful log is its 4th artifact.
+	client, _ := perJobArtifactsClient(t, map[string]int{"job-failed": 10, "job-timed-out": 10}, nil, defaultFailureSummaryArtifacts)
 
-	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(artifactsClient), GetBuildFailureSummaryArgs{})
+	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
-	require.Len(t, summary.Artifacts, 2)
-	require.False(t, summary.ArtifactsTruncated)
+	require.Equal(t, []string{
+		"job-failed-artifact-0", "job-failed-artifact-1", "job-failed-artifact-2", "job-failed-artifact-3", "job-failed-artifact-4",
+		"job-timed-out-artifact-0", "job-timed-out-artifact-1", "job-timed-out-artifact-2", "job-timed-out-artifact-3", "job-timed-out-artifact-4",
+	}, artifactIDs(summary.Artifacts))
+	require.True(t, summary.ArtifactsTruncated)
+}
+
+func TestGetBuildFailureSummaryArtifactBudgetFlowsToJobsWithMore(t *testing.T) {
+	client, _ := perJobArtifactsClient(t, map[string]int{"job-failed": 1, "job-timed-out": 5, "job-canceled": 1}, nil, 4)
+
+	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{MaxArtifacts: 4})
+
+	require.Equal(t, []string{
+		"job-failed-artifact-0", "job-timed-out-artifact-0", "job-timed-out-artifact-1", "job-canceled-artifact-0",
+	}, artifactIDs(summary.Artifacts))
+	require.True(t, summary.ArtifactsTruncated)
+}
+
+func TestGetBuildFailureSummaryArtifactsTruncatedWhenAJobHasMorePages(t *testing.T) {
+	client, _ := perJobArtifactsClient(t, map[string]int{"job-canceled": 1}, map[string]bool{"job-canceled": true}, defaultFailureSummaryArtifacts)
+
+	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
+
+	require.Equal(t, []string{"job-canceled-artifact-0"}, artifactIDs(summary.Artifacts))
+	require.True(t, summary.ArtifactsTruncated)
 }
 
 func TestGetBuildFailureSummaryBoundsMaxArtifacts(t *testing.T) {
@@ -114,15 +187,10 @@ func TestGetBuildFailureSummaryBoundsMaxArtifacts(t *testing.T) {
 		{name: "default for negative", requested: -1, wantPerPage: defaultFailureSummaryArtifacts},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			artifactsClient := &MockArtifactsClient{
-				ListByBuildFunc: func(_ context.Context, _, _, _ string, opts *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
-					require.Equal(t, 1, opts.Page)
-					require.Equal(t, tc.wantPerPage, opts.PerPage)
-					return nil, &buildkite.Response{}, nil
-				},
-			}
+			client, requested := perJobArtifactsClient(t, nil, nil, tc.wantPerPage)
 
-			summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(artifactsClient), GetBuildFailureSummaryArgs{MaxArtifacts: tc.requested})
+			summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{MaxArtifacts: tc.requested})
+			require.Len(t, requested(), 3)
 			require.Empty(t, summary.Artifacts)
 			require.False(t, summary.ArtifactsTruncated)
 		})
@@ -130,19 +198,15 @@ func TestGetBuildFailureSummaryBoundsMaxArtifacts(t *testing.T) {
 }
 
 func TestGetBuildFailureSummaryCanDisableArtifacts(t *testing.T) {
-	artifactsClient := &MockArtifactsClient{
-		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
-			t.Fatal("artifacts must not be listed when include_artifacts is false")
-			return nil, nil, nil
-		},
-	}
+	client, requested := perJobArtifactsClient(t, nil, nil, defaultFailureSummaryArtifacts)
 
-	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(artifactsClient), GetBuildFailureSummaryArgs{IncludeArtifacts: boolPtr(false)})
+	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{IncludeArtifacts: boolPtr(false)})
 
+	require.Empty(t, requested())
 	require.Empty(t, summary.Artifacts)
 }
 
-func TestGetBuildFailureSummaryArtifactErrorBecomesWarning(t *testing.T) {
+func TestGetBuildFailureSummaryArtifactErrorBecomesJobWarning(t *testing.T) {
 	forbidden := &buildkite.ErrorResponse{
 		Response: &http.Response{
 			StatusCode: http.StatusForbidden,
@@ -153,18 +217,20 @@ func TestGetBuildFailureSummaryArtifactErrorBecomesWarning(t *testing.T) {
 		},
 		Message: "Your access token doesn't have the required scope",
 	}
-	artifactsClient := &MockArtifactsClient{
-		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
-			return nil, nil, forbidden
+	client := &MockArtifactsClient{
+		ListByJobFunc: func(_ context.Context, _, _, _, jobID string, _ *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
+			if jobID == "job-timed-out" {
+				return nil, nil, forbidden
+			}
+			return failureSummaryTestArtifacts(jobID, 1), &buildkite.Response{}, nil
 		},
 	}
 
-	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(artifactsClient), GetBuildFailureSummaryArgs{})
+	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
-	require.Equal(t, "failed", summary.Build.State)
-	require.Empty(t, summary.Artifacts)
+	require.Equal(t, []string{"job-failed-artifact-0", "job-canceled-artifact-0"}, artifactIDs(summary.Artifacts))
 	require.Len(t, summary.Warnings, 1)
-	require.Contains(t, summary.Warnings[0], "artifacts unavailable")
+	require.Contains(t, summary.Warnings[0], "artifacts unavailable for job job-timed-out")
 	require.Contains(t, summary.Warnings[0], forbidden.Message)
 }
 
@@ -179,26 +245,13 @@ func TestLoadFailureArtifactsPropagatesUnauthorized(t *testing.T) {
 		},
 	})
 	client := &MockArtifactsClient{
-		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
+		ListByJobFunc: func(context.Context, string, string, string, string, *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
 			return nil, nil, unauthorized
 		},
 	}
 
-	_, _, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1"}, 1)
+	_, _, _, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{}, []buildkite.Job{{ID: "job", State: "failed"}}, 1)
 	require.ErrorIs(t, err, ErrUnauthorized)
-}
-
-func TestLoadFailureArtifactsTrimsOversizedPage(t *testing.T) {
-	client := &MockArtifactsClient{
-		ListByBuildFunc: func(context.Context, string, string, string, *buildkite.ArtifactListOptions) ([]buildkite.Artifact, *buildkite.Response, error) {
-			return failureSummaryTestArtifacts(5), &buildkite.Response{}, nil
-		},
-	}
-
-	artifacts, truncated, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{}, 3)
-	require.NoError(t, err)
-	require.Len(t, artifacts, 3)
-	require.True(t, truncated)
 }
 
 func TestLimitFailureSummaryCollectionsDropsArtifactsBeforeAnnotations(t *testing.T) {
@@ -212,7 +265,7 @@ func TestLimitFailureSummaryCollectionsDropsArtifactsBeforeAnnotations(t *testin
 	result := BuildFailureSummary{
 		Build:       BuildFailureSummaryBuild{BuildSummary: BuildSummary{Number: 1, State: "failed"}},
 		Annotations: annotations,
-		Artifacts:   toArtifactListItems(failureSummaryTestArtifacts(maxFailureSummaryArtifacts)),
+		Artifacts:   toArtifactListItems(failureSummaryTestArtifacts("job-failed", maxFailureSummaryArtifacts)),
 	}
 
 	// A limit that fits every annotation plus a few artifacts at their
