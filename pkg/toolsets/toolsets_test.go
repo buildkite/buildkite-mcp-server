@@ -668,7 +668,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Len(investigations.Tools, 2)
 	assert.Equal("get_build_failure_summary", investigations.Tools[0].Tool.Name)
 	assert.Equal("compare_builds", investigations.Tools[1].Tool.Name)
-	assert.Equal([]string{"read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
+	assert.Equal([]string{"read_artifacts", "read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
 
 	builds, exists := registry.Get(ToolsetBuilds)
 	assert.True(exists)
