@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
@@ -64,11 +65,11 @@ func unauthorizedMiddleware(cb func()) mcp.Middleware {
 }
 
 // instructionSection is one paragraph of the server instructions, optionally
-// gated on a toolset being enabled. An empty toolset means always included.
+// gated on any of its toolsets being enabled. No toolsets means always included.
 // writeOnly marks a paragraph that describes a write-only operation, excluded
 // whenever read-only mode is active regardless of toolset.
 type instructionSection struct {
-	toolset   string
+	toolsets  []string
 	writeOnly bool
 	text      string
 }
@@ -76,49 +77,53 @@ type instructionSection struct {
 var instructionSections = []instructionSection{
 	{text: "This is the Buildkite MCP Server. It provides access to the Buildkite CI/CD API, enabling you to manage and inspect pipelines, builds, jobs, logs, clusters, tests, artifacts, and annotations."},
 	{
-		toolset: toolsets.ToolsetUser,
-		text:    "Start here: Before using most tools, call user_token_organization to retrieve the organization slug. Nearly every other tool requires the org_slug parameter, and this call is the fastest way to discover it.",
+		toolsets: []string{toolsets.ToolsetUser},
+		text:     "Start here: Before using most tools, call user_token_organization to retrieve the organization slug. Nearly every other tool requires the org_slug parameter, and this call is the fastest way to discover it.",
 	},
 	{
-		toolset: toolsets.ToolsetSkills,
-		text:    "Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill (e.g. debugging a build failure, tuning search_logs), call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below.",
+		toolsets: []string{toolsets.ToolsetSkills},
+		text:     "Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill (e.g. debugging a build failure, tuning search_logs), call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below.",
 	},
 	{text: "Authorization: Tools available depend on the scopes and organization access granted to the configured API token. A 401 response means the token is invalid, expired, or revoked and requires reauthentication. A 403 response means the credentials were accepted but access was denied, commonly because the token lacks a required scope or organization access, or the user lacks permission."},
 	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field."},
 	{
-		toolset: toolsets.ToolsetInvestigations,
-		text:    "Build failure investigation: start with get_build_failure_summary. It combines build state, failed and canceled jobs, promised failures from running jobs, bounded log tails, relevant annotations, and failed tests in one response; jobs that never ran (broken, waiting_failed, blocked_failed, unblocked_failed) fill the remaining max_jobs slots unless include_never_ran_jobs is false. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
+		toolsets: []string{toolsets.ToolsetInvestigations},
+		text:     "Build failure investigation: start with get_build_failure_summary. It combines build state, blocking failed and canceled jobs, promised failures from running jobs, soft-failed jobs (listed after blocking failures and canceled jobs), bounded log tails, relevant annotations, and failed tests in one response; jobs that never ran (broken, waiting_failed, blocked_failed, unblocked_failed) fill the remaining max_jobs slots unless include_never_ran_jobs is false. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
 	},
 	{
-		toolset: toolsets.ToolsetPipelines,
-		text:    "Pipeline authoring: always check pipeline YAML with validate_pipeline before creating or updating a pipeline, or before committing changes to .buildkite/pipeline.yml. It validates against the official pipeline schema locally — the call itself never contacts the Buildkite API and works regardless of the configured token's scopes — and catches structural errors that would otherwise fail silently at upload time. A valid result does not guarantee runtime correctness (environment variable interpolation, plugin configuration, dynamically generated steps).",
+		toolsets: []string{toolsets.ToolsetPipelines},
+		text:     "Pipeline authoring: always check pipeline YAML with validate_pipeline before creating or updating a pipeline, or before committing changes to .buildkite/pipeline.yml. It validates against the official pipeline schema locally — the call itself never contacts the Buildkite API and works regardless of the configured token's scopes — and catches structural errors that would otherwise fail silently at upload time. A valid result does not guarantee runtime correctness (environment variable interpolation, plugin configuration, dynamically generated steps).",
 	},
 	{
-		toolset: toolsets.ToolsetInvestigations,
-		text:    "Build comparison: use compare_builds when asked what changed since a build worked, or to compare two builds. Without an explicit baseline it selects an earlier successful build on the same pipeline and branch. Report the selected baseline and unmatched steps; shared failing steps do not establish a shared cause or justify a retry. Timings cover final attempts, not total retry cost or build wall-clock duration.",
+		toolsets: []string{toolsets.ToolsetInvestigations},
+		text:     "Build comparison: use compare_builds when asked what changed since a build worked, or to compare two builds. Without an explicit baseline it selects an earlier successful build on the same pipeline and branch. Report the selected baseline and unmatched steps; shared failing steps do not establish a shared cause or justify a retry. Timings cover final attempts, not total retry cost or build wall-clock duration.",
 	},
 	{
-		toolset: toolsets.ToolsetBuilds,
-		text:    "Job state \"broken\" means the pipeline configuration decided, when the job was created, that it would not run: an `if` condition or `branches` filter did not match, `parallelism` was 0, or the step was marked `skip`. Broken is never caused by another job failing, never fails a build, and is normal in passing builds. Jobs stopped by a failed dependency are `waiting_failed`, `blocked_failed` or `unblocked_failed` instead; those appear only in builds that actually failed. None of these four states ran, so they have no logs. `failed` = ran and exited non-zero; `skipped` = an external factor (e.g. a newer build superseded it). To explain a red build, investigate only `failed`, `timed_out`, `expired` jobs as well as `running` jobs that have non-zero `promised_exit_status`.",
+		toolsets: []string{toolsets.ToolsetBuilds},
+		text:     "Job state \"broken\" means the pipeline configuration decided, when the job was created, that it would not run: an `if` condition or `branches` filter did not match, `parallelism` was 0, or the step was marked `skip`. Broken is never caused by another job failing, never fails a build, and is normal in passing builds. Jobs stopped by a failed dependency are `waiting_failed`, `blocked_failed` or `unblocked_failed` instead; those appear only in builds that actually failed and are consequences of an upstream failure, not root causes. None of these four states ran, so they have no logs. `failed` = ran and exited non-zero; `skipped` = an external factor (e.g. a newer build superseded it). To explain a red build, investigate only `failed`, `timed_out`, `expired` jobs that are not `soft_failed`, as well as `running` jobs that have non-zero `promised_exit_status`.",
 	},
 	{
-		toolset: toolsets.ToolsetBuilds,
-		text:    "Job output links: Job summaries expose a step ID as step_id; full job responses expose it as step.id. To link directly to that job's output, use https://buildkite.com/{org_slug}/{pipeline_slug}/builds/{build_number}/list?sid={step_id}&tab=output.",
+		toolsets: []string{toolsets.ToolsetBuilds, toolsets.ToolsetInvestigations},
+		text:     "Soft failures: a job with `soft_failed` true actually ran and exited unsuccessfully, but the step's `soft_fail` setting allowed that exit status, so the failure did not block the build. `soft_fail` may allow every non-zero exit or only listed `exit_status` values, so the same step can still fail the build with another status. Identify soft failures by the `soft_failed` field, not by step names (e.g. a security audit) or by a non-zero `exit_status` alone. Describe them as non-blocking, allowed failures, never as passing and never as proof the problem is harmless. When explaining a red build, prioritize the blocking failures; do not read logs, retry, or propose fixes for soft-failed jobs unless the user asks about them or evidence connects them to the reported problem. Non-blocking does not mean irrelevant: a soft-failed step still ran, can still be a dependency of later steps, and still contributes to build duration.",
 	},
 	{
-		toolset: toolsets.ToolsetBuilds,
-		text:    "Build selection after a push: resolve the pushed commit's full SHA and call list_builds with pipeline_slug and commit. Do not assume the newest build on the branch is for that push. Webhook-created builds may not appear immediately; if no exact commit match is returned, retry before concluding no build exists. Once found, use its build number with wait_for_build.",
+		toolsets: []string{toolsets.ToolsetBuilds},
+		text:     "Job output links: Job summaries expose a step ID as step_id; full job responses expose it as step.id. To link directly to that job's output, use https://buildkite.com/{org_slug}/{pipeline_slug}/builds/{build_number}/list?sid={step_id}&tab=output.",
 	},
 	{
-		toolset: toolsets.ToolsetBuilds,
-		text:    "Dynamic pipeline uploads: steps added at runtime via `buildkite-agent pipeline upload` do not appear in the pipeline's static configuration. To inspect what was dynamically uploaded, call list_step_uploads (returns each upload's state, source_job_id, created_jobs_count, and rejection details), then get_step_upload with an upload_uuid to read its dynamic pipeline definition YAML (definition_yaml field). Large definitions are omitted from get_step_upload. Step-upload data is only available while the build is within its maximum lifetime (~30 days).",
+		toolsets: []string{toolsets.ToolsetBuilds},
+		text:     "Build selection after a push: resolve the pushed commit's full SHA and call list_builds with pipeline_slug and commit. Do not assume the newest build on the branch is for that push. Webhook-created builds may not appear immediately; if no exact commit match is returned, retry before concluding no build exists. Once found, use its build number with wait_for_build.",
 	},
 	{
-		toolset: toolsets.ToolsetLogs,
-		text:    "Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.",
+		toolsets: []string{toolsets.ToolsetBuilds},
+		text:     "Dynamic pipeline uploads: steps added at runtime via `buildkite-agent pipeline upload` do not appear in the pipeline's static configuration. To inspect what was dynamically uploaded, call list_step_uploads (returns each upload's state, source_job_id, created_jobs_count, and rejection details), then get_step_upload with an upload_uuid to read its dynamic pipeline definition YAML (definition_yaml field). Large definitions are omitted from get_step_upload. Step-upload data is only available while the build is within its maximum lifetime (~30 days).",
 	},
 	{
-		toolset:   toolsets.ToolsetAnnotations,
+		toolsets: []string{toolsets.ToolsetLogs},
+		text:     "Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.",
+	},
+	{
+		toolsets:  []string{toolsets.ToolsetAnnotations},
 		writeOnly: true,
 		text:      "Annotation scope: when creating an annotation with scope \"job\", job_id is required. If job_id is provided but scope is left as the default \"build\", the job_id is silently ignored.",
 	},
@@ -135,7 +140,9 @@ func BuildkiteServerInstructions(enabledToolsets []string, readOnly bool) string
 		if s.writeOnly && readOnly {
 			continue
 		}
-		if s.toolset == "" || toolsets.IsToolsetEnabled(enabledToolsets, s.toolset) {
+		if len(s.toolsets) == 0 || slices.ContainsFunc(s.toolsets, func(name string) bool {
+			return toolsets.IsToolsetEnabled(enabledToolsets, name)
+		}) {
 			parts = append(parts, s.text)
 		}
 	}

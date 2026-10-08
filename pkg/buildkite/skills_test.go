@@ -91,6 +91,8 @@ func TestLoadSkill(t *testing.T) {
 
 		textContent := getTextResult(t, result)
 		assert.Contains(textContent.Text, "broken")
+		assert.Contains(textContent.Text, "### Soft Failures")
+		assert.Contains(textContent.Text, "**Identify them by `soft_failed: true`**")
 	})
 
 	t.Run("unknown name returns error mentioning valid names", func(t *testing.T) {
