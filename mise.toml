@@ -7,10 +7,10 @@ github.slsa = false
 
 [tools]
 go = "1.27.1"
-golangci-lint = "2.13.2"
-goreleaser = "2.18.1"
+golangci-lint = "2.14.0"
+goreleaser = "2.18.2"
 ko = "0.19.1"
-lefthook = "2.1.12"
+lefthook = "2.1.17"
 node = "24.21.0"
 
 [tasks.setup]
