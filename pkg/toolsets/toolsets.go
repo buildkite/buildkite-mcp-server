@@ -1,11 +1,14 @@
 package toolsets
 
 import (
+	"context"
 	"fmt"
+	"reflect"
 	"slices"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	buildkiteapi "github.com/buildkite/go-buildkite/v5"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -302,7 +305,18 @@ func ValidateToolsets(names []string) error {
 // The generic parameters In and Out match the typed handler signature.
 func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, Out], []string)) ToolDefinition {
 	tool, handler, scopes := toolFunc()
-	inputSchema, err := jsonschema.For[In](nil)
+	schemaOptions := &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+		// REST filter values differ from returned states (notably "finished").
+		// https://buildkite.com/docs/apis/rest-api/builds#list-builds-for-an-organization
+		reflect.TypeFor[buildkite.BuildStateFilter](): {
+			Type: "string",
+			// Preserve the existing empty-string sentinel for no filter.
+			Enum: []any{"", "creating", "scheduled", "running", "passed", "failing", "failed", "blocked", "canceling", "canceled", "skipped", "not_run", "finished"},
+		},
+		// Timestamp marshals as a string, not its embedded time.Time struct.
+		reflect.TypeFor[buildkiteapi.Timestamp](): {Type: "string", Format: "date-time"},
+	}}
+	inputSchema, err := jsonschema.For[In](schemaOptions)
 	if err != nil {
 		panic(fmt.Sprintf("generate input schema for tool %q: %v", tool.Name, err))
 	}
@@ -317,10 +331,31 @@ func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, O
 	contextSchema.MaxLength = jsonschema.Ptr(trace.TelemetryContextMaxLength)
 	tool.InputSchema = inputSchema
 
+	if reflect.TypeFor[Out]() != reflect.TypeFor[any]() {
+		outputType := reflect.TypeFor[Out]()
+		if outputType.Kind() == reflect.Pointer {
+			outputType = outputType.Elem()
+		}
+		outputSchema, err := jsonschema.ForType(outputType, schemaOptions)
+		if err != nil {
+			panic(fmt.Sprintf("generate output schema for tool %q: %v", tool.Name, err))
+		}
+		tool.OutputSchema = outputSchema
+	}
+
 	return ToolDefinition{
 		Tool: tool,
 		Register: func(s *mcp.Server) {
-			mcp.AddTool(s, &tool, handler)
+			// The SDK validates typed nil outputs even for IsError results.
+			// Use an untyped nil on errors so success schemas do not replace
+			// the original API error with an output-validation failure.
+			mcp.AddTool(s, &tool, func(ctx context.Context, req *mcp.CallToolRequest, args In) (*mcp.CallToolResult, any, error) {
+				result, output, err := handler(ctx, req, args)
+				if err != nil || (result != nil && result.IsError) {
+					return result, nil, err
+				}
+				return result, output, nil
+			})
 		},
 		RequiredScopes: scopes,
 	}

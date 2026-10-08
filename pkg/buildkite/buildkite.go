@@ -61,6 +61,30 @@ func mcpTextResult(span trace.Span, result any) (*mcp.CallToolResult, any, error
 	return mcpSanitizedTextResult(span, sanitized)
 }
 
+// mcpStructuredResult returns the same sanitized data as text and typed output.
+// The SDK serializes the typed output into structuredContent; returning the
+// original value here would bypass sanitization for structured consumers.
+func mcpStructuredResult[T any](span trace.Span, result *T) (*mcp.CallToolResult, *T, error) {
+	sanitized, err := marshalSanitizedJSON(result)
+	if err != nil {
+		return utils.NewToolResultError(err.Error()), nil, nil
+	}
+	var output T
+	decoder := json.NewDecoder(bytes.NewReader(sanitized))
+	decoder.UseNumber()
+	if err := decoder.Decode(&output); err != nil {
+		return utils.NewToolResultError(err.Error()), nil, nil
+	}
+	// Apply the same typed serialization as the SDK: sanitization may have
+	// emptied an omitempty field that must now be omitted in both payloads.
+	formatted, err := marshalMultilineJSON(&output)
+	if err != nil {
+		return utils.NewToolResultError(err.Error()), nil, nil
+	}
+	text, _, err := mcpSanitizedTextResult(span, formatted)
+	return text, &output, err
+}
+
 func mcpTextResultWithByteLimit(span trace.Span, result any, limit int) (*mcp.CallToolResult, any, error) {
 	sanitized, err := marshalSanitizedJSON(result)
 	if err != nil {
