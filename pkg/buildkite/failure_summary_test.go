@@ -2060,6 +2060,24 @@ func TestGetBuildFailureSummaryLoweredContentLimitFlagsTruncatedFailedTest(t *te
 	require.True(t, entry.ContentTruncated, "a failure_reason cut by content_limit_bytes must be flagged")
 }
 
+func TestLimitFailureExpandedKeepsErrorMessageBeforeBacktrace(t *testing.T) {
+	values := []buildkite.FailureExpanded{{
+		Backtrace: slices.Repeat([]string{strings.Repeat("b", 200)}, 50),
+		Expanded:  []string{"expected ActiveRecord::RecordNotUnique, got PG::CheckViolation"},
+	}}
+	entryRemaining, sectionRemaining := 1000, 1000
+
+	limited, truncated := limitFailureExpanded(values, &entryRemaining, &sectionRemaining)
+
+	require.True(t, truncated)
+	require.Equal(t, values[0].Expanded, limited[0].Expanded, "the error message must survive a backtrace that exceeds the budget")
+	require.NotEmpty(t, limited[0].Backtrace)
+	require.Less(t, len(limited[0].Backtrace), len(values[0].Backtrace))
+	encoded, err := json.Marshal(limited)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(encoded)+len(`"failure_expanded":`), 1000)
+}
+
 func TestApplyFailureSummaryContentLimitsBoundsFailedTestContent(t *testing.T) {
 	summary := &BuildFailureSummary{
 		Jobs: []FailureSummaryJob{{
