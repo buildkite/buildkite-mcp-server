@@ -26,6 +26,7 @@ func TestGetBuildFailureSummaryToolDefinition(t *testing.T) {
 	require.Equal(t, "get_build_failure_summary", tool.Name)
 	require.True(t, tool.Annotations.ReadOnlyHint)
 	require.Contains(t, tool.Description, "one call")
+	require.Contains(t, tool.Description, "soft-failed jobs (soft_failed true")
 	require.Equal(t, []string{"read_builds", "read_build_logs", "read_suites"}, scopes)
 	require.NotNil(t, handler)
 }
@@ -267,6 +268,83 @@ func TestGetBuildFailureSummaryPrioritizesFailuresAndCanceledJobsBeforeDownstrea
 	require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
 	require.Equal(t, []string{"failed", "promised", "canceled"}, []string{summary.Jobs[0].ID, summary.Jobs[1].ID, summary.Jobs[2].ID})
 	require.True(t, summary.JobsTruncated)
+}
+
+// Soft-failed jobs share the failed state but did not block the build. They
+// must not take max_jobs slots from blocking failures, even on a later page,
+// yet still appear, with their real outcome, when slots remain.
+func TestGetBuildFailureSummaryListsSoftFailedJobsAfterBlockingFailures(t *testing.T) {
+	exitStatus := 1
+	softAudit := buildkite.Job{ID: "audit", State: "failed", SoftFailed: true, ExitStatus: &exitStatus}
+	nextPage := "https://api.buildkite.com/v2/organizations/org/pipelines/pipeline/builds/1/jobs?after=cursor-2"
+
+	run := func(t *testing.T, maxJobs int, pages map[string]buildkite.JobsList) (BuildFailureSummary, []string) {
+		t.Helper()
+		var calls []string
+		jobsClient := &MockJobsClient{
+			ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				call := options.State[0]
+				if call == "failed" {
+					require.Equal(t, []string{"failed", "timed_out", "expired"}, options.State)
+					require.Equal(t, maxJobs+1, options.PerPage)
+					require.False(t, *options.IncludeRetriedJobs)
+					call += ":" + options.After
+				}
+				calls = append(calls, call)
+				return pages[call], &buildkite.Response{}, nil
+			},
+		}
+		buildsClient := &MockBuildsClient{
+			GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{}, nil
+			},
+		}
+		include := false
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: buildsClient, JobsClient: jobsClient})
+		_, handler, _ := GetBuildFailureSummary()
+		callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: maxJobs,
+			IncludeLogs: &include, IncludeAnnotations: &include, IncludeFailedTests: &include, IncludeNeverRanJobs: &include,
+		})
+		require.NoError(t, err)
+		var summary BuildFailureSummary
+		require.NoError(t, json.Unmarshal([]byte(getTextResult(t, callResult).Text), &summary))
+		return summary, calls
+	}
+	jobIDs := func(summary BuildFailureSummary) []string {
+		ids := make([]string, len(summary.Jobs))
+		for i, job := range summary.Jobs {
+			ids[i] = job.ID
+		}
+		return ids
+	}
+
+	t.Run("blocking failures on a later page outrank soft failures", func(t *testing.T) {
+		summary, calls := run(t, 2, map[string]buildkite.JobsList{
+			"failed:": {
+				Items: []buildkite.Job{softAudit, {ID: "unit", State: "failed"}},
+				Links: buildkite.JobsListLinks{Next: buildkite.JobsListLink(nextPage)},
+			},
+			"failed:cursor-2": {Items: []buildkite.Job{{ID: "lint", State: "failed"}}},
+		})
+		require.Equal(t, []string{"failed:", "failed:cursor-2", "canceled"}, calls)
+		require.Equal(t, []string{"unit", "lint"}, jobIDs(summary))
+		require.True(t, summary.JobsTruncated, "the omitted soft failure must be reported as truncation")
+	})
+
+	t.Run("soft failures fill remaining slots after canceled jobs with their outcome intact", func(t *testing.T) {
+		summary, calls := run(t, 5, map[string]buildkite.JobsList{
+			"failed:":  {Items: []buildkite.Job{softAudit, {ID: "unit", State: "failed"}}},
+			"canceled": {Items: []buildkite.Job{{ID: "deploy", State: "canceled"}}},
+		})
+		require.Equal(t, []string{"failed:", "canceled"}, calls)
+		require.Equal(t, []string{"unit", "deploy", "audit"}, jobIDs(summary))
+		require.False(t, summary.JobsTruncated)
+		audit := summary.Jobs[2]
+		require.Equal(t, "failed", audit.State)
+		require.True(t, audit.SoftFailed)
+		require.Equal(t, &exitStatus, audit.ExitStatus)
+	})
 }
 
 func TestGetBuildFailureSummaryEnforcesServerJobLimit(t *testing.T) {

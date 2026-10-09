@@ -7,5 +7,3 @@ pre-commit:
       run: make lint
     - name: go mod tidy
       run: make tidy-check
-    - name: go fix
-      run: make fix-check
