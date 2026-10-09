@@ -1053,7 +1053,7 @@ func TestGetBuildFailureSummaryIncludesJobAnchoredFailedTests(t *testing.T) {
 					URL:      "https://api.buildkite.com/v2/analytics/organizations/org/suites/suite-1/tests/test-a",
 					WebURL:   "https://buildkite.com/organizations/org/analytics/suites/suite-1/tests/test-a",
 					Labels:   []string{"flaky", "slow"},
-				}},
+				}, ExecutionsCountByResult: map[string]int{"failed": 2, "passed": 0}},
 				{Test: buildkite.Test{
 					ID:       "test-b",
 					Name:     "b always fails",
@@ -1118,6 +1118,7 @@ func TestGetBuildFailureSummaryIncludesJobAnchoredFailedTests(t *testing.T) {
 	require.Equal(t, []string{"flaky", "slow"}, anchor.FailedTests[0].Labels)
 	require.Equal(t, "b failed", anchor.FailedTests[1].FailureReason)
 	require.Nil(t, anchor.FailedTests[1].Labels)
+	require.Equal(t, map[string]int{"failed": 2, "passed": 0}, anchor.FailedTests[0].ExecutionsCountByResult, "the first run and its retry both failed")
 	require.Equal(t, 1, strings.Count(text, `"labels"`), "an unlabeled test omits labels")
 
 	broken := summary.Jobs[1]
@@ -1125,7 +1126,7 @@ func TestGetBuildFailureSummaryIncludesJobAnchoredFailedTests(t *testing.T) {
 	require.Empty(t, broken.FailedTestsStatus, "non-anchor jobs carry no test fields")
 
 	require.NotContains(t, text, "test-rescued")
-	require.NotContains(t, text, "executions_count")
+	require.NotContains(t, text, `"executions_count"`)
 	require.NotContains(t, text, "duration_avg")
 }
 
