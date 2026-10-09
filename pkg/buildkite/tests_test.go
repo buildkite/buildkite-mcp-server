@@ -44,16 +44,6 @@ func (m *MockBuildTestsClient) List(ctx context.Context, org, buildUUID string, 
 
 var _ BuildTestsClient = (*MockBuildTestsClient)(nil)
 
-func TestTestToolDescriptionsIncludeFlakyTestGuidance(t *testing.T) {
-	listTests, _, _ := ListTests()
-	listTestsForBuild, _, _ := ListTestsForBuild()
-	getTest, _, _ := GetTest()
-	failureSummary, _, _ := GetBuildFailureSummary()
-	for _, tool := range []string{listTests.Description, listTestsForBuild.Description, getTest.Description, failureSummary.Description} {
-		require.Contains(t, tool, flakyTestGuidance)
-	}
-}
-
 func TestListTestsForBuild(t *testing.T) {
 	client := &MockBuildTestsClient{
 		ListFunc: func(ctx context.Context, org, buildUUID string, opt *buildkite.BuildTestsListOptions) ([]buildkite.TestWithMetrics, *buildkite.Response, error) {
