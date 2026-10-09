@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -377,7 +378,7 @@ func TestGetBuildFailureSummaryNeverShortensArtifactIDs(t *testing.T) {
 
 	// Tight limits force the generic limiter to shorten strings below an
 	// artifact ID's length; every artifact that survives must keep its whole
-	// id and job_id so get_artifact can fetch it.
+	// id, and its job its whole id, so get_artifact can fetch it.
 	for limit := 2000; limit <= 8000; limit += 500 {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			_, handler, _ := GetBuildFailureSummary()
@@ -393,9 +394,12 @@ func TestGetBuildFailureSummaryNeverShortensArtifactIDs(t *testing.T) {
 			var summary BuildFailureSummary
 			require.NoError(t, json.Unmarshal([]byte(text), &summary))
 			require.True(t, summary.ContentTruncated)
-			for _, artifact := range summary.Artifacts {
-				require.True(t, wantIDs[artifact.ID], "artifact id %q was shortened", artifact.ID)
-				require.Contains(t, []string{"job-failed", "job-timed-out", "job-canceled"}, artifact.JobID)
+			for _, job := range summary.Jobs {
+				for _, artifact := range job.Artifacts {
+					require.Contains(t, []string{"job-failed", "job-timed-out", "job-canceled"}, job.ID, "job id was shortened")
+					require.True(t, wantIDs[artifact.ID], "artifact id %q was shortened", artifact.ID)
+					require.True(t, strings.HasPrefix(artifact.ID, job.ID+"-"), "artifact %q listed on the wrong job %q", artifact.ID, job.ID)
+				}
 			}
 		})
 	}
