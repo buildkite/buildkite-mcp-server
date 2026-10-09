@@ -20,7 +20,7 @@ type skill struct {
 var skillRegistry = []skill{
 	{
 		Name:        "debug-logs-guide",
-		Description: "How to debug Buildkite build failures using tail_logs, search_logs, and read_logs — including failed vs broken job semantics and token-efficient investigation workflow.",
+		Description: "How to debug Buildkite build failures using tail_logs, search_logs, and read_logs — including blocking, soft-failed and broken job semantics and token-efficient investigation workflow.",
 		Path:        "resources/debug-logs-guide.md",
 	},
 }
