@@ -1,5 +1,3 @@
-image: "buildkite/hosted-agent-base-images:ubuntu-jammy"
-
 agents:
   queue: hosted
 
