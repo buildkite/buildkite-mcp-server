@@ -143,7 +143,7 @@ func createJobListResult[T any](jobs buildkite.JobsList, converter func(buildkit
 func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_jobs",
-			Description: "List jobs for a Buildkite build, returning an actionable summary by default. For CI failure diagnosis, use state='failed,broken' to avoid returning successful jobs. Use detail_level='detailed' for execution metadata or 'full' for the existing full MCP job response. Returns 'items' and cursor pagination 'links'",
+			Description: "List jobs for a Buildkite build, returning an actionable summary by default. For CI failure diagnosis, use state='failed,timed_out,expired' to avoid returning successful jobs, and investigate jobs without soft_failed first: soft_failed true means the job ran and failed but soft_fail allowed its exit status, so it did not block the build. Broken jobs never ran because pipeline configuration excluded them; they are not failures. Use detail_level='detailed' for execution metadata or 'full' for the existing full MCP job response. Returns 'items' and cursor pagination 'links'",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Jobs",
 				ReadOnlyHint: true,

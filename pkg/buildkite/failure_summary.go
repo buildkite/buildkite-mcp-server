@@ -42,6 +42,8 @@ const (
 	failureSummaryTestContentByteLimit   = 64 * 1024
 	failureSummaryContentByteLimit       = failureSummaryLogContentByteLimit + failureSummaryAnnotationContentLimit + failureSummaryTestContentByteLimit
 	failureSummaryConcurrency            = 4
+	// Bounds how far soft-failed jobs can push the scan for blocking failures.
+	failureSummaryPrimaryJobPages = 5
 )
 
 // GetBuildFailureSummaryArgs controls the amount of diagnostic context returned
@@ -53,7 +55,7 @@ type GetBuildFailureSummaryArgs struct {
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`
 	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200)"`
-	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum problem jobs to return (default 10, server may enforce a lower maximum, absolute max 50). Failed, timed-out, and expired jobs fill the limit first, followed by canceled jobs. Unless include_never_ran_jobs is false, remaining slots are filled first by jobs stopped by a failed dependency (waiting_failed, blocked_failed, unblocked_failed), then by broken jobs excluded by pipeline configuration."`
+	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum problem jobs to return (default 10, server may enforce a lower maximum, absolute max 50). Blocking failed, timed-out, and expired jobs fill the limit first, followed by canceled jobs, then soft-failed jobs. Unless include_never_ran_jobs is false, remaining slots are filled first by jobs stopped by a failed dependency (waiting_failed, blocked_failed, unblocked_failed), then by broken jobs excluded by pipeline configuration."`
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to scan for failure details of the returned failed tests (default 5, max 20); the runs holding the most returned failed tests are scanned first"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed Test Engine tests to return for the build (default 50, max 100)"`
@@ -111,6 +113,35 @@ type FailureSummaryJob struct {
 	FailedTestsStatus    string                     `json:"failed_tests_status,omitempty"`
 	FailedTestsHint      string                     `json:"failed_tests_hint,omitempty"`
 	FailedTestsTruncated bool                       `json:"failed_tests_truncated,omitempty"`
+	// Artifacts are set only on jobs that ran to a terminal state, ranked by
+	// failureArtifactRank; get_artifact takes an artifact's id with this
+	// job's id. ArtifactsTruncated reports that the job has more artifacts.
+	Artifacts          []FailureSummaryArtifact `json:"artifacts,omitempty"`
+	ArtifactsTruncated bool                     `json:"artifacts_truncated,omitempty"`
+}
+
+// FailureSummaryArtifact is an artifact listed on the job that uploaded it.
+// It carries only what an agent needs to choose and fetch a file: the job is
+// its parent, and checksums, states and file names (the end of path) are
+// left to list_artifacts_for_job.
+type FailureSummaryArtifact struct {
+	ID       string `json:"id"`
+	Path     string `json:"path,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
+	FileSize int64  `json:"file_size,omitempty"`
+}
+
+func failureSummaryArtifacts(artifacts []buildkite.Artifact) []FailureSummaryArtifact {
+	results := make([]FailureSummaryArtifact, len(artifacts))
+	for i, artifact := range artifacts {
+		results[i] = FailureSummaryArtifact{
+			ID:       artifact.ID,
+			Path:     artifact.Path,
+			MimeType: artifact.MimeType,
+			FileSize: artifact.FileSize,
+		}
+	}
+	return results
 }
 
 type FailureSummaryAnnotation struct {
@@ -193,18 +224,11 @@ type BuildFailureSummary struct {
 	// or "no_data"), so an absent failed_tests section is never ambiguous
 	// between "no tests" and "no Test Engine". Omitted when the failed-tests
 	// section is disabled or unconfigured.
-	TestEngine string `json:"test_engine,omitempty"`
-	// Artifacts lists up to max_artifacts artifacts uploaded by the returned
-	// jobs that ran, grouped in job order and ranked within each job by
-	// failureArtifactRank, using the same projection as
-	// list_artifacts_for_build; fetch one with get_artifact using its id and
-	// job_id.
-	Artifacts          []artifactListItem `json:"artifacts,omitempty"`
-	ArtifactsTruncated bool               `json:"artifacts_truncated,omitempty"`
-	ContentBytes       int                `json:"content_bytes"`
-	ContentLimitBytes  int                `json:"content_limit_bytes"`
-	ContentTruncated   bool               `json:"content_truncated,omitempty"`
-	Warnings           []string           `json:"warnings,omitempty"`
+	TestEngine        string   `json:"test_engine,omitempty"`
+	ContentBytes      int      `json:"content_bytes"`
+	ContentLimitBytes int      `json:"content_limit_bytes"`
+	ContentTruncated  bool     `json:"content_truncated,omitempty"`
+	Warnings          []string `json:"warnings,omitempty"`
 }
 
 func defaultTrue(value *bool) bool {
@@ -443,12 +467,11 @@ func failureArtifactRank(artifact buildkite.Artifact, stems []string) int {
 // that ran, one ListByJob call per job (the build-wide list cannot filter by
 // job). Each job's page is ranked by failureArtifactRank, keeping upload
 // order within a rank, and up to limit artifacts are then shared round-robin
-// across the jobs, grouped in job order. jobs carries the failed tests whose
-// file stems drive the ranking, index-aligned with sourceJobs. Truncated
-// reports that a listed job has more artifacts than were returned. A failed
-// lookup becomes a warning so the other jobs' artifacts are kept; a 401 is
-// returned as ErrUnauthorized.
-func loadFailureArtifacts(ctx context.Context, client ArtifactsClient, args GetBuildFailureSummaryArgs, sourceJobs []buildkite.Job, jobs []FailureSummaryJob, limit int) ([]artifactListItem, bool, []string, error) {
+// across the jobs and set on each job, which is index-aligned with
+// sourceJobs and whose failed tests drive the ranking. A failed lookup
+// becomes a warning so the other jobs' artifacts are kept; a 401 is returned
+// as ErrUnauthorized.
+func loadFailureArtifacts(ctx context.Context, client ArtifactsClient, args GetBuildFailureSummaryArgs, sourceJobs []buildkite.Job, jobs []FailureSummaryJob, limit int) ([]string, error) {
 	type jobArtifacts struct {
 		artifacts []buildkite.Artifact
 		hasMore   bool
@@ -489,7 +512,7 @@ func loadFailureArtifacts(ctx context.Context, client ArtifactsClient, args GetB
 			continue
 		}
 		if isBuildkiteUnauthorized(job.err) {
-			return nil, false, nil, ErrUnauthorized
+			return nil, ErrUnauthorized
 		}
 		warnings = append(warnings, fmt.Sprintf("artifacts unavailable for job %s: %v", sourceJobs[i].ID, job.err))
 		fetched[i].artifacts = nil
@@ -520,13 +543,15 @@ func loadFailureArtifacts(ctx context.Context, client ArtifactsClient, args GetB
 		}
 	}
 
-	results := make([]artifactListItem, 0, limit)
-	truncated := false
 	for i, job := range fetched {
-		truncated = truncated || job.hasMore || taken[i] < len(job.artifacts)
-		results = append(results, toArtifactListItems(job.artifacts[:taken[i]])...)
+		if i < len(jobs) {
+			if taken[i] > 0 {
+				jobs[i].Artifacts = failureSummaryArtifacts(job.artifacts[:taken[i]])
+			}
+			jobs[i].ArtifactsTruncated = job.hasMore || taken[i] < len(job.artifacts)
+		}
 	}
-	return results, truncated, warnings, nil
+	return warnings, nil
 }
 
 func readFailureLogTail(ctx context.Context, client BuildkiteLogsClient, args GetBuildFailureSummaryArgs, job buildkite.Job, tail int) ([]FailureSummaryLogEntry, int64, bool, bool, int, error) {
@@ -1362,17 +1387,21 @@ func failureSummaryWithAnnotationLimit(result *BuildFailureSummary, maxAnnotatio
 	return limited
 }
 
-// failureSummaryWithArtifactLimit returns a copy of the summary keeping at
-// most the first maxArtifacts artifacts.
-func failureSummaryWithArtifactLimit(result *BuildFailureSummary, maxArtifacts int) BuildFailureSummary {
+// failureSummaryWithArtifactLimit returns a copy of the summary where every
+// job keeps at most its first (highest-ranked) perJobLimit artifacts.
+func failureSummaryWithArtifactLimit(result *BuildFailureSummary, perJobLimit int) BuildFailureSummary {
 	limited := *result
-	if len(result.Artifacts) <= maxArtifacts {
-		return limited
-	}
+	limited.Jobs = append([]FailureSummaryJob(nil), result.Jobs...)
+	for i := range limited.Jobs {
+		artifacts := result.Jobs[i].Artifacts
+		if len(artifacts) <= perJobLimit {
+			continue
+		}
 
-	limited.Artifacts = append([]artifactListItem(nil), result.Artifacts[:maxArtifacts]...)
-	limited.ArtifactsTruncated = true
-	limited.ContentTruncated = true
+		limited.Jobs[i].Artifacts = append([]FailureSummaryArtifact(nil), artifacts[:perJobLimit]...)
+		limited.Jobs[i].ArtifactsTruncated = true
+		limited.ContentTruncated = true
+	}
 	return limited
 }
 
@@ -1463,8 +1492,14 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 	}{
 		// Artifacts go first: they are pointers to more data, not diagnoses.
 		{
-			maxEntries: func(r *BuildFailureSummary) int { return len(r.Artifacts) },
-			withLimit:  failureSummaryWithArtifactLimit,
+			maxEntries: func(r *BuildFailureSummary) int {
+				entries := 0
+				for _, job := range r.Jobs {
+					entries = max(entries, len(job.Artifacts))
+				}
+				return entries
+			},
+			withLimit: failureSummaryWithArtifactLimit,
 		},
 		{
 			maxEntries: func(r *BuildFailureSummary) int {
@@ -1500,7 +1535,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), size-bounded diagnostic content from logs, annotations, and failed Test Engine tests, and up to max_artifacts artifacts uploaded by the returned failed, timed-out, and canceled jobs (artifacts, each with its job_id, most useful first within each job — files named after a failed test, then screenshots, then logs — and artifacts_truncated when a job has more; uploaded test logs and screenshots often hold the server-side error a job log lacks, and image artifacts often show layout bugs the HTML hides — fetch one with get_artifact using its id and job_id, or page further with list_artifacts_for_job). Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, soft-failed jobs (soft_failed true: ran and failed, but the step's soft_fail setting in the pipeline allowed that exit status, so they did not block the build; soft_failed is authoritative, so the pipeline configuration is not needed; listed after blocking failures and canceled jobs — not proof the problem is harmless, but do not dig into their logs, retry, or fix them unless the user asks or evidence links them to the reported failure), and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), size-bounded diagnostic content from logs, annotations, and failed Test Engine tests, and on each returned failed, timed-out, and canceled job the artifacts it uploaded (artifacts, up to max_artifacts shared across the jobs, most useful first — files named after a failed test, then screenshots, then logs — with artifacts_truncated when the job has more; uploaded test logs and screenshots often hold the server-side error a job log lacks, and image artifacts often show layout bugs the HTML hides — fetch one with get_artifact using the artifact's id and that job's id, or page further with list_artifacts_for_job). Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body_html field; there is no body field. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
@@ -1550,33 +1585,59 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		result := BuildFailureSummary{Build: failureSummaryBuild(build), JobLimit: maxJobs}
 
 		includeRetriedJobs := false
-		primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-			// The API's failed filter includes running jobs with a hard promised
-			// failure. Querying running separately can include promises covered by
-			// soft-fail or retry rules that do not put the build into failing.
-			State:              []string{"failed", "timed_out", "expired"},
+		// The API's failed filter includes running jobs with a hard promised
+		// failure. Querying running separately can include promises covered by
+		// soft-fail or retry rules that do not put the build into failing.
+		primaryStates := []string{"failed", "timed_out", "expired"}
+		primaryOptions := &buildkite.JobsListOptions{
+			State:              primaryStates,
 			IncludeRetriedJobs: &includeRetriedJobs,
 			PerPage:            maxJobs + 1,
-		})
-		if err != nil {
-			return handleBuildkiteError(err)
 		}
 
+		// Soft-failed jobs share the failed state but their exit status was
+		// allowed by soft_fail, so they did not block the build. They are held
+		// back, and later pages are scanned, so they cannot displace blocking
+		// failures from the job limit; they are added after canceled jobs.
 		sourceJobs := make([]buildkite.Job, 0, maxJobs)
-		jobsTruncated := primaryJobsList.Links.Next != ""
-		for _, job := range primaryJobsList.Items {
-			if !isPrimaryFailureSummaryJob(job) {
-				continue
+		var softFailedJobs []buildkite.Job
+		jobsTruncated := false
+		for page := 1; ; page++ {
+			primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, primaryOptions)
+			if err != nil {
+				return handleBuildkiteError(err)
 			}
-			if len(sourceJobs) < maxJobs {
-				sourceJobs = append(sourceJobs, job)
-			} else {
+			for _, job := range primaryJobsList.Items {
+				switch {
+				case !isPrimaryFailureSummaryJob(job):
+				case job.SoftFailed:
+					softFailedJobs = append(softFailedJobs, job)
+				case len(sourceJobs) < maxJobs:
+					sourceJobs = append(sourceJobs, job)
+				default:
+					jobsTruncated = true
+				}
+			}
+			if primaryJobsList.Links.Next == "" {
+				break
+			}
+			// Only held-back soft failures justify scanning further pages.
+			if len(softFailedJobs) == 0 || len(sourceJobs) >= maxJobs || page >= failureSummaryPrimaryJobPages {
 				jobsTruncated = true
+				break
 			}
+			primaryOptions, err = primaryJobsList.Links.Next.ToOptions()
+			if err != nil {
+				return utils.NewToolResultError(fmt.Sprintf("failed to read next page of failed jobs: %v", err)), nil, nil
+			}
+			primaryOptions.State = primaryStates
+			primaryOptions.IncludeRetriedJobs = &includeRetriedJobs
+			primaryOptions.PerPage = maxJobs + 1
 		}
 
 		// Non-primary jobs fill whatever budget the primaries left, in priority
-		// order. Canceled jobs ran and may have logs. The *_failed states exist
+		// order. Canceled jobs ran and may have logs. Soft-failed jobs follow:
+		// they ran and failed but were allowed through. The *_failed states exist
 		// only because a dependency failed, so they are evidence of the failure.
 		// Broken jobs were excluded by pipeline configuration when the build was
 		// created; they are routine in passing builds and go last. Neither of the
@@ -1611,6 +1672,13 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		}
 		if listErr := appendJobsInStates([]string{"canceled"}, isCanceledFailureSummaryJob); listErr != nil {
 			return handleBuildkiteError(listErr)
+		}
+		for _, job := range softFailedJobs {
+			if len(sourceJobs) < maxJobs {
+				sourceJobs = append(sourceJobs, job)
+			} else {
+				jobsTruncated = true
+			}
 		}
 		if defaultTrue(args.IncludeNeverRanJobs) {
 			if listErr := appendJobsInStates([]string{"waiting_failed", "blocked_failed", "unblocked_failed"}, isDependencyFailedFailureSummaryJob); listErr != nil {
@@ -1660,11 +1728,10 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		}
 
 		if defaultTrue(args.IncludeArtifacts) && deps.ArtifactsClient != nil {
-			artifacts, artifactsTruncated, artifactWarnings, artifactsErr := loadFailureArtifacts(ctx, deps.ArtifactsClient, args, sourceJobs, result.Jobs, maxArtifacts)
+			artifactWarnings, artifactsErr := loadFailureArtifacts(ctx, deps.ArtifactsClient, args, sourceJobs, result.Jobs, maxArtifacts)
 			if artifactsErr != nil {
 				return nil, nil, artifactsErr
 			}
-			result.Artifacts, result.ArtifactsTruncated = artifacts, artifactsTruncated
 			result.Warnings = append(result.Warnings, artifactWarnings...)
 		}
 
@@ -1673,15 +1740,16 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 			return utils.NewToolResultError(fmt.Sprintf("failed to limit failure summary logs: %v", err)), nil, nil
 		}
 
-		failedTestCount := 0
+		failedTestCount, artifactCount := 0, 0
 		for _, job := range result.Jobs {
 			failedTestCount += len(job.FailedTests)
+			artifactCount += len(job.Artifacts)
 		}
 		span.SetAttributes(
 			attribute.Int("failure_job_count", len(result.Jobs)),
 			attribute.Int("annotation_count", len(result.Annotations)),
 			attribute.Int("failed_test_count", failedTestCount),
-			attribute.Int("artifact_count", len(result.Artifacts)),
+			attribute.Int("artifact_count", artifactCount),
 		)
 
 		return mcpTextResultWithByteLimit(span, &result, contentLimit)

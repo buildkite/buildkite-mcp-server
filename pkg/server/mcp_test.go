@@ -25,6 +25,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		logInvestigation = "Log investigation order:"
 		annotationScope  = "Annotation scope:"
 		failureSummary   = "Build failure investigation:"
+		softFailures     = "Soft failures:"
 	)
 
 	always := []string{authorization, invalidToken, forbiddenAccess, buildNumber}
@@ -39,37 +40,37 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		{
 			name:    "all toolsets includes every section",
 			enabled: []string{"all"},
-			want:    append(append([]string{}, always...), startHere, skillDiscovery, failureSummary, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope),
+			want:    append(append([]string{}, always...), startHere, skillDiscovery, failureSummary, softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope),
 		},
 		{
 			name:    "builds alone",
 			enabled: []string{"builds"},
-			want:    append(append([]string{}, always...), jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads),
+			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads),
 			notWant: []string{startHere, skillDiscovery, failureSummary, logInvestigation, annotationScope},
 		},
 		{
 			name:    "skills alone",
 			enabled: []string{"skills"},
 			want:    append(append([]string{}, always...), skillDiscovery),
-			notWant: []string{startHere, failureSummary, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope},
+			notWant: []string{startHere, failureSummary, softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope},
 		},
 		{
 			name:    "user alone",
 			enabled: []string{"user"},
 			want:    append(append([]string{}, always...), startHere),
-			notWant: []string{skillDiscovery, failureSummary, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope},
+			notWant: []string{skillDiscovery, failureSummary, softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope},
 		},
 		{
 			name:     "all toolsets, read-only, omits annotation scope",
 			enabled:  []string{"all"},
 			readOnly: true,
-			want:     append(append([]string{}, always...), startHere, skillDiscovery, failureSummary, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation),
+			want:     append(append([]string{}, always...), startHere, skillDiscovery, failureSummary, softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation),
 			notWant:  []string{annotationScope},
 		},
 		{
 			name:    "investigations alone",
 			enabled: []string{"investigations"},
-			want:    append(append([]string{}, always...), failureSummary),
+			want:    append(append([]string{}, always...), failureSummary, softFailures),
 			notWant: []string{startHere, skillDiscovery, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope},
 		},
 		{
@@ -77,7 +78,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 			enabled:  []string{"annotations"},
 			readOnly: true,
 			want:     append([]string{}, always...),
-			notWant:  []string{jobOutputLinks, buildSelection, dynamicUploads, annotationScope},
+			notWant:  []string{softFailures, jobOutputLinks, buildSelection, dynamicUploads, annotationScope},
 		},
 	}
 

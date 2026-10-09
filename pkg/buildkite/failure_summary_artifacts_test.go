@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"slices"
@@ -97,12 +98,41 @@ func perJobArtifactsClient(t *testing.T, counts map[string]int, nextPage map[str
 	}
 }
 
-func artifactIDs(artifacts []artifactListItem) []string {
+func artifactIDs(artifacts []FailureSummaryArtifact) []string {
 	ids := make([]string, len(artifacts))
 	for i, artifact := range artifacts {
 		ids[i] = artifact.ID
 	}
 	return ids
+}
+
+// summaryArtifactIDs lists every job's artifact ids in job order.
+func summaryArtifactIDs(summary BuildFailureSummary) []string {
+	ids := []string{}
+	for _, job := range summary.Jobs {
+		ids = append(ids, artifactIDs(job.Artifacts)...)
+	}
+	return ids
+}
+
+func summaryJob(t *testing.T, summary BuildFailureSummary, jobID string) FailureSummaryJob {
+	t.Helper()
+	for _, job := range summary.Jobs {
+		if job.ID == jobID {
+			return job
+		}
+	}
+	t.Fatalf("job %s not in summary", jobID)
+	return FailureSummaryJob{}
+}
+
+func anyArtifactsTruncated(summary BuildFailureSummary) bool {
+	for _, job := range summary.Jobs {
+		if job.ArtifactsTruncated {
+			return true
+		}
+	}
+	return false
 }
 
 func callFailureSummaryForArtifacts(t *testing.T, deps ToolDependencies, args GetBuildFailureSummaryArgs) BuildFailureSummary {
@@ -125,21 +155,30 @@ func TestGetBuildFailureSummaryListsArtifactsOfJobsThatRan(t *testing.T) {
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
 	require.Equal(t, []string{"job-canceled", "job-failed", "job-timed-out"}, requested())
-	require.Equal(t, []string{
-		"job-failed-artifact-0", "job-failed-artifact-1", "job-timed-out-artifact-0", "job-canceled-artifact-0",
-	}, artifactIDs(summary.Artifacts))
-	require.False(t, summary.ArtifactsTruncated)
-	require.Equal(t, artifactListItem{
+	require.Equal(t, []string{"job-failed-artifact-0", "job-failed-artifact-1"}, artifactIDs(summaryJob(t, summary, "job-failed").Artifacts))
+	require.Equal(t, []string{"job-timed-out-artifact-0"}, artifactIDs(summaryJob(t, summary, "job-timed-out").Artifacts))
+	require.Equal(t, []string{"job-canceled-artifact-0"}, artifactIDs(summaryJob(t, summary, "job-canceled").Artifacts))
+	require.Empty(t, summaryJob(t, summary, "job-expired").Artifacts)
+	require.Empty(t, summaryJob(t, summary, "job-broken").Artifacts)
+	require.False(t, anyArtifactsTruncated(summary))
+	require.Equal(t, FailureSummaryArtifact{
 		ID:       "job-failed-artifact-0",
-		JobID:    "job-failed",
-		State:    "finished",
 		Path:     "log/test/spec_0.log",
-		Filename: "spec_0.log",
 		MimeType: "text/plain",
 		FileSize: 1024,
-		SHA1:     "abc123",
-	}, summary.Artifacts[0])
+	}, summaryJob(t, summary, "job-failed").Artifacts[0])
 	require.Empty(t, summary.Warnings)
+}
+
+func TestFailureSummaryArtifactCarriesOnlyFieldsNeededToFetch(t *testing.T) {
+	// The parent job's id is the job_id get_artifact needs, so entries carry
+	// no job_id, and no checksum, state or file name either.
+	payload, err := json.Marshal(failureSummaryArtifacts(failureSummaryTestArtifacts("job-failed", 1))[0])
+	require.NoError(t, err)
+
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(payload, &fields))
+	require.ElementsMatch(t, []string{"id", "path", "mime_type", "file_size"}, slices.Collect(maps.Keys(fields)))
 }
 
 func TestGetBuildFailureSummaryArtifactBudgetIsSharedRoundRobin(t *testing.T) {
@@ -152,8 +191,9 @@ func TestGetBuildFailureSummaryArtifactBudgetIsSharedRoundRobin(t *testing.T) {
 	require.Equal(t, []string{
 		"job-failed-artifact-0", "job-failed-artifact-1", "job-failed-artifact-2", "job-failed-artifact-3", "job-failed-artifact-4",
 		"job-timed-out-artifact-0", "job-timed-out-artifact-1", "job-timed-out-artifact-2", "job-timed-out-artifact-3", "job-timed-out-artifact-4",
-	}, artifactIDs(summary.Artifacts))
-	require.True(t, summary.ArtifactsTruncated)
+	}, summaryArtifactIDs(summary))
+	require.True(t, summaryJob(t, summary, "job-failed").ArtifactsTruncated)
+	require.True(t, summaryJob(t, summary, "job-timed-out").ArtifactsTruncated)
 }
 
 func TestGetBuildFailureSummaryArtifactBudgetFlowsToJobsWithMore(t *testing.T) {
@@ -163,8 +203,10 @@ func TestGetBuildFailureSummaryArtifactBudgetFlowsToJobsWithMore(t *testing.T) {
 
 	require.Equal(t, []string{
 		"job-failed-artifact-0", "job-timed-out-artifact-0", "job-timed-out-artifact-1", "job-canceled-artifact-0",
-	}, artifactIDs(summary.Artifacts))
-	require.True(t, summary.ArtifactsTruncated)
+	}, summaryArtifactIDs(summary))
+	require.False(t, summaryJob(t, summary, "job-failed").ArtifactsTruncated)
+	require.True(t, summaryJob(t, summary, "job-timed-out").ArtifactsTruncated)
+	require.False(t, summaryJob(t, summary, "job-canceled").ArtifactsTruncated)
 }
 
 func TestGetBuildFailureSummaryArtifactsTruncatedWhenAJobHasMorePages(t *testing.T) {
@@ -172,8 +214,8 @@ func TestGetBuildFailureSummaryArtifactsTruncatedWhenAJobHasMorePages(t *testing
 
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
-	require.Equal(t, []string{"job-canceled-artifact-0"}, artifactIDs(summary.Artifacts))
-	require.True(t, summary.ArtifactsTruncated)
+	require.Equal(t, []string{"job-canceled-artifact-0"}, summaryArtifactIDs(summary))
+	require.True(t, summaryJob(t, summary, "job-canceled").ArtifactsTruncated)
 }
 
 func TestGetBuildFailureSummaryBoundsMaxArtifacts(t *testing.T) {
@@ -191,8 +233,8 @@ func TestGetBuildFailureSummaryBoundsMaxArtifacts(t *testing.T) {
 
 			summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{MaxArtifacts: tc.requested})
 			require.Len(t, requested(), 3)
-			require.Len(t, summary.Artifacts, tc.wantKept)
-			require.True(t, summary.ArtifactsTruncated)
+			require.Len(t, summaryArtifactIDs(summary), tc.wantKept)
+			require.True(t, anyArtifactsTruncated(summary))
 		})
 	}
 }
@@ -203,7 +245,7 @@ func TestGetBuildFailureSummaryCanDisableArtifacts(t *testing.T) {
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{IncludeArtifacts: boolPtr(false)})
 
 	require.Empty(t, requested())
-	require.Empty(t, summary.Artifacts)
+	require.Empty(t, summaryArtifactIDs(summary))
 }
 
 func TestGetBuildFailureSummaryArtifactErrorBecomesJobWarning(t *testing.T) {
@@ -228,7 +270,8 @@ func TestGetBuildFailureSummaryArtifactErrorBecomesJobWarning(t *testing.T) {
 
 	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{})
 
-	require.Equal(t, []string{"job-failed-artifact-0", "job-canceled-artifact-0"}, artifactIDs(summary.Artifacts))
+	require.Equal(t, []string{"job-failed-artifact-0", "job-canceled-artifact-0"}, summaryArtifactIDs(summary))
+	require.Empty(t, summaryJob(t, summary, "job-timed-out").Artifacts)
 	require.Len(t, summary.Warnings, 1)
 	require.Contains(t, summary.Warnings[0], "artifacts unavailable for job job-timed-out")
 	require.Contains(t, summary.Warnings[0], forbidden.Message)
@@ -250,7 +293,7 @@ func TestLoadFailureArtifactsPropagatesUnauthorized(t *testing.T) {
 		},
 	}
 
-	_, _, _, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{}, []buildkite.Job{{ID: "job", State: "failed"}}, make([]FailureSummaryJob, 1), 1)
+	_, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{}, []buildkite.Job{{ID: "job", State: "failed"}}, make([]FailureSummaryJob, 1), 1)
 	require.ErrorIs(t, err, ErrUnauthorized)
 }
 
@@ -283,11 +326,11 @@ func rankedFailureArtifactIDs(t *testing.T, failedTests []FailureSummaryFailedTe
 			return build204234WaterfallJobArtifacts(), &buildkite.Response{}, nil
 		},
 	}
-	artifacts, _, _, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{},
-		[]buildkite.Job{{ID: "job-waterfall", State: "failed"}},
-		[]FailureSummaryJob{{FailedTests: failedTests}}, limit)
+	jobs := []FailureSummaryJob{{FailedTests: failedTests}}
+	_, err := loadFailureArtifacts(context.Background(), client, GetBuildFailureSummaryArgs{},
+		[]buildkite.Job{{ID: "job-waterfall", State: "failed"}}, jobs, limit)
 	require.NoError(t, err)
-	return artifactIDs(artifacts)
+	return artifactIDs(jobs[0].Artifacts)
 }
 
 func TestLoadFailureArtifactsRanksFailedTestOutputFirst(t *testing.T) {
@@ -367,9 +410,12 @@ func TestLimitFailureSummaryCollectionsDropsArtifactsBeforeAnnotations(t *testin
 		}
 	}
 	result := BuildFailureSummary{
-		Build:       BuildFailureSummaryBuild{BuildSummary: BuildSummary{Number: 1, State: "failed"}},
+		Build: BuildFailureSummaryBuild{BuildSummary: BuildSummary{Number: 1, State: "failed"}},
+		Jobs: []FailureSummaryJob{{
+			JobSummary: JobSummary{ID: "job-failed", State: "failed"},
+			Artifacts:  failureSummaryArtifacts(failureSummaryTestArtifacts("job-failed", maxFailureSummaryArtifacts)),
+		}},
 		Annotations: annotations,
-		Artifacts:   toArtifactListItems(failureSummaryTestArtifacts("job-failed", maxFailureSummaryArtifacts)),
 	}
 
 	// A limit that fits every annotation plus a few artifacts at their
@@ -382,8 +428,10 @@ func TestLimitFailureSummaryCollectionsDropsArtifactsBeforeAnnotations(t *testin
 
 	require.Len(t, result.Annotations, len(annotations))
 	require.False(t, result.AnnotationsTruncated)
-	require.GreaterOrEqual(t, len(result.Artifacts), 5)
-	require.Less(t, len(result.Artifacts), maxFailureSummaryArtifacts)
-	require.True(t, result.ArtifactsTruncated)
+	kept := result.Jobs[0].Artifacts
+	require.GreaterOrEqual(t, len(kept), 5)
+	require.Less(t, len(kept), maxFailureSummaryArtifacts)
+	require.Equal(t, "job-failed-artifact-0", kept[0].ID, "the highest-ranked artifacts are kept")
+	require.True(t, result.Jobs[0].ArtifactsTruncated)
 	require.True(t, result.ContentTruncated)
 }
