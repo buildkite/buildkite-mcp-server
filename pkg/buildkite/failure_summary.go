@@ -1004,31 +1004,12 @@ func limitFailureExpanded(values []buildkite.FailureExpanded, entryRemaining, se
 		}
 
 		bounded := buildkite.FailureExpanded{}
-		for _, backtrace := range value.Backtrace {
-			structureBytes := len(`""`)
-			if len(bounded.Backtrace) == 0 {
-				structureBytes += len(`"backtrace":[]`)
-			} else {
-				structureBytes++ // comma between backtrace items
-			}
-			if !consumeFailureSummaryBytes(structureBytes, entryRemaining, sectionRemaining) {
-				truncated = true
-				break
-			}
-			line, lineTruncated := limitFailureSummaryString(backtrace, failureSummaryEntryContentByteLimit, entryRemaining, sectionRemaining)
-			bounded.Backtrace = append(bounded.Backtrace, line)
-			truncated = truncated || lineTruncated
-		}
-		if len(bounded.Backtrace) < len(value.Backtrace) {
-			truncated = true
-		}
+		// Bound the error message before the backtrace: the message says what
+		// failed, and a long backtrace would otherwise use the whole budget.
 		for _, expanded := range value.Expanded {
 			structureBytes := len(`""`)
 			if len(bounded.Expanded) == 0 {
 				structureBytes += len(`"expanded":[]`)
-				if len(bounded.Backtrace) > 0 {
-					structureBytes++ // comma between object fields
-				}
 			} else {
 				structureBytes++ // comma between expanded items
 			}
@@ -1041,6 +1022,27 @@ func limitFailureExpanded(values []buildkite.FailureExpanded, entryRemaining, se
 			truncated = truncated || lineTruncated
 		}
 		if len(bounded.Expanded) < len(value.Expanded) {
+			truncated = true
+		}
+		for _, backtrace := range value.Backtrace {
+			structureBytes := len(`""`)
+			if len(bounded.Backtrace) == 0 {
+				structureBytes += len(`"backtrace":[]`)
+				if len(bounded.Expanded) > 0 {
+					structureBytes++ // comma between object fields
+				}
+			} else {
+				structureBytes++ // comma between backtrace items
+			}
+			if !consumeFailureSummaryBytes(structureBytes, entryRemaining, sectionRemaining) {
+				truncated = true
+				break
+			}
+			line, lineTruncated := limitFailureSummaryString(backtrace, failureSummaryEntryContentByteLimit, entryRemaining, sectionRemaining)
+			bounded.Backtrace = append(bounded.Backtrace, line)
+			truncated = truncated || lineTruncated
+		}
+		if len(bounded.Backtrace) < len(value.Backtrace) {
 			truncated = true
 		}
 		result = append(result, bounded)
