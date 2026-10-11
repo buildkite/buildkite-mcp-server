@@ -226,6 +226,36 @@ func WriteMarkdown(w io.Writer, r Report) error {
 	return err
 }
 
+// ViolationSummary describes the tools over the ceiling, one per line, for
+// plain-text logs. It returns "" when there are no violations.
+func ViolationSummary(r Report) string {
+	if len(r.Violations) == 0 {
+		return ""
+	}
+
+	var over []Tool
+	width := 0
+	for _, t := range r.Tools {
+		if t.OverLimit {
+			over = append(over, t)
+			width = max(width, len(t.Name))
+		}
+	}
+
+	noun := "tools exceed"
+	if len(over) == 1 {
+		noun = "tool exceeds"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d %s the %s token ceiling (estimated tokens, bytes/%g):\n", len(over), noun, num(r.MaxToolTokens), r.CharsPerToken)
+	for _, t := range over {
+		fmt.Fprintf(&b, "  %-*s  %7s  (+%s)\n", width, t.Name, num(t.Tokens), num(t.Tokens-r.MaxToolTokens))
+	}
+	b.WriteString(`See the "tool-tokens" annotation for the full breakdown.`)
+	return b.String()
+}
+
 // num formats n with thousands separators.
 func num(n int) string {
 	s := fmt.Sprint(n)

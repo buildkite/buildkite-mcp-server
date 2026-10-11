@@ -75,7 +75,7 @@ func run(cli cliArgs, stdout io.Writer) (int, error) {
 	}
 
 	if len(report.Violations) > 0 {
-		return 2, fmt.Errorf("%d tool(s) exceed %d tokens: %v", len(report.Violations), cli.MaxToolTokens, report.Violations)
+		return 2, errors.New(tokenreport.ViolationSummary(report))
 	}
 	return 0, nil
 }

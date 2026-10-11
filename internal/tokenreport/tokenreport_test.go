@@ -84,9 +84,17 @@ func TestCeiling(t *testing.T) {
 	require.Contains(t, out, "Over ceiling")
 	require.Contains(t, out, "token ceiling")
 
+	summary := ViolationSummary(r)
+	require.Contains(t, summary, "tools exceed the 1 token ceiling")
+	for _, tool := range r.Tools {
+		require.Contains(t, summary, tool.Name)
+	}
+	require.Contains(t, summary, `"tool-tokens" annotation`)
+
 	r, err = Build(1_000_000)
 	require.NoError(t, err)
 	require.Empty(t, r.Violations)
+	require.Empty(t, ViolationSummary(r))
 
 	buf.Reset()
 	require.NoError(t, WriteMarkdown(&buf, r))
