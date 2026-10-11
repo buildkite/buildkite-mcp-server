@@ -80,10 +80,7 @@ type Report struct {
 // Build computes the report. When maxToolTokens is greater than 0, tools above
 // that many tokens are flagged and listed in Violations.
 func Build(maxToolTokens int) (Report, error) {
-	r := Report{CharsPerToken: CharsPerToken}
-	if maxToolTokens > 0 {
-		r.MaxToolTokens = maxToolTokens
-	}
+	r := Report{CharsPerToken: CharsPerToken, MaxToolTokens: maxToolTokens}
 
 	all := toolsets.CreateBuiltinToolsets()
 	names := make([]string, 0, len(all))
@@ -111,8 +108,8 @@ func Build(maxToolTokens int) (Report, error) {
 				DescriptionTokens: Estimate([]byte(def.Tool.Description)),
 				SchemaTokens:      Estimate(schema),
 				Tokens:            Estimate(full),
-				OverLimit:         maxToolTokens > 0 && Estimate(full) > maxToolTokens,
 			}
+			t.OverLimit = maxToolTokens > 0 && t.Tokens > maxToolTokens
 			r.Tools = append(r.Tools, t)
 
 			ts.Tools++

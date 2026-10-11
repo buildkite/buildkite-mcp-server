@@ -25,6 +25,12 @@ func (c *cliArgs) Validate() error {
 	if c.Markdown == stdoutPath && c.JSON == stdoutPath {
 		return errors.New("only one of --markdown and --json may write to stdout ('-')")
 	}
+	if c.Markdown != "" && c.Markdown == c.JSON {
+		return errors.New("--markdown and --json must write to different paths")
+	}
+	if c.MaxToolTokens < 0 {
+		return errors.New("--max-tool-tokens must not be negative")
+	}
 	return nil
 }
 
@@ -45,7 +51,8 @@ func main() {
 
 // run writes the requested reports and returns the process exit code: 0 on
 // success, 1 on error, 2 when a tool exceeds the ceiling. Outputs are always
-// written before the ceiling result is returned.
+// written before the ceiling result is returned. Invalid flags are rejected
+// earlier by kong, which exits 80.
 func run(cli cliArgs, stdout io.Writer) (int, error) {
 	if cli.Markdown == "" && cli.JSON == "" {
 		cli.Markdown = stdoutPath

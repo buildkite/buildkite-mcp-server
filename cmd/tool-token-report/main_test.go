@@ -12,7 +12,17 @@ import (
 func TestValidate(t *testing.T) {
 	require.Error(t, (&cliArgs{Markdown: "-", JSON: "-"}).Validate())
 	require.NoError(t, (&cliArgs{Markdown: "-", JSON: "out.json"}).Validate())
+	require.Error(t, (&cliArgs{Markdown: "out", JSON: "out"}).Validate())
+	require.Error(t, (&cliArgs{MaxToolTokens: -1}).Validate())
 	require.NoError(t, (&cliArgs{}).Validate())
+}
+
+func TestRunWriteFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "r.json")
+
+	code, err := run(cliArgs{JSON: path}, &bytes.Buffer{})
+	require.Error(t, err)
+	require.Equal(t, 1, code)
 }
 
 func TestRunDefaultsToMarkdownStdout(t *testing.T) {
