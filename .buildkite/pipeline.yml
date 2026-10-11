@@ -36,6 +36,23 @@ steps:
       plugins:
         - mise#v1.1.5: ~
 
+    - name: ":abacus: tool token report"
+      command: |
+        go build -o tool-token-report ./cmd/tool-token-report
+        status=0
+        ./tool-token-report --max-tool-tokens 1850 --json tool-tokens.json --markdown - > tool-tokens.md || status=$$?
+        style=info; [ "$$status" -eq 2 ] && style=error
+        [ -s tool-tokens.md ] && buildkite-agent annotate --style "$$style" --context tool-tokens < tool-tokens.md
+        exit "$$status"
+      artifact_paths:
+        - tool-tokens.json
+        - tool-tokens.md
+      env:
+        GOCACHE: /gocache
+        GOMODCACHE: /gomodcache
+      plugins:
+        - mise#v1.1.5: ~
+
   - label: ":terminal: build ({{matrix}})"
     command: ".buildkite/release.sh release --clean --snapshot"
     depends_on: quality-checks
