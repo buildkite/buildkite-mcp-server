@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
@@ -383,6 +384,8 @@ func RetryJob() (mcp.Tool, mcp.ToolHandlerFor[RetryJobArgs, any], []string) {
 		}, []string{"write_builds"}
 }
 
+var cancelJobIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
 // CancelJobArgs struct for typed parameters
 type CancelJobArgs struct {
 	ToolInput
@@ -415,13 +418,17 @@ func CancelJob() (mcp.Tool, mcp.ToolHandlerFor[CancelJobArgs, any], []string) {
 			if (args.PipelineSlug == "") != (args.BuildNumber == "") {
 				return utils.NewToolResultError("provide both 'pipeline_slug' and 'build_number' for a build-scoped cancel, or omit both"), nil, nil
 			}
-			// go-buildkite interpolates identifiers into the path unescaped, so a '/'
-			// or dot segment could turn a job cancel into a request for another
-			// resource, such as PUT .../builds/123/jobs/../cancel resolving to a
-			// build cancel.
-			for _, segment := range []string{args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID} {
-				if strings.Contains(segment, "/") || segment == "." || segment == ".." {
-					return utils.NewToolResultError("'org_slug', 'pipeline_slug', 'build_number', and 'job_id' must not contain '/' or be '.' or '..'"), nil, nil
+			// go-buildkite parses the formatted path as a URL, so '/', '%', '?', '#'
+			// or a dot segment in an identifier could turn a job cancel into a
+			// request for another resource, such as a whole-build cancel. Allow
+			// only characters that cannot change the path.
+			identifiers := []string{args.OrgSlug, args.JobID}
+			if args.PipelineSlug != "" {
+				identifiers = append(identifiers, args.PipelineSlug, args.BuildNumber)
+			}
+			for _, identifier := range identifiers {
+				if !cancelJobIdentifierPattern.MatchString(identifier) || identifier == "." || identifier == ".." {
+					return utils.NewToolResultError("'org_slug', 'pipeline_slug', 'build_number', and 'job_id' may contain only letters, digits, '-', '_' and '.', and must not be '.' or '..'"), nil, nil
 				}
 			}
 

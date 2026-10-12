@@ -990,6 +990,8 @@ func TestCancelJob(t *testing.T) {
 		"RejectsPathSeparatorInJobID": {OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", JobID: "../../124"},
 		// Without this check, PUT .../builds/123/jobs/../cancel would cancel build 123.
 		"RejectsDotSegmentJobID": {OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", JobID: ".."},
+		// Without this check, the SDK decodes %2f and splits at '?', sending PUT .../builds/123/cancel?ignored=/jobs/job-456/cancel.
+		"RejectsEncodedSeparatorInBuildNumber": {OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123%2fcancel?ignored=", JobID: "job-456"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, requests := cancelJobServer(t, http.StatusOK, `{}`)
