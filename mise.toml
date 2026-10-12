@@ -10,7 +10,7 @@ go = "1.27.2"
 golangci-lint = "2.14.0"
 goreleaser = "2.18.2"
 ko = "0.19.1"
-lefthook = "2.1.17"
+lefthook = "2.2.1"
 node = "24.21.0"
 
 [tasks.setup]
