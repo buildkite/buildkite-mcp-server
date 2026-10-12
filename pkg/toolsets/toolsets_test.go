@@ -554,6 +554,24 @@ func TestToolsetRegistry_GetRequiredScopes(t *testing.T) {
 		expected := []string{"read_only"}
 		assert.Equal(expected, scopes)
 	})
+
+	t.Run("builtin retries remain excluded from read-only mode", func(t *testing.T) {
+		registry := NewToolsetRegistry()
+		registry.RegisterToolsets(CreateBuiltinToolsets())
+
+		scopes := registry.GetRequiredScopes([]string{ToolsetBuilds}, false)
+		require.Contains(t, scopes, "retry_builds")
+		// Creating, rebuilding, canceling and unblocking still need write access.
+		require.Contains(t, scopes, "write_builds")
+
+		readOnlyScopes := registry.GetRequiredScopes([]string{ToolsetBuilds}, true)
+		require.Contains(t, readOnlyScopes, "read_builds")
+		require.NotContains(t, readOnlyScopes, "retry_builds")
+		require.NotContains(t, readOnlyScopes, "write_builds")
+		for _, tool := range registry.GetEnabledTools([]string{ToolsetBuilds}, true) {
+			require.NotContains(t, []string{"retry_job", "retry_failed_jobs"}, tool.Tool.Name)
+		}
+	})
 }
 
 func TestNewTool(t *testing.T) {
@@ -675,7 +693,18 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	buildToolNames := make([]string, 0, len(builds.Tools))
 	for _, tool := range builds.Tools {
 		buildToolNames = append(buildToolNames, tool.Tool.Name)
+		switch tool.Tool.Name {
+		case "retry_job":
+			assert.Equal([]string{"retry_builds"}, tool.RequiredScopes)
+			assert.False(tool.IsReadOnly())
+		case "retry_failed_jobs":
+			assert.Equal([]string{"read_builds", "retry_builds"}, tool.RequiredScopes)
+			assert.False(tool.IsReadOnly())
+		case "create_build", "rebuild_build", "cancel_build", "unblock_job":
+			assert.Equal([]string{"write_builds"}, tool.RequiredScopes)
+		}
 	}
+	assert.Contains(buildToolNames, "retry_job")
 	assert.Contains(buildToolNames, "retry_failed_jobs")
 
 	tests, exists := registry.Get(ToolsetTests)

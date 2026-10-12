@@ -378,7 +378,7 @@ func RetryJob() (mcp.Tool, mcp.ToolHandlerFor[RetryJobArgs, any], []string) {
 			}
 
 			return mcpTextResult(span, &job)
-		}, []string{"write_builds"}
+		}, []string{"retry_builds"}
 }
 
 // GetJobEnvironmentVariablesArgs struct for typed parameters
