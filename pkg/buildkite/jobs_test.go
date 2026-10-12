@@ -921,7 +921,7 @@ func TestCancelJob(t *testing.T) {
 		assert.Equal(t, []string{"write_builds"}, scopes)
 	})
 
-	// cancelJobServer serves the Buildkite REST API through the real adapter so
+	// cancelJobServer serves the Buildkite REST API through the real SDK client so
 	// the tests cover the method and path sent for each endpoint form.
 	cancelJobServer := func(t *testing.T, status int, body string) (context.Context, *[]string) {
 		t.Helper()
@@ -937,8 +937,7 @@ func TestCancelJob(t *testing.T) {
 		client, err := buildkite.NewOpts(buildkite.WithTokenAuth("fake-token"), buildkite.WithBaseURL(srv.URL))
 		require.NoError(t, err)
 
-		jobs := &JobsClientAdapter{JobsService: client.Jobs, Client: client}
-		return ContextWithDeps(context.Background(), ToolDependencies{JobsClient: jobs}), &requests
+		return ContextWithDeps(context.Background(), ToolDependencies{JobsClient: client.Jobs}), &requests
 	}
 
 	tests := []struct {

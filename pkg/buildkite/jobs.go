@@ -2,9 +2,6 @@ package buildkite
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
@@ -23,40 +20,6 @@ type JobsClient interface {
 	GetJobEnvironmentVariables(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.JobEnvs, *buildkite.Response, error)
 	CancelJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	CancelJobByOrg(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error)
-}
-
-// JobsClientAdapter adds job cancellation to go-buildkite's JobsService. The
-// released SDK has no job cancel methods yet; once it does, use Client.Jobs
-// directly and delete this adapter.
-type JobsClientAdapter struct {
-	*buildkite.JobsService
-	Client *buildkite.Client
-}
-
-// CancelJob implements JobsClient
-func (a *JobsClientAdapter) CancelJob(ctx context.Context, org, pipeline, buildNumber, jobID string) (buildkite.Job, *buildkite.Response, error) {
-	return a.cancelJob(ctx, fmt.Sprintf("v2/organizations/%s/pipelines/%s/builds/%s/jobs/%s/cancel",
-		url.PathEscape(org), url.PathEscape(pipeline), url.PathEscape(buildNumber), url.PathEscape(jobID)))
-}
-
-// CancelJobByOrg implements JobsClient
-func (a *JobsClientAdapter) CancelJobByOrg(ctx context.Context, org, jobID string) (buildkite.Job, *buildkite.Response, error) {
-	return a.cancelJob(ctx, fmt.Sprintf("v2/organizations/%s/jobs/%s/cancel", url.PathEscape(org), url.PathEscape(jobID)))
-}
-
-func (a *JobsClientAdapter) cancelJob(ctx context.Context, path string) (buildkite.Job, *buildkite.Response, error) {
-	req, err := a.Client.NewRequest(ctx, http.MethodPut, path, nil)
-	if err != nil {
-		return buildkite.Job{}, nil, err
-	}
-
-	var job buildkite.Job
-	resp, err := a.Client.Do(req, &job)
-	if err != nil {
-		return buildkite.Job{}, resp, err
-	}
-
-	return job, resp, nil
 }
 
 func redactUnusedJobFields(job *buildkite.Job) {
@@ -452,9 +415,10 @@ func CancelJob() (mcp.Tool, mcp.ToolHandlerFor[CancelJobArgs, any], []string) {
 			if (args.PipelineSlug == "") != (args.BuildNumber == "") {
 				return utils.NewToolResultError("provide both 'pipeline_slug' and 'build_number' for a build-scoped cancel, or omit both"), nil, nil
 			}
-			// go-buildkite decodes escaped path segments, so a '/' or dot segment
-			// could turn a job cancel into a request for another resource, such as
-			// PUT .../builds/123/jobs/../cancel resolving to a build cancel.
+			// go-buildkite interpolates identifiers into the path unescaped, so a '/'
+			// or dot segment could turn a job cancel into a request for another
+			// resource, such as PUT .../builds/123/jobs/../cancel resolving to a
+			// build cancel.
 			for _, segment := range []string{args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID} {
 				if strings.Contains(segment, "/") || segment == "." || segment == ".." {
 					return utils.NewToolResultError("'org_slug', 'pipeline_slug', 'build_number', and 'job_id' must not contain '/' or be '.' or '..'"), nil, nil

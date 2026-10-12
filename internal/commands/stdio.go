@@ -35,7 +35,7 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 		RepositoryConnectionsClient: globals.Client.RepositoryConnections,
 		UserClient:                  globals.Client.User,
 		AccessTokensClient:          globals.Client.AccessTokens,
-		JobsClient:                  &buildkite.JobsClientAdapter{JobsService: globals.Client.Jobs, Client: globals.Client},
+		JobsClient:                  globals.Client.Jobs,
 		StepUploadsClient:           globals.Client.StepUploads,
 		TestRunsClient:              globals.Client.TestRuns,
 		TestSuitesClient:            globals.Client.TestSuites,
