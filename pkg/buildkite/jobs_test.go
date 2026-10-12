@@ -989,6 +989,8 @@ func TestCancelJob(t *testing.T) {
 		"RequiresPipelineAndBuildTogether": {OrgSlug: "test-org", PipelineSlug: "test-pipeline", JobID: "job-456"},
 		// Without this check, PUT .../builds/123/jobs/../../124/cancel would cancel build 124.
 		"RejectsPathSeparatorInJobID": {OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", JobID: "../../124"},
+		// Without this check, PUT .../builds/123/jobs/../cancel would cancel build 123.
+		"RejectsDotSegmentJobID": {OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", JobID: ".."},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, requests := cancelJobServer(t, http.StatusOK, `{}`)

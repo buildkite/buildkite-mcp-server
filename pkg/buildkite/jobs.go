@@ -452,10 +452,13 @@ func CancelJob() (mcp.Tool, mcp.ToolHandlerFor[CancelJobArgs, any], []string) {
 			if (args.PipelineSlug == "") != (args.BuildNumber == "") {
 				return utils.NewToolResultError("provide both 'pipeline_slug' and 'build_number' for a build-scoped cancel, or omit both"), nil, nil
 			}
-			// go-buildkite decodes escaped path segments, so a '/' could turn a
-			// job cancel into a request for another resource, such as a build cancel.
-			if strings.Contains(args.OrgSlug+args.PipelineSlug+args.BuildNumber+args.JobID, "/") {
-				return utils.NewToolResultError("'org_slug', 'pipeline_slug', 'build_number', and 'job_id' must not contain '/'"), nil, nil
+			// go-buildkite decodes escaped path segments, so a '/' or dot segment
+			// could turn a job cancel into a request for another resource, such as
+			// PUT .../builds/123/jobs/../cancel resolving to a build cancel.
+			for _, segment := range []string{args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID} {
+				if strings.Contains(segment, "/") || segment == "." || segment == ".." {
+					return utils.NewToolResultError("'org_slug', 'pipeline_slug', 'build_number', and 'job_id' must not contain '/' or be '.' or '..'"), nil, nil
+				}
 			}
 
 			deps := DepsFromContext(ctx)
