@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -22,6 +23,8 @@ type MockJobsClient struct {
 	UnblockJobFunc                 func(ctx context.Context, org string, pipeline string, buildNumber string, jobID string, opt *buildkite.JobUnblockOptions) (buildkite.Job, *buildkite.Response, error)
 	RetryJobFunc                   func(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobEnvironmentVariablesFunc func(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.JobEnvs, *buildkite.Response, error)
+	CancelJobFunc                  func(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
+	CancelJobByOrgFunc             func(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error)
 }
 
 func (m *MockJobsClient) ListByBuild(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
@@ -64,6 +67,20 @@ func (m *MockJobsClient) GetJobEnvironmentVariables(ctx context.Context, org str
 		return m.GetJobEnvironmentVariablesFunc(ctx, org, pipeline, buildNumber, jobID)
 	}
 	return buildkite.JobEnvs{}, &buildkite.Response{}, nil
+}
+
+func (m *MockJobsClient) CancelJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error) {
+	if m.CancelJobFunc != nil {
+		return m.CancelJobFunc(ctx, org, pipeline, buildNumber, jobID)
+	}
+	return buildkite.Job{}, &buildkite.Response{}, nil
+}
+
+func (m *MockJobsClient) CancelJobByOrg(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error) {
+	if m.CancelJobByOrgFunc != nil {
+		return m.CancelJobByOrgFunc(ctx, org, jobID)
+	}
+	return buildkite.Job{}, &buildkite.Response{}, nil
 }
 
 var _ JobsClient = (*MockJobsClient)(nil)
@@ -892,4 +909,95 @@ func TestJobSignalDecodesFromWire(t *testing.T) {
 	assert.Equal(t, "SIGKILL", jobs.Items[0].Signal)
 	assert.Equal(t, "SIGTERM", jobs.Items[1].Signal)
 	assert.Empty(t, jobs.Items[2].Signal)
+}
+
+func TestCancelJob(t *testing.T) {
+	t.Run("ToolDefinition", func(t *testing.T) {
+		tool, _, scopes := CancelJob()
+		assert.Equal(t, "cancel_job", tool.Name)
+		assert.Contains(t, tool.Description, "cancel_build")
+		assert.False(t, tool.Annotations.ReadOnlyHint)
+		assert.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
+		assert.Equal(t, []string{"write_builds"}, scopes)
+	})
+
+	// cancelJobServer serves the Buildkite REST API through the real adapter so
+	// the tests cover the method and path sent for each endpoint form.
+	cancelJobServer := func(t *testing.T, status int, body string) (context.Context, *[]string) {
+		t.Helper()
+		var requests []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests = append(requests, r.Method+" "+r.URL.EscapedPath())
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+		}))
+		t.Cleanup(srv.Close)
+
+		client, err := buildkite.NewOpts(buildkite.WithTokenAuth("fake-token"), buildkite.WithBaseURL(srv.URL))
+		require.NoError(t, err)
+
+		jobs := &JobsClientAdapter{JobsService: client.Jobs, Client: client}
+		return ContextWithDeps(context.Background(), ToolDependencies{JobsClient: jobs}), &requests
+	}
+
+	tests := []struct {
+		name        string
+		args        CancelJobArgs
+		wantRequest string
+	}{
+		{
+			name:        "build scoped",
+			args:        CancelJobArgs{OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", JobID: "job-456"},
+			wantRequest: "PUT /v2/organizations/test-org/pipelines/test-pipeline/builds/123/jobs/job-456/cancel",
+		},
+		{
+			name:        "organization scoped",
+			args:        CancelJobArgs{OrgSlug: "test-org", JobID: "job-456"},
+			wantRequest: "PUT /v2/organizations/test-org/jobs/job-456/cancel",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, requests := cancelJobServer(t, http.StatusOK, `{"id":"job-456","type":"script","state":"canceling","agent":{"id":"agent-1","name":"agent-name"},"web_url":"https://buildkite.com/x"}`)
+			_, handler, _ := CancelJob()
+
+			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), tt.args)
+			require.NoError(t, err)
+			require.False(t, result.IsError, getTextResult(t, result).Text)
+			assert.Equal(t, []string{tt.wantRequest}, *requests)
+
+			var job buildkite.Job
+			require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &job))
+			assert.Equal(t, "canceling", job.State)
+			assert.Equal(t, buildkite.Agent{ID: "agent-1"}, job.Agent)
+			assert.Empty(t, job.WebURL)
+		})
+	}
+
+	t.Run("SurfacesAPIError", func(t *testing.T) {
+		ctx, _ := cancelJobServer(t, http.StatusUnprocessableEntity, `{"message":"This job is already being canceled"}`)
+		_, handler, _ := CancelJob()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), CancelJobArgs{OrgSlug: "test-org", JobID: "job-456"})
+		require.NoError(t, err)
+		assert.True(t, result.IsError)
+		assert.Contains(t, getTextResult(t, result).Text, "This job is already being canceled")
+	})
+
+	for name, args := range map[string]CancelJobArgs{
+		"RequiresPipelineAndBuildTogether": {OrgSlug: "test-org", PipelineSlug: "test-pipeline", JobID: "job-456"},
+		// Without this check, PUT .../builds/123/jobs/../../124/cancel would cancel build 124.
+		"RejectsPathSeparatorInJobID": {OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", JobID: "../../124"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx, requests := cancelJobServer(t, http.StatusOK, `{}`)
+			_, handler, _ := CancelJob()
+
+			result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), args)
+			require.NoError(t, err)
+			assert.True(t, result.IsError)
+			assert.Empty(t, *requests)
+		})
+	}
 }

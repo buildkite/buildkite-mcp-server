@@ -412,6 +412,10 @@ func TestUnblockJobArgsSchema(t *testing.T) {
 	}
 }
 
+func TestCancelJobArgsSchema(t *testing.T) {
+	require.Equal(t, []string{"job_id", "org_slug"}, sortedRequired[CancelJobArgs](t))
+}
+
 func TestListJobsArgsSchemaOptionalFields(t *testing.T) {
 	s := schemaFor[ListJobsArgs](t)
 	req := sortedToolRequired(t, s)
