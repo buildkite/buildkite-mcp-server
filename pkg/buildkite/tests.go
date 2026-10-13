@@ -195,7 +195,7 @@ func ListTestsForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListTestsForBuildArgs, an
 func GetTest() (mcp.Tool, mcp.ToolHandlerFor[GetTestArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_test",
-			Description: "Get a specific test in Buildkite Test Engine, including execution metrics aggregated over a selected time window. This provides additional metadata for failed test executions.",
+			Description: "Get a specific test in Buildkite Test Engine, including execution metrics aggregated over a selected time window. This provides additional metadata for failed test executions. The response also includes transition_count_score and probabilistic_flakiness_score, which help judge whether a failure is flaky. Each score is absent unless the suite has a monitor of that type and the monitor has scored the test. The time window does not apply to them.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Test",
 				ReadOnlyHint: true,
