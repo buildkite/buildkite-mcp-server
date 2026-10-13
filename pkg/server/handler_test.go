@@ -125,26 +125,34 @@ func TestNewPerRequestServerFactory_BothHeaders(t *testing.T) {
 }
 
 func TestNewPerRequestServerFactory_DisabledToolsetsCannotBeReenabled(t *testing.T) {
-	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false, toolsets.ToolsetLogs)
-
 	for _, tt := range []struct {
 		name           string
 		toolsetsHeader string
+		disabled       string
+		absent         []string
+		present        string
 	}{
-		{name: "server defaults"},
-		{name: "per-request override", toolsetsHeader: toolsets.ToolsetLogs},
+		{name: "server defaults", disabled: toolsets.ToolsetLogs, absent: []string{"search_logs", "tail_logs", "read_logs"}, present: "get_build"},
+		{name: "per-request override", toolsetsHeader: toolsets.ToolsetLogs, disabled: toolsets.ToolsetLogs, absent: []string{"search_logs", "tail_logs", "read_logs"}},
+		{name: "all override", toolsetsHeader: "all", disabled: toolsets.ToolsetLogs, absent: []string{"search_logs", "tail_logs", "read_logs"}, present: "retry_job"},
+		{name: "retries override", toolsetsHeader: "retries", disabled: toolsets.ToolsetLogs, absent: []string{"search_logs", "tail_logs", "read_logs"}, present: "retry_job"},
+		{name: "logs and retries override", toolsetsHeader: "logs,retries", disabled: toolsets.ToolsetLogs, absent: []string{"search_logs", "tail_logs", "read_logs"}, present: "retry_job"},
+		{name: "invalid override", toolsetsHeader: "invalid", disabled: toolsets.ToolsetLogs, absent: []string{"search_logs", "tail_logs", "read_logs"}, present: "get_build"},
+		{name: "builds disabled", toolsetsHeader: "retries", disabled: toolsets.ToolsetBuilds, absent: []string{"get_build", "list_jobs", "retry_job", "retry_failed_jobs"}, present: "tail_logs"},
+		{name: "retries disabled", toolsetsHeader: "builds,logs", disabled: toolsets.ToolsetRetries, absent: []string{"get_build", "tail_logs", "retry_job", "retry_failed_jobs"}, present: "create_build"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false, tt.disabled)
 			req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
 			require.NoError(t, err)
 			req.Header.Set(HeaderToolsets, tt.toolsetsHeader)
 
 			toolNames := listToolNames(t, factory(req))
-			require.NotContains(t, toolNames, "search_logs")
-			require.NotContains(t, toolNames, "tail_logs")
-			require.NotContains(t, toolNames, "read_logs")
-			if tt.toolsetsHeader == "" {
-				require.Contains(t, toolNames, "get_build")
+			for _, name := range tt.absent {
+				require.NotContains(t, toolNames, name)
+			}
+			if tt.present != "" {
+				require.Contains(t, toolNames, tt.present)
 			}
 		})
 	}

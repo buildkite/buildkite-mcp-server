@@ -49,6 +49,12 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 			notWant: []string{startHere, skillDiscovery, failureSummary, logInvestigation, annotationScope},
 		},
 		{
+			name:    "retries alone",
+			enabled: []string{"retries"},
+			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, logInvestigation),
+			notWant: []string{startHere, skillDiscovery, failureSummary, dynamicUploads, annotationScope},
+		},
+		{
 			name:    "skills alone",
 			enabled: []string{"skills"},
 			want:    append(append([]string{}, always...), skillDiscovery),
@@ -94,6 +100,48 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 				assert.NotContains(got, nw)
 			}
 		})
+	}
+}
+
+func TestRetryToolsetRegistration(t *testing.T) {
+	inspection := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job"}
+	logs := []string{"search_logs", "tail_logs", "read_logs"}
+	readTools := append(append([]string{}, inspection...), logs...)
+	for _, tt := range []struct {
+		name     string
+		readOnly bool
+		disabled []string
+		expected []string
+	}{
+		{name: "retries", expected: append(append([]string{}, readTools...), "retry_job", "retry_failed_jobs")},
+		{name: "read-only retries", readOnly: true, expected: readTools},
+		{name: "logs disabled", disabled: []string{"logs"}, expected: append(append([]string{}, inspection...), "retry_job", "retry_failed_jobs")},
+		{name: "read-only with logs disabled", readOnly: true, disabled: []string{"logs"}, expected: inspection},
+		{name: "builds disabled", disabled: []string{"builds"}, expected: logs},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := NewMCPServer("test", buildkite.ToolDependencies{}, WithToolsets("retries"), WithReadOnly(tt.readOnly), WithDisabledToolsets(tt.disabled...))
+			require.ElementsMatch(t, tt.expected, listToolNames(t, server))
+			instructions := buildkiteServerInstructions([]string{"retries"}, tt.readOnly, tt.disabled)
+			if len(tt.disabled) > 0 && tt.disabled[0] == "logs" {
+				require.NotContains(t, instructions, "Log investigation order:")
+				require.Contains(t, instructions, "Build selection after a push:")
+			}
+			if len(tt.disabled) > 0 && tt.disabled[0] == "builds" {
+				require.Contains(t, instructions, "Log investigation order:")
+				require.NotContains(t, instructions, "Build selection after a push:")
+				require.NotContains(t, instructions, "Job output links:")
+			}
+		})
+	}
+}
+
+func TestDisabledAllToolsets(t *testing.T) {
+	server := NewMCPServer("test", buildkite.ToolDependencies{}, WithDisabledToolsets("all"))
+	require.Empty(t, listToolNames(t, server))
+	instructions := buildkiteServerInstructions([]string{"all"}, false, []string{"all"})
+	for _, paragraph := range []string{"Start here:", "Skill discovery:", "Pipeline authoring:", "Build failure investigation:", "Log investigation order:"} {
+		require.NotContains(t, instructions, paragraph)
 	}
 }
 

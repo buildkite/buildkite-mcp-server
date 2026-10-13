@@ -271,6 +271,33 @@ func TestRetryJob(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "job not retryable")
 	})
+
+	t.Run("RetryScopesForbiddenWithFeatureEnabled", func(t *testing.T) {
+		const message = "Your access token needs one of these scopes: write_builds, retry_builds"
+		const body = `{"message":"Your access token needs one of these scopes: write_builds, retry_builds"}`
+		request, err := http.NewRequest(http.MethodPut, "https://api.buildkite.com/v2/organizations/test-org/pipelines/test-pipeline/builds/123/jobs/job-456/retry", nil)
+		require.NoError(t, err)
+		mockJobs := &MockJobsClient{
+			RetryJobFunc: func(context.Context, string, string, string, string) (buildkite.Job, *buildkite.Response, error) {
+				// With the feature enabled, either scope suffices; neither returns 403.
+				return buildkite.Job{}, nil, &buildkite.ErrorResponse{
+					Response: &http.Response{StatusCode: http.StatusForbidden, Request: request},
+					Message:  message,
+					RawBody:  []byte(body),
+				}
+			},
+		}
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := RetryJob()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), RetryJobArgs{
+			OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", JobID: "job-456",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.True(t, result.IsError)
+		assert.JSONEq(t, body, result.Content[0].(*mcp.TextContent).Text)
+	})
 }
 
 func TestGetJobEnvironmentVariables(t *testing.T) {

@@ -188,5 +188,5 @@ func RetryFailedJobs() (mcp.Tool, mcp.ToolHandlerFor[RetryFailedJobsArgs, any], 
 			)
 
 			return mcpTextResult(span, result)
-		}, []string{"read_builds", "write_builds"}
+		}, []string{"read_builds", "retry_builds"}
 }
