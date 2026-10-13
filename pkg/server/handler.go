@@ -24,6 +24,7 @@ const (
 // NewPerRequestServerFactory returns a function that creates an mcp.Server per HTTP request.
 // It reads X-Buildkite-Toolsets and X-Buildkite-Read-Only headers from the request,
 // falling back to the provided defaults when headers are absent.
+// Disabled toolsets exclude all their members, even through other toolsets.
 func NewPerRequestServerFactory(
 	version string,
 	deps buildkite.ToolDependencies,
@@ -51,6 +52,7 @@ func NewPerRequestServerFactory(
 
 		return NewMCPServer(version, deps,
 			WithToolsets(enabledToolsets...),
+			WithDisabledToolsets(disabledToolsets...),
 			WithReadOnly(readOnly),
 		)
 	}
@@ -59,6 +61,9 @@ func NewPerRequestServerFactory(
 func withoutToolsets(enabled, disabled []string) []string {
 	if len(disabled) == 0 {
 		return enabled
+	}
+	if slices.Contains(disabled, toolsets.ToolsetAll) {
+		return nil
 	}
 	if slices.Contains(enabled, toolsets.ToolsetAll) {
 		enabled = toolsets.ValidToolsets

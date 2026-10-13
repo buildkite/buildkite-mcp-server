@@ -2,6 +2,7 @@ package toolsets
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
@@ -599,6 +600,7 @@ func TestIsValidToolset(t *testing.T) {
 		{"valid toolset - clusters", "clusters", true},
 		{"valid toolset - pipelines", "pipelines", true},
 		{"valid toolset - builds", "builds", true},
+		{"valid toolset - retries", "retries", true},
 		{"valid toolset - artifacts", "artifacts", true},
 		{"valid toolset - logs", "logs", true},
 		{"valid toolset - tests", "tests", true},
@@ -675,7 +677,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered
-	expectedToolsets := []string{"clusters", "cluster_secrets", "cache_registries", "agents", "pipelines", "builds", "artifacts", "logs", "tests", "annotations", "investigations", "user", "repository_connections", "skills"}
+	expectedToolsets := []string{"clusters", "cluster_secrets", "cache_registries", "agents", "pipelines", "builds", "retries", "artifacts", "logs", "tests", "annotations", "investigations", "user", "repository_connections", "skills"}
 	for _, name := range expectedToolsets {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
@@ -726,6 +728,98 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 		toolNames = append(toolNames, tool.Tool.Name)
 	}
 	assert.Contains(toolNames, "create_pipeline_webhook")
+}
+
+func TestRetryToolset(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	readTools := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job", "search_logs", "tail_logs", "read_logs"}
+
+	for _, readOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read_only=%t", readOnly), func(t *testing.T) {
+			var names []string
+			for _, tool := range registry.GetEnabledTools([]string{ToolsetRetries}, readOnly) {
+				names = append(names, tool.Tool.Name)
+				if tool.Tool.Name == "retry_job" || tool.Tool.Name == "retry_failed_jobs" {
+					require.False(t, tool.IsReadOnly())
+				} else {
+					require.True(t, tool.IsReadOnly())
+				}
+			}
+			expectedNames := append([]string{}, readTools...)
+			expectedScopes := []string{"read_build_logs", "read_builds"}
+			if !readOnly {
+				expectedNames = append(expectedNames, "retry_job", "retry_failed_jobs")
+				expectedScopes = append(expectedScopes, "retry_builds")
+			}
+			require.ElementsMatch(t, expectedNames, names)
+			require.Equal(t, expectedScopes, registry.GetRequiredScopes([]string{ToolsetRetries}, readOnly))
+		})
+	}
+}
+
+func TestOverlappingToolsets(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	selected := []string{ToolsetRetries, ToolsetBuilds, ToolsetLogs}
+	for _, readOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read_only=%t", readOnly), func(t *testing.T) {
+			expectedCount := 18
+			if readOnly {
+				expectedCount = 12
+			}
+			for _, tools := range [][]ToolDefinition{
+				registry.GetToolsForToolsets(selected, readOnly),
+				registry.GetEnabledTools(selected, readOnly),
+			} {
+				require.Len(t, tools, expectedCount)
+				seen := make(map[string]bool)
+				for _, tool := range tools {
+					require.False(t, seen[tool.Tool.Name], "duplicate tool %s", tool.Tool.Name)
+					seen[tool.Tool.Name] = true
+				}
+			}
+		})
+	}
+
+	for _, tools := range [][]ToolDefinition{registry.GetEnabledTools([]string{ToolsetAll}, false), registry.GetAllTools()} {
+		seen := make(map[string]bool)
+		for _, tool := range tools {
+			require.False(t, seen[tool.Tool.Name], "duplicate tool %s", tool.Tool.Name)
+			seen[tool.Tool.Name] = true
+		}
+		require.Contains(t, seen, "retry_job")
+		require.Contains(t, seen, "retry_failed_jobs")
+	}
+}
+
+func TestToolsetExclusions(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	for _, tt := range []struct {
+		name     string
+		enabled  []string
+		disabled []string
+		readOnly bool
+		scopes   []string
+	}{
+		{name: "retries without logs", enabled: []string{ToolsetRetries}, disabled: []string{ToolsetLogs}, scopes: []string{"read_builds", "retry_builds"}},
+		{name: "read-only retries without logs", enabled: []string{ToolsetRetries}, disabled: []string{ToolsetLogs}, readOnly: true, scopes: []string{"read_builds"}},
+		{name: "retries without builds", enabled: []string{ToolsetRetries}, disabled: []string{ToolsetBuilds}, scopes: []string{"read_build_logs"}},
+		{name: "builds and logs without retries", enabled: []string{ToolsetBuilds, ToolsetLogs}, disabled: []string{ToolsetRetries}, scopes: []string{"read_builds", "read_job_env", "write_builds"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			selected := Toolset{Tools: registry.GetEnabledToolsWithExclusions(tt.enabled, tt.readOnly, tt.disabled)}
+			require.Equal(t, tt.scopes, selected.GetRequiredScopes())
+			if tt.disabled[0] == ToolsetRetries {
+				var names []string
+				for _, tool := range selected.Tools {
+					names = append(names, tool.Tool.Name)
+				}
+				require.ElementsMatch(t, []string{"get_build_test_engine_runs", "list_step_uploads", "get_step_upload", "get_job_env", "create_build", "cancel_build", "rebuild_build", "unblock_job"}, names)
+			}
+		})
+	}
 }
 
 func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {

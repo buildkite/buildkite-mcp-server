@@ -8,6 +8,38 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Retrying builds with limited permissions
+
+The `retries` toolset supports investigating failures and retrying jobs without
+broader build-write access. It includes `list_builds`, `get_build`,
+`wait_for_build`, `list_jobs`, `get_job`, `search_logs`, `tail_logs`, `read_logs`,
+`retry_job`, and `retry_failed_jobs`. It requires `read_builds`,
+`read_build_logs`, and `retry_builds` scopes, not `write_builds`.
+
+```bash
+buildkite-mcp-server stdio --enabled-toolsets retries
+```
+
+`retry_failed_jobs` retries only infrastructure failures; use its `dry_run`
+option to inspect the proposed retries without executing them. `retry_job`
+retries a specific job. Both are mutating tools and are excluded by
+`--read-only`. The toolset does not expose create, rebuild, cancel, or unblock
+operations. Existing retry tools remain available in `builds`; selecting
+`builds` or `all` still requires `write_builds` for the other mutations.
+
+The Buildkite API must have the `RetryBuildsScope` feature enabled for the token
+owner to accept `retry_builds`; existing `write_builds` tokens remain accepted.
+Hosted MCP OAuth can select this toolset using `/mcp/x/retries` once the hosted
+server adopts a release containing it. Selecting toolsets through request
+headers does not change an existing token's OAuth scopes.
+
+For library consumers, `WithDisabledToolsets` and the HTTP factory's disabled
+toolsets exclude all members of those toolsets, even through overlapping
+groups. For example, disabling `logs` also removes log tools from `retries`;
+disabling `retries` removes its inspection and retry tools from other groups.
+
+---
+
 ## Comparing builds
 
 The read-only `compare_builds` tool in the `investigations` toolset answers questions such as “What changed since this build last worked on main?” Supply `org_slug`, `pipeline_slug`, and the target `build_number`. It selects the most recently created earlier build that is currently passed on the same pipeline and exact branch. It does not require that the baseline had already passed when the target started. Supply `baseline_build_number` to compare against a specific build in that pipeline instead, including a failed build or one on another branch.
