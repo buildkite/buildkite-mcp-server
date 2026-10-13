@@ -6,11 +6,11 @@ github.github_attestations = false
 github.slsa = false
 
 [tools]
-go = "1.27.1"
+go = "1.27.2"
 golangci-lint = "2.14.0"
-goreleaser = "2.18.2"
+goreleaser = "2.18.3"
 ko = "0.19.1"
-lefthook = "2.1.17"
+lefthook = "2.2.1"
 node = "24.21.0"
 
 [tasks.setup]
