@@ -408,6 +408,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.UnblockJob),
 				newToolDef(buildkite.RetryJob),
 				newToolDef(buildkite.RetryFailedJobs),
+				newToolDef(buildkite.CancelJob),
 				newToolDef(buildkite.GetJobEnvironmentVariables),
 			},
 		},
