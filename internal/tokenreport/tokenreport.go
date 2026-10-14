@@ -89,6 +89,7 @@ func Build(maxToolTokens int) (Report, error) {
 	}
 	slices.Sort(names)
 
+	seen := make(map[string]bool)
 	for _, name := range names {
 		ts := Toolset{Name: name}
 		for _, def := range all[name].Tools {
@@ -110,10 +111,16 @@ func Build(maxToolTokens int) (Report, error) {
 				Tokens:            Estimate(full),
 			}
 			t.OverLimit = maxToolTokens > 0 && t.Tokens > maxToolTokens
-			r.Tools = append(r.Tools, t)
 
 			ts.Tools++
 			ts.Tokens += t.Tokens
+			// Each toolset includes its shared tools, but deployment totals
+			// and the tool list count each tool only once.
+			if seen[t.Name] {
+				continue
+			}
+			seen[t.Name] = true
+			r.Tools = append(r.Tools, t)
 			r.Totals.All.Tools++
 			r.Totals.All.ToolTokens += t.Tokens
 			if t.ReadOnly {
@@ -196,6 +203,7 @@ func WriteMarkdown(w io.Writer, r Report) error {
 		fmt.Fprintf(&b, "| %s | %d | %s | %.1f%% |\n", ts.Name, ts.Tools, num(ts.Tokens), share)
 	}
 	b.WriteString("\n")
+	b.WriteString("Toolset subtotals include shared tools; deployment totals count each tool once. Shares may sum to more than 100%.\n\n")
 
 	fmt.Fprintf(&b, "<details><summary>All tools (%d)</summary>\n\n", len(r.Tools))
 	if limited {

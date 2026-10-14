@@ -764,7 +764,7 @@ func TestOverlappingToolsets(t *testing.T) {
 	selected := []string{ToolsetRetries, ToolsetBuilds, ToolsetLogs}
 	for _, readOnly := range []bool{false, true} {
 		t.Run(fmt.Sprintf("read_only=%t", readOnly), func(t *testing.T) {
-			expectedCount := 18
+			expectedCount := 19
 			if readOnly {
 				expectedCount = 12
 			}
@@ -816,7 +816,7 @@ func TestToolsetExclusions(t *testing.T) {
 				for _, tool := range selected.Tools {
 					names = append(names, tool.Tool.Name)
 				}
-				require.ElementsMatch(t, []string{"get_build_test_engine_runs", "list_step_uploads", "get_step_upload", "get_job_env", "create_build", "cancel_build", "rebuild_build", "unblock_job"}, names)
+				require.ElementsMatch(t, []string{"get_build_test_engine_runs", "list_step_uploads", "get_step_upload", "get_job_env", "create_build", "cancel_build", "cancel_job", "rebuild_build", "unblock_job"}, names)
 			}
 		})
 	}
