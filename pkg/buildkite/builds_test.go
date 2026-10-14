@@ -349,7 +349,7 @@ func TestListBuilds(t *testing.T) {
 		})
 		assert.NoError(err)
 		assert.True(time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.CreatedFrom))
-		assert.True(time.Date(2026, 10, 13, 23, 59, 59, 0, time.UTC).Equal(capturedOptions.CreatedTo))
+		assert.True(time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.CreatedTo))
 	})
 
 	t.Run("InvalidTimeFilter", func(t *testing.T) {
@@ -385,7 +385,7 @@ func TestListBuilds(t *testing.T) {
 				return []buildkite.Build{
 					{
 						ID: "123", Number: 1, State: "passed", CreatedAt: &buildkite.Timestamp{},
-						URL:        "https://api.buildkite.com/v2/organizations/org/pipelines/web-app/builds/1",
+						URL:        "https://api.buildkite.com/v2/organizations/pipelines/pipelines/web-app/builds/1",
 						Creator:    buildkite.Creator{ID: "user-uuid", Name: "Jane", Email: "jane@example.com", AvatarURL: "https://example.com/a.png"},
 						FinishedAt: buildkite.NewTimestamp(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)),
 					},

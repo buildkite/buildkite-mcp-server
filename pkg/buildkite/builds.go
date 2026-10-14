@@ -3,6 +3,7 @@ package buildkite
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -165,12 +166,11 @@ func buildPipelineSlug(build buildkite.Build) string {
 	if build.Pipeline != nil {
 		return build.Pipeline.Slug
 	}
-	_, rest, ok := strings.Cut(build.URL, "/pipelines/")
-	if !ok {
+	i := strings.LastIndex(build.URL, "/builds/")
+	if i < 0 {
 		return ""
 	}
-	slug, _, _ := strings.Cut(rest, "/")
-	return slug
+	return path.Base(build.URL[:i])
 }
 
 func detailBuild(build buildkite.Build, annotations []buildkite.Annotation, annotationsTruncated bool) BuildDetail {
@@ -331,15 +331,15 @@ func setBuildTimeFilters(options *buildkite.BuildsListOptions, args ListBuildsAr
 }
 
 // parseBuildTime parses an RFC 3339 timestamp or a UTC YYYY-MM-DD date. With
-// endOfDay, a date becomes its last second, matching how the API reads a
-// date-only created_to.
+// endOfDay, a date becomes the next midnight so that, as with the API's own
+// date-only created_to, the whole day is included.
 func parseBuildTime(value string, endOfDay bool) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, value); err == nil {
 		return t, nil
 	}
 	t, err := time.Parse(time.DateOnly, value)
 	if err == nil && endOfDay {
-		t = t.AddDate(0, 0, 1).Add(-time.Second)
+		t = t.AddDate(0, 0, 1)
 	}
 	return t, err
 }
