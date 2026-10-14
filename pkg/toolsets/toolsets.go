@@ -25,6 +25,14 @@ func (td ToolDefinition) IsReadOnly() bool {
 	return td.Tool.Annotations.ReadOnlyHint
 }
 
+// IsMinimumAccess reports whether a read-only tool needs only the documented
+// minimum token scopes. Read-only tools requiring no API scopes are included.
+func (td ToolDefinition) IsMinimumAccess() bool {
+	return td.IsReadOnly() && !slices.ContainsFunc(td.RequiredScopes, func(scope string) bool {
+		return scope != "read_builds" && scope != "read_pipelines" && scope != "read_user"
+	})
+}
+
 // Toolset represents a logical grouping of related tools
 type Toolset struct {
 	Name        string

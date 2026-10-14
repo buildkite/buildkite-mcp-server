@@ -56,6 +56,28 @@ func TestToolDefinition_IsReadOnly(t *testing.T) {
 	}
 }
 
+func TestToolDefinition_IsMinimumAccess(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		scopes      []string
+		annotations *mcp.ToolAnnotations
+		expected    bool
+	}{
+		{name: "minimum scopes", scopes: []string{"read_builds", "read_pipelines", "read_user"}, annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}, expected: true},
+		{name: "subset", scopes: []string{"read_builds"}, annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}, expected: true},
+		{name: "local read-only tool", annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}, expected: true},
+		{name: "mixed allowed and extra scopes", scopes: []string{"read_builds", "read_build_logs"}, annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+		{name: "unknown scope", scopes: []string{"read_future_data"}, annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}},
+		{name: "mutating tool with no scopes", annotations: &mcp.ToolAnnotations{ReadOnlyHint: false}},
+		{name: "missing read-only annotation", scopes: []string{"read_builds"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := ToolDefinition{Tool: mcp.Tool{Annotations: tt.annotations}, RequiredScopes: tt.scopes}
+			require.Equal(t, tt.expected, tool.IsMinimumAccess())
+		})
+	}
+}
+
 func TestToolset_GetReadOnlyTools(t *testing.T) {
 	readOnlyTool := ToolDefinition{
 		Tool: mcp.Tool{

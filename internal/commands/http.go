@@ -19,6 +19,7 @@ type HTTPCmd struct {
 	Listen                 string   `help:"The address to listen on." default:"localhost:3000" env:"HTTP_LISTEN_ADDR"`
 	EnabledToolsets        []string `help:"Comma-separated list of toolsets to enable (e.g., 'pipelines,builds,clusters'). Use 'all' to enable all toolsets." default:"all" env:"BUILDKITE_TOOLSETS"`
 	ReadOnly               bool     `help:"Enable read-only mode, which filters out write operations from all toolsets." default:"false" env:"BUILDKITE_READ_ONLY"`
+	MinimumAccess          bool     `help:"Enable only read-only tools requiring read_builds, read_pipelines and read_user scopes (or no API scopes)." default:"false" env:"BUILDKITE_MINIMUM_ACCESS"`
 	PassthroughHTTPHeaders []string `help:"Inbound HTTP header names to pass through to the Buildkite API. May be repeated." name:"passthrough-http-header" env:"BUILDKITE_PASSTHROUGH_HTTP_HEADERS"`
 }
 
@@ -55,7 +56,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		FailureSummary:              globals.FailureSummary,
 	}
 
-	factory := server.NewPerRequestServerFactory(globals.Version, deps, c.EnabledToolsets, c.ReadOnly)
+	factory := server.NewPerRequestServerFactory(globals.Version, deps, c.EnabledToolsets, c.ReadOnly, server.WithMinimumAccess(c.MinimumAccess))
 
 	listener, err := net.Listen("tcp", c.Listen)
 	if err != nil {

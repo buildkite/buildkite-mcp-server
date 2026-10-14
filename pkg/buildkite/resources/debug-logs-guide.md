@@ -2,6 +2,12 @@
 
 This guide explains how to effectively use the Buildkite MCP server's log tools to debug build failures.
 
+## Tool Availability
+
+This guide covers the full server. Only follow steps for tools advertised in your current session; never call an unavailable tool. Toolset settings and `--minimum-access` can exclude tools described below.
+
+In minimum-access mode, `get_build_failure_summary`, `compare_builds`, `tail_logs`, `search_logs`, and `read_logs` are unavailable. Skip the log workflow below. Instead, use available build and job inspection tools (`get_build`, `list_jobs`, `get_job`) to inspect states and exit statuses, and explain that log-based diagnosis is unavailable in this mode. Supply the organization slug yourself; `user_token_organization` is also unavailable.
+
 ## Table of Contents
 - [Tools Overview](#tools-overview)
 - [Debugging Workflow](#debugging-workflow)
