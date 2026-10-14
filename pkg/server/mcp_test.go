@@ -1,12 +1,17 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -142,6 +147,59 @@ func TestDisabledAllToolsets(t *testing.T) {
 	instructions := buildkiteServerInstructions([]string{"all"}, false, []string{"all"})
 	for _, paragraph := range []string{"Start here:", "Skill discovery:", "Pipeline authoring:", "Build failure investigation:", "Log investigation order:"} {
 		require.NotContains(t, instructions, paragraph)
+	}
+}
+
+func TestToolsetOverlapWarning(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		enabled  []string
+		disabled []string
+		readOnly bool
+		header   string
+		removed  []string
+	}{
+		{name: "shared tools excluded", enabled: []string{"retries"}, disabled: []string{"logs"}, removed: []string{"read_logs", "search_logs", "tail_logs"}},
+		{name: "all toolsets", enabled: []string{"all"}, disabled: []string{"logs"}, removed: []string{"read_logs", "search_logs", "tail_logs"}},
+		{name: "read-only", enabled: []string{"logs", "builds"}, disabled: []string{"retries"}, readOnly: true, removed: []string{"get_build", "get_job", "list_builds", "list_jobs", "read_logs", "search_logs", "tail_logs", "wait_for_build"}},
+		{name: "duplicate selections", enabled: []string{"retries", "retries", "logs"}, disabled: []string{"logs", "logs"}, removed: []string{"read_logs", "search_logs", "tail_logs"}},
+		{name: "HTTP override", enabled: []string{"user"}, disabled: []string{"logs"}, header: "retries,logs", removed: []string{"read_logs", "search_logs", "tail_logs"}},
+		{name: "harmless overlap", enabled: []string{"retries", "logs"}},
+		{name: "unrelated exclusion", enabled: []string{"retries"}, disabled: []string{"user"}},
+		{name: "own toolset disabled", enabled: []string{"logs", "user"}, disabled: []string{"logs"}},
+		{name: "all disabled", enabled: []string{"all"}, disabled: []string{"all"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var output bytes.Buffer
+			previousLogger := log.Logger
+			log.Logger = zerolog.New(&output).Level(zerolog.WarnLevel)
+			t.Cleanup(func() { log.Logger = previousLogger })
+
+			if tt.header != "" {
+				factory := NewPerRequestServerFactory("test", buildkite.ToolDependencies{}, tt.enabled, tt.readOnly, tt.disabled...)
+				req := httptest.NewRequest("POST", "/mcp", nil)
+				req.Header.Set(HeaderToolsets, tt.header)
+				factory(req)
+			} else {
+				NewMCPServer("test", buildkite.ToolDependencies{}, WithToolsets(tt.enabled...), WithDisabledToolsets(tt.disabled...), WithReadOnly(tt.readOnly))
+			}
+
+			if len(tt.removed) == 0 {
+				require.Empty(t, output.String(), "no warning unless another enabled toolset loses tools")
+				return
+			}
+			var warning struct {
+				Level    string   `json:"level"`
+				Message  string   `json:"message"`
+				Disabled []string `json:"disabled_toolsets"`
+				Removed  []string `json:"removed_tools"`
+			}
+			require.NoError(t, json.Unmarshal(output.Bytes(), &warning))
+			require.Equal(t, "warn", warning.Level)
+			require.Contains(t, warning.Message, "other enabled toolsets")
+			require.Equal(t, tt.disabled, warning.Disabled)
+			require.Equal(t, tt.removed, warning.Removed)
+		})
 	}
 }
 

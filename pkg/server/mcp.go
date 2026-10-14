@@ -254,8 +254,29 @@ func RegisterTools(s *mcp.Server, cfg *ToolsetConfig) {
 
 	enabledTools := registry.GetEnabledToolsWithExclusions(cfg.EnabledToolsets, cfg.ReadOnly, cfg.DisabledToolsets)
 
+	registered := make(map[string]bool, len(enabledTools))
 	for _, toolDef := range enabledTools {
 		toolDef.Register(s)
+		registered[toolDef.Tool.Name] = true
+	}
+
+	if len(cfg.DisabledToolsets) > 0 {
+		// Ignore tools removed by disabling their own toolset; warn only when
+		// exclusions also remove tools from other enabled toolsets.
+		var removedTools []string
+		for _, tool := range registry.GetEnabledTools(withoutToolsets(cfg.EnabledToolsets, cfg.DisabledToolsets), cfg.ReadOnly) {
+			if !registered[tool.Tool.Name] {
+				removedTools = append(removedTools, tool.Tool.Name)
+			}
+		}
+		if len(removedTools) > 0 {
+			slices.Sort(removedTools)
+			log.Warn().
+				Strs("enabled_toolsets", cfg.EnabledToolsets).
+				Strs("disabled_toolsets", cfg.DisabledToolsets).
+				Strs("removed_tools", removedTools).
+				Msg("Disabled toolsets removed tools from other enabled toolsets")
+		}
 	}
 
 	scopes := (toolsets.Toolset{Tools: enabledTools}).GetRequiredScopes()
