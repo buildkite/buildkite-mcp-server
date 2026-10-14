@@ -13,6 +13,7 @@ import (
 type StdioCmd struct {
 	EnabledToolsets []string `help:"Comma-separated list of toolsets to enable (e.g., 'pipelines,builds,clusters'). Use 'all' to enable all toolsets." default:"all" env:"BUILDKITE_TOOLSETS"`
 	ReadOnly        bool     `help:"Enable read-only mode, which filters out write operations from all toolsets." default:"false" env:"BUILDKITE_READ_ONLY"`
+	MinimumAccess   bool     `help:"Enable only read-only tools requiring read_builds, read_pipelines and read_user scopes (or no API scopes)." default:"false" env:"BUILDKITE_MINIMUM_ACCESS"`
 }
 
 func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
@@ -53,6 +54,7 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 
 	s := server.NewMCPServer(globals.Version, deps,
 		server.WithReadOnly(c.ReadOnly),
+		server.WithMinimumAccess(c.MinimumAccess),
 		server.WithToolsets(c.EnabledToolsets...))
 
 	return s.Run(ctx, &mcp.StdioTransport{})

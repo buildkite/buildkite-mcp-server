@@ -8,6 +8,43 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Minimum access
+
+Run with `--minimum-access` to expose only read-only tools requiring the
+[minimum token scopes](https://buildkite.com/docs/apis/mcp-server/local/installing#configure-an-api-access-token-minimum-access):
+`read_builds`, `read_pipelines`, and `read_user`. Local read-only tools such as
+`validate_pipeline`, `list_skills`, and `load_skill` remain available because
+they require no API scopes.
+
+```bash
+buildkite-mcp-server stdio --minimum-access
+buildkite-mcp-server http --minimum-access
+```
+
+Alternatively, set `BUILDKITE_MINIMUM_ACCESS=true`. Unlike `--read-only`, this
+also excludes read operations requiring additional scopes, including logs,
+artifacts, job environment variables, clusters, secrets, organizations, and
+Test Engine tools requiring `read_suites`. It filters `--enabled-toolsets`
+rather than replacing your selection, and can be combined with `--read-only`.
+HTTP toolset and read-only headers cannot relax minimum access.
+
+Exclusions take precedence over enabled toolsets. When minimum access removes
+selected tools, the server logs a warning naming those tools and their required
+scopes. Disabled-toolset overlaps also warn, even when minimum access rejects
+the same tools.
+
+Supply the organization slug when using pipeline and build tools;
+`user_token_organization` is unavailable because it requires
+`read_organizations`. This option restricts the tools exposed by the server;
+it does not change the permissions of your API token.
+
+Library consumers can use `server.WithMinimumAccess(true)` with
+`NewMCPServer`, `NewPerRequestServerFactory`, or `BuildkiteServerInstructions`.
+The HTTP factory's optional arguments now use `ToolsetOption`; pass disabled
+toolsets using `WithDisabledToolsets(names...)` instead of bare names.
+
+---
+
 ## Retrying builds with limited permissions
 
 The `retries` toolset supports investigating failures and retrying jobs without

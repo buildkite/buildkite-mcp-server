@@ -22,6 +22,7 @@ type ToolsetConfig struct {
 	EnabledToolsets  []string
 	DisabledToolsets []string
 	ReadOnly         bool
+	MinimumAccess    bool
 	OnUnauthorized   func()
 }
 
@@ -45,6 +46,22 @@ func WithReadOnly(readOnly bool) ToolsetOption {
 	return func(cfg *ToolsetConfig) {
 		cfg.ReadOnly = readOnly
 	}
+}
+
+// WithMinimumAccess restricts tools to read-only operations requiring only
+// read_builds, read_pipelines and read_user (or no API scopes).
+func WithMinimumAccess(minimumAccess bool) ToolsetOption {
+	return func(cfg *ToolsetConfig) {
+		cfg.MinimumAccess = minimumAccess
+	}
+}
+
+func (cfg *ToolsetConfig) enabledTools(registry *toolsets.ToolsetRegistry) []toolsets.ToolDefinition {
+	tools := registry.GetEnabledToolsWithExclusions(cfg.EnabledToolsets, cfg.ReadOnly, cfg.DisabledToolsets)
+	if cfg.MinimumAccess {
+		tools = slices.DeleteFunc(tools, func(tool toolsets.ToolDefinition) bool { return !tool.IsMinimumAccess() })
+	}
+	return tools
 }
 
 // WithOnUnauthorized registers a callback that fires when the Buildkite API returns a
@@ -88,16 +105,18 @@ var instructionSections = []instructionSection{
 	{text: "This is the Buildkite MCP Server. It provides access to the Buildkite CI/CD API, enabling you to manage and inspect pipelines, builds, jobs, logs, clusters, tests, artifacts, and annotations."},
 	{
 		toolsets: []string{toolsets.ToolsetUser},
+		tools:    []string{"user_token_organization"},
 		text:     "Start here: Before using most tools, call user_token_organization to retrieve the organization slug. Nearly every other tool requires the org_slug parameter, and this call is the fastest way to discover it.",
 	},
 	{
 		toolsets: []string{toolsets.ToolsetSkills},
-		text:     "Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill (e.g. debugging a build failure, tuning search_logs), call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below.",
+		text:     "Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill, call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below. Guides cover the full server; only follow steps for tools advertised in this session. Never call tools excluded by minimum-access mode or toolset settings.",
 	},
 	{text: "Authorization: Tools available depend on the scopes and organization access granted to the configured API token. A 401 response means the token is invalid, expired, or revoked and requires reauthentication. A 403 response means the credentials were accepted but access was denied, commonly because the token lacks a required scope or organization access, or the user lacks permission."},
 	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field."},
 	{
 		toolsets: []string{toolsets.ToolsetInvestigations},
+		tools:    []string{"get_build_failure_summary"},
 		text:     "Build failure investigation: start with get_build_failure_summary. It combines build state, blocking failed and canceled jobs, promised failures from running jobs, soft-failed jobs (listed after blocking failures and canceled jobs), bounded log tails, relevant annotations, and failed tests in one response; jobs that never ran (broken, waiting_failed, blocked_failed, unblocked_failed) fill the remaining max_jobs slots unless include_never_ran_jobs is false. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
 	},
 	{
@@ -106,6 +125,7 @@ var instructionSections = []instructionSection{
 	},
 	{
 		toolsets: []string{toolsets.ToolsetInvestigations},
+		tools:    []string{"compare_builds"},
 		text:     "Build comparison: use compare_builds when asked what changed since a build worked, or to compare two builds. Without an explicit baseline it selects an earlier successful build on the same pipeline and branch. Report the selected baseline and unmatched steps; shared failing steps do not establish a shared cause or justify a retry. Timings cover final attempts, not total retry cost or build wall-clock duration.",
 	},
 	{
@@ -147,27 +167,31 @@ var instructionSections = []instructionSection{
 
 // BuildkiteServerInstructions builds the instructions sent to MCP clients
 // describing how to use this server's tools, including only the paragraphs
-// relevant to enabledToolsets and readOnly mode. Exported so other services
-// embedding or re-implementing Buildkite MCP tools (e.g. custom/internal MCP
-// servers) can reuse the same guidance instead of maintaining their own copy.
-func BuildkiteServerInstructions(enabledToolsets []string, readOnly bool) string {
-	return buildkiteServerInstructions(enabledToolsets, readOnly, nil)
+// relevant to enabledToolsets, readOnly mode and any additional options.
+// Exported so other services embedding or re-implementing Buildkite MCP tools
+// (e.g. custom/internal MCP servers) can reuse the same guidance.
+func BuildkiteServerInstructions(enabledToolsets []string, readOnly bool, opts ...ToolsetOption) string {
+	cfg := &ToolsetConfig{EnabledToolsets: enabledToolsets, ReadOnly: readOnly}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return buildkiteServerInstructions(cfg)
 }
 
-func buildkiteServerInstructions(enabledToolsets []string, readOnly bool, disabledToolsets []string) string {
+func buildkiteServerInstructions(cfg *ToolsetConfig) string {
 	var available map[string]bool
-	if len(disabledToolsets) > 0 {
+	if len(cfg.DisabledToolsets) > 0 || cfg.MinimumAccess {
 		registry := toolsets.NewToolsetRegistry()
 		registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
 		available = make(map[string]bool)
-		for _, tool := range registry.GetEnabledToolsWithExclusions(enabledToolsets, readOnly, disabledToolsets) {
+		for _, tool := range cfg.enabledTools(registry) {
 			available[tool.Tool.Name] = true
 		}
 	}
-	enabledToolsets = withoutToolsets(enabledToolsets, disabledToolsets)
+	enabledToolsets := withoutToolsets(cfg.EnabledToolsets, cfg.DisabledToolsets)
 	parts := make([]string, 0, len(instructionSections))
 	for _, s := range instructionSections {
-		if s.writeOnly && readOnly {
+		if s.writeOnly && (cfg.ReadOnly || cfg.MinimumAccess) {
 			continue
 		}
 		if available != nil && len(s.tools) > 0 && !slices.ContainsFunc(s.tools, func(name string) bool { return available[name] }) {
@@ -197,7 +221,7 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 		Name:    "buildkite-mcp-server",
 		Version: version,
 	}, &mcp.ServerOptions{
-		Instructions: buildkiteServerInstructions(cfg.EnabledToolsets, cfg.ReadOnly, cfg.DisabledToolsets),
+		Instructions: buildkiteServerInstructions(cfg),
 		// A non-nil empty Capabilities stops the SDK from advertising the
 		// deprecated (as of MCP 2026-07-28) logging capability by default.
 		// Tool, prompt, and resource capabilities are still inferred as they
@@ -219,10 +243,12 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 	RegisterTools(s, cfg)
 
 	// Register prompts
-	s.AddPrompt(&mcp.Prompt{
-		Name:        "user_token_organization_prompt",
-		Description: "When asked for detail of a user's pipelines start by looking up the user's token organization",
-	}, buildkite.HandleUserTokenOrganizationPrompt)
+	if !cfg.MinimumAccess {
+		s.AddPrompt(&mcp.Prompt{
+			Name:        "user_token_organization_prompt",
+			Description: "When asked for detail of a user's pipelines start by looking up the user's token organization",
+		}, buildkite.HandleUserTokenOrganizationPrompt)
+	}
 
 	reportIssuePrompt, reportIssueHandler := buildkite.NewReportIssuePrompt(version)
 	s.AddPrompt(reportIssuePrompt, reportIssueHandler)
@@ -252,20 +278,22 @@ func RegisterTools(s *mcp.Server, cfg *ToolsetConfig) {
 	registry := toolsets.NewToolsetRegistry()
 	registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
 
-	enabledTools := registry.GetEnabledToolsWithExclusions(cfg.EnabledToolsets, cfg.ReadOnly, cfg.DisabledToolsets)
+	enabledTools := cfg.enabledTools(registry)
 
-	registered := make(map[string]bool, len(enabledTools))
 	for _, toolDef := range enabledTools {
 		toolDef.Register(s)
-		registered[toolDef.Tool.Name] = true
 	}
 
 	if len(cfg.DisabledToolsets) > 0 {
 		// Ignore tools removed by disabling their own toolset; warn only when
 		// exclusions also remove tools from other enabled toolsets.
+		blocked := make(map[string]bool)
+		for _, tool := range registry.GetEnabledTools(cfg.DisabledToolsets, false) {
+			blocked[tool.Tool.Name] = true
+		}
 		var removedTools []string
 		for _, tool := range registry.GetEnabledTools(withoutToolsets(cfg.EnabledToolsets, cfg.DisabledToolsets), cfg.ReadOnly) {
-			if !registered[tool.Tool.Name] {
+			if blocked[tool.Tool.Name] {
 				removedTools = append(removedTools, tool.Tool.Name)
 			}
 		}
@@ -279,11 +307,33 @@ func RegisterTools(s *mcp.Server, cfg *ToolsetConfig) {
 		}
 	}
 
+	if cfg.MinimumAccess {
+		var removedTools []string
+		removedScopes := make(map[string][]string)
+		for _, tool := range registry.GetEnabledToolsWithExclusions(cfg.EnabledToolsets, cfg.ReadOnly, cfg.DisabledToolsets) {
+			if !tool.IsMinimumAccess() {
+				removedTools = append(removedTools, tool.Tool.Name)
+				removedScopes[tool.Tool.Name] = tool.RequiredScopes
+			}
+		}
+		if len(removedTools) > 0 {
+			slices.Sort(removedTools)
+			log.Warn().
+				Strs("enabled_toolsets", cfg.EnabledToolsets).
+				Bool("minimum_access", true).
+				Bool("read_only", cfg.ReadOnly).
+				Strs("removed_tools", removedTools).
+				Interface("removed_tool_scopes", removedScopes).
+				Msg("Minimum access removed tools requiring additional scopes or write access; exclusions take precedence")
+		}
+	}
+
 	scopes := (toolsets.Toolset{Tools: enabledTools}).GetRequiredScopes()
 
 	log.Info().
 		Strs("enabled_toolsets", cfg.EnabledToolsets).
 		Bool("read_only", cfg.ReadOnly).
+		Bool("minimum_access", cfg.MinimumAccess).
 		Int("tool_count", len(enabledTools)).
 		Strs("required_scopes", scopes).
 		Msg("Registered tools from toolsets")

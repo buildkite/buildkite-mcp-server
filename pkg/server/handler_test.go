@@ -142,7 +142,7 @@ func TestNewPerRequestServerFactory_DisabledToolsetsCannotBeReenabled(t *testing
 		{name: "retries disabled", toolsetsHeader: "builds,logs", disabled: toolsets.ToolsetRetries, absent: []string{"get_build", "tail_logs", "retry_job", "retry_failed_jobs"}, present: "create_build"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false, tt.disabled)
+			factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false, WithDisabledToolsets(tt.disabled))
 			req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
 			require.NoError(t, err)
 			req.Header.Set(HeaderToolsets, tt.toolsetsHeader)
@@ -154,6 +154,27 @@ func TestNewPerRequestServerFactory_DisabledToolsetsCannotBeReenabled(t *testing
 			if tt.present != "" {
 				require.Contains(t, toolNames, tt.present)
 			}
+		})
+	}
+}
+
+func TestNewPerRequestServerFactory_MinimumAccessCannotBeRelaxed(t *testing.T) {
+	factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"user"}, false, WithMinimumAccess(true))
+	for _, tt := range []struct {
+		name     string
+		header   string
+		expected []string
+	}{
+		{name: "defaults", expected: []string{"current_user", "access_token"}},
+		{name: "overlapping toolsets", header: "retries,logs", expected: []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job"}},
+		{name: "forbidden toolset", header: "cluster_secrets"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
+			require.NoError(t, err)
+			req.Header.Set(HeaderToolsets, tt.header)
+			req.Header.Set(HeaderReadOnly, "false")
+			require.ElementsMatch(t, tt.expected, listToolNames(t, factory(req)))
 		})
 	}
 }

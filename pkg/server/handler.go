@@ -25,12 +25,13 @@ const (
 // It reads X-Buildkite-Toolsets and X-Buildkite-Read-Only headers from the request,
 // falling back to the provided defaults when headers are absent.
 // Disabled toolsets exclude all their members, even through other toolsets.
+// Additional options, including minimum access, cannot be overridden by headers.
 func NewPerRequestServerFactory(
 	version string,
 	deps buildkite.ToolDependencies,
 	defaultToolsets []string,
 	defaultReadOnly bool,
-	disabledToolsets ...string,
+	opts ...ToolsetOption,
 ) func(*http.Request) *mcp.Server {
 	return func(r *http.Request) *mcp.Server {
 		enabledToolsets := defaultToolsets
@@ -48,13 +49,12 @@ func NewPerRequestServerFactory(
 		if header := r.Header.Get(HeaderReadOnly); header != "" {
 			readOnly = strings.EqualFold(strings.TrimSpace(header), "true")
 		}
-		enabledToolsets = withoutToolsets(enabledToolsets, disabledToolsets)
 
-		return NewMCPServer(version, deps,
+		options := []ToolsetOption{
 			WithToolsets(enabledToolsets...),
-			WithDisabledToolsets(disabledToolsets...),
 			WithReadOnly(readOnly),
-		)
+		}
+		return NewMCPServer(version, deps, append(options, opts...)...)
 	}
 }
 
