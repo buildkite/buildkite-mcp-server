@@ -58,6 +58,15 @@ Every run records what it used — mode, `mode_params`, the harness (agent CLI) 
 * the `eval-final` / `eval-metrics` / `eval-tools` annotation titles, e.g. `mode: cli · claude 2.1.300 (Claude Code) · bk 3.59.1`
 * Datadog tags `mode:`, `harness_version:`, `bk_cli_version:`
 
+## API fan-out
+
+Each run also records every Buildkite API request the agent caused, so you can see how many requests sit behind each MCP tool call and each bk command ("fan-out"). Not available for `cursor-cloud` (both would run inside Cursor's VM).
+
+* **MCP server**: the server's `--request-log <file>` flag (env `BUILDKITE_REQUEST_LOG`) appends one JSON line per API request — method, URL, status, duration, bytes, and the MCP tool name + tool call id that made it (no headers or bodies). `mcp.json` / `mcp_in_ci.json` pass `BUILDKITE_REQUEST_LOG` through (`${BUILDKITE_REQUEST_LOG:-}`, so an unset value just means no log); the cursor config generators re-spell it as `${env:BUILDKITE_REQUEST_LOG}`.
+* **bk CLI**: `scripts/bk-request-log-shim.mjs`, installed as a `bk` wrapper first on the agent's PATH (`~/.eval-bk-cli/<run>/shim/bk`, needs node). For each bk run it starts a local proxy and points bk at it via bk's own `BUILDKITE_REST_API_ENDPOINT` / `BUILDKITE_GRAPHQL_ENDPOINT` settings, forwarding every request unchanged to the real API and logging it (GraphQL by operation name) plus one line per bk run. stdin/stdout/stderr and the exit code pass through untouched. In `mcp` mode bk is wrapped too when it is on PATH, so an MCP run that shells out to bk still shows up. Not seen: requests bk sends to absolute URLs taken from API responses (e.g. following a redirect).
+* Both write to `runs/<id>/<run>.api-requests.jsonl`. `scripts/api-fanout.sh` summarizes it per MCP tool (calls from the transcript, API requests, avg / max per call, top endpoints with ids normalized) and per bk command (runs, requests, avg / max per run, top endpoints).
+* The summary lands in: the `eval-fanout-<id>` annotation (and `<run>.api-fanout.md`), `api_fanout` in `<run>.metrics.json`, an "API requests (total)" row plus a per-tool / per-command table in the comparison report (an mcp run and a cli run line up side by side), Datadog gauges `api_requests.total` / `.mcp` / `.bk_cli`, and klaren's prompt (with the raw log path) so its review can quantify waste.
+
 `bk-tool-audit-v2.sh metrics` also reports `tool_calls_bk_cli` (shell tool calls that ran bk) and `bk_cli_commands_by_name` (e.g. `2 bk build view`) for every agent and mode — an MCP run that shells out to bk shows up too. Detection is a heuristic: bk must be in command position (start of the command, or after `;` `&&` `|` `(` `$(` etc.).
 
 ## Permission posture
@@ -183,6 +192,8 @@ All new code are mostly in `evals/` folder
     * The mcp config used when `babystand.sh` is running in ci
   * mcp_none.json
     * The empty mcp config used by `mode: cli` entries (see "Modes" above)
+  * api-fanout.sh / bk-request-log-shim.mjs
+    * Per-run API request log summary, and the logging bk wrapper (see "API fan-out" above)
   * mcp.json
     * The mcp config used when `babystand.sh` is running locally
   * mcp_cursor_cloud.json

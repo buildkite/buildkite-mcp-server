@@ -149,6 +149,7 @@ metrics_table() {
           r("Cache read";          $B.tokens.cache_read;     $C.tokens.cache_read),
           r("Tool calls (total)";  $B.tool_calls_total;      $C.tool_calls_total),
           r("Shell calls running bk"; $B.tool_calls_bk_cli;  $C.tool_calls_bk_cli),
+          r("API requests (total)"; $B.api_fanout.total_requests?; $C.api_fanout.total_requests?),
           r("Assistant responses"; $B.assistant_responses;   $C.assistant_responses),
           r("User messages";       $B.user_messages;         $C.user_messages),
           r("Duration (min)";      $B.duration_min;          $C.duration_min),
@@ -214,6 +215,31 @@ bk_cli_table() {
            + ($names | map(. as $n
                | (($B[$n]) // 0) as $bv | (($C[$n]) // 0) as $cv
                | "| `\($n)` | \($bv) | \($cv) | \(if ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) |")))
+          | .[]
+        end'
+}
+
+# fanout_table BASE_JSON CUR_JSON  -> Buildkite API requests per MCP tool and
+# per bk command (metrics.json's api_fanout), base vs target. Rows are keyed
+# "mcp <tool>" / "<bk command>" so a cli run and an mcp run line up side by
+# side (each side just shows "–" for the other's rows).
+fanout_table() {
+    jq -rn --slurpfile b "$1" --slurpfile c "$2" '
+        def rows(f): ((f // {}) as $f
+          | (($f.mcp.tools // []) | map({key: "mcp \(.tool)", value: {calls: .calls, requests: .requests}}))
+          + (($f.bk_cli.commands // []) | map({key: .command, value: {calls: .invocations, requests: .requests}}))
+          | from_entries);
+        def cell(x): if x == null then "–" else "\(x)" end;
+        ($b[0].api_fanout // null) as $BF | ($c[0].api_fanout // null) as $CF |
+        if $BF == null and $CF == null then "_No API fan-out recorded in either run._"
+        else
+          rows($BF) as $B | rows($CF) as $C |
+          (($B | keys) + ($C | keys) | unique) as $names |
+          (["| Tool / bk command | Base calls | Base API requests | Target calls | Target API requests | Δ requests |",
+            "|---|---:|---:|---:|---:|---:|"]
+           + ($names | map(. as $n
+               | ($B[$n].requests // 0) as $bv | ($C[$n].requests // 0) as $cv
+               | "| `\($n)` | \(cell($B[$n].calls)) | \(cell($B[$n].requests)) | \(cell($C[$n].calls)) | \(cell($C[$n].requests)) | \(if ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) |")))
           | .[]
         end'
 }
@@ -360,6 +386,9 @@ main() {
             echo; echo "</details>"
             echo; echo "<details><summary>bk CLI command counts</summary>"; echo
             bk_cli_table "$BASE_METRICS" "$TGT_METRICS"
+            echo; echo "</details>"
+            echo; echo "<details><summary>API fan-out (Buildkite API requests per tool / bk command)</summary>"; echo
+            fanout_table "$BASE_METRICS" "$TGT_METRICS"
             echo; echo "</details>"
         else
             echo "_Metrics unavailable (missing base or target metrics)._"

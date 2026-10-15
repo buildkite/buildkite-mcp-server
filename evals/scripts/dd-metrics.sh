@@ -54,6 +54,9 @@
 #   <prefix>.tool_calls.total
 #   <prefix>.tool_calls.buildkite_mcp   calls with the mcp__ prefix
 #   <prefix>.tool_calls.bk_cli          shell tool calls that ran the bk CLI
+#   <prefix>.api_requests.total         Buildkite API requests (fan-out; from
+#   <prefix>.api_requests.mcp           the run's request log — omitted when
+#   <prefix>.api_requests.bk_cli        no log was collected, e.g. cursor-cloud)
 #   <prefix>.tokens.input / .output / .cache_read / .cache_write
 #
 set -euo pipefail
@@ -141,6 +144,9 @@ PAYLOAD="$(jq -n \
         gauge("tool_calls.total"; ($m.tool_calls_total // null); $tags),
         gauge("tool_calls.buildkite_mcp"; ($m.tool_calls_mcp // null); $tags),
         gauge("tool_calls.bk_cli"; ($m.tool_calls_bk_cli // null); $tags),
+        gauge("api_requests.total"; ($m.api_fanout.total_requests? // null); $tags),
+        gauge("api_requests.mcp"; ($m.api_fanout.mcp.requests? // null); $tags),
+        gauge("api_requests.bk_cli"; ($m.api_fanout.bk_cli.requests? // null); $tags),
         gauge("tokens.input"; ($tok.input // null); $tags),
         gauge("tokens.output"; ($tok.output // null); $tags),
         gauge("tokens.cache_read"; ($tok.cache_read // null); $tags),

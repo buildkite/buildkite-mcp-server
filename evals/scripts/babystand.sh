@@ -283,6 +283,28 @@ prepare_bk_cli() {
     echo "*** [$ENTRY_ID] bk CLI: $BK_CLI_BIN (version $BK_CLI_VERSION, org ${BK_CLI_ORG:-none})"
 }
 
+# install_bk_shim <shim_dir> <real_bk> <request_log>  -- write a `bk` wrapper
+# into <shim_dir> (put first on the agent's PATH) that runs the real bk through
+# bk-request-log-shim.mjs, which logs each Buildkite API request bk makes to
+# <request_log>. bk's output and exit code are passed through unchanged.
+# Needs node; returns non-zero (caller warns, bk runs unlogged) without it.
+install_bk_shim() {
+    local dir="$1" real="$2" log="$3" node_bin
+    node_bin="$(command -v node || true)"
+    if [[ -z "$node_bin" ]]; then
+        echo "WARNING: [$ENTRY_ID] node not found; bk API requests will not be logged." >&2
+        return 1
+    fi
+    mkdir -p "$dir"
+    {
+        echo '#!/usr/bin/env bash'
+        echo '# Eval harness wrapper: runs the real bk and logs its Buildkite API requests.'
+        printf 'BK_SHIM_REAL_BK=%q BK_SHIM_REQUEST_LOG=%q exec %q %q "$@"\n' \
+            "$real" "$log" "$node_bin" "$SCRIPT_DIR/bk-request-log-shim.mjs"
+    } > "$dir/bk"
+    chmod +x "$dir/bk"
+}
+
 # run_agent <agent> <rendered_prompt_file> <model> <log_file> -- dispatch to
 # the per-agent runner. Every runner shares one contract: stream the run to the
 # build log (via tee) and set the caller's SESSION_ID / TRANSCRIPT /
@@ -405,6 +427,7 @@ run_cursor() {
         jq --arg cwd "$PWD" \
             '.mcpServers |= with_entries(
                .value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}"
+               | .value.env.BUILDKITE_REQUEST_LOG = "${env:BUILDKITE_REQUEST_LOG}"
                | .value.command |= (if startswith("./") then $cwd + ltrimstr(".") else . end))' \
             "$mcp_src" > .cursor/mcp.json
         # Diff hygiene, not a security control (the file holds no secret):
@@ -623,6 +646,23 @@ run_entry() {
         # hence MCP_SOURCE_SHA alongside it).
         MCP_SERVER_VERSION="$("$MCP_SERVER_BIN" --version 2>/dev/null | head -n1 || true)"
     fi
+    # API request log (fan-out): one JSON line per Buildkite API request, from
+    # the MCP server (--request-log via BUILDKITE_REQUEST_LOG in the MCP
+    # configs; tagged with the tool call) and from bk (a logging wrapper first
+    # on PATH; tagged with the bk command). In mcp mode bk is wrapped too when
+    # it is on PATH, so an MCP run that shells out to bk is still counted.
+    # cursor-cloud runs in Cursor's VM, where neither log can be collected.
+    local REQUEST_LOG="" BK_SHIM_DIR=""
+    if [[ "$AGENT" != "cursor-cloud" ]]; then
+        REQUEST_LOG="$PREFIX.api-requests.jsonl"
+        : > "$REQUEST_LOG"
+        local BK_REAL="$BK_CLI_BIN"
+        [[ "$MODE" == "mcp" ]] && BK_REAL="$(command -v bk || true)"
+        if [[ -n "$BK_REAL" ]]; then
+            BK_SHIM_DIR="$HOME/.eval-bk-cli/$RUN_KEY/shim"
+            install_bk_shim "$BK_SHIM_DIR" "$BK_REAL" "$REQUEST_LOG" || BK_SHIM_DIR=""
+        fi
+    fi
     local HARNESS_VERSION; HARNESS_VERSION="$(harness_version "$AGENT")"
     # One record of what this run used — written to the bundle as
     # <run>.run-info.json, merged into <run>.metrics.json (so the metrics
@@ -634,7 +674,9 @@ run_entry() {
         --arg agent "$AGENT" --arg harness "$HARNESS_VERSION" --arg model "${MODEL:-default}" \
         --arg bk_bin "$BK_CLI_BIN" --arg bk_ver "$BK_CLI_VERSION" --arg bk_org "$BK_CLI_ORG" \
         --arg mcp_req "$MCP_VERSION" --arg mcp_ver "$MCP_SERVER_VERSION" --arg mcp_sha "$MCP_SOURCE_SHA" \
+        --arg req_log "$REQUEST_LOG" --arg bk_shim "$BK_SHIM_DIR" \
         '{mode: $mode, mode_params: $params,
+          api_request_log: {mcp_server: ($req_log != "" and $mode == "mcp"), bk_cli: ($bk_shim != "")},
           harness: {agent: $agent, version: $harness, model: $model},
           bk_cli: (if $mode == "cli" then
                      {version: $bk_ver, path: $bk_bin, download_url: ($params.download_url // null),
@@ -731,8 +773,11 @@ run_entry() {
         AGENT_PATH="$(dirname "$BK_CLI_BIN"):$PATH"
         AGENT_ORG="$BK_CLI_ORG"
     fi
+    # The logging bk wrapper goes in front of the real bk.
+    [[ -n "$BK_SHIM_DIR" ]] && AGENT_PATH="$BK_SHIM_DIR:$AGENT_PATH"
     if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" EVAL_MODE="$MODE" PATH="$AGENT_PATH" \
             BUILDKITE_ORGANIZATION_SLUG="$AGENT_ORG" BK_TELEMETRY=false \
+            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" \
             run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
@@ -761,6 +806,26 @@ run_entry() {
         jq -n --argjson ri "$RUN_INFO" '{run_info: $ri}' > "$MERGED_METRICS"
     fi
     mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
+
+    # --- API fan-out (requests per MCP tool call / per bk command) ----------
+    # From the request log; merged into metrics.json as api_fanout (so the
+    # comparison and Datadog see it) and rendered as markdown for the
+    # eval-fanout annotation and klaren.
+    local FANOUT_JSON="" FANOUT_MD=""
+    if [[ -n "$REQUEST_LOG" ]]; then
+        echo "--- :satellite_antenna: [$ENTRY_ID] API fan-out"
+        FANOUT_JSON="$(mktemp)"; FANOUT_MD="$(mktemp)"
+        if "$SCRIPT_DIR/api-fanout.sh" json "$REQUEST_LOG" "$AUDIT_METRICS_FILE" > "$FANOUT_JSON" \
+                && "$SCRIPT_DIR/api-fanout.sh" markdown "$FANOUT_JSON" > "$FANOUT_MD"; then
+            cat "$FANOUT_MD"
+            MERGED_METRICS="$(mktemp)"
+            jq --slurpfile f "$FANOUT_JSON" '. + {api_fanout: $f[0]}' "$AUDIT_METRICS_FILE" > "$MERGED_METRICS" \
+                && mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
+        else
+            echo "WARNING: [$ENTRY_ID] API fan-out summary failed (request log: $REQUEST_LOG)" >&2
+            FANOUT_JSON="" FANOUT_MD=""
+        fi
+    fi
 
     # --- Goal outcome ---------------------------------------------------------
     # Scenario-shaped: entries whose setup pushed a scenario branch
@@ -841,6 +906,12 @@ run_entry() {
         else
             echo "Run context: the agent reached Buildkite through the Buildkite MCP server (mode: mcp)."
         fi
+        if [[ -s "$FANOUT_MD" ]]; then
+            echo
+            echo "Buildkite API requests behind each tool call / bk command (fan-out). Use it to quantify waste. The raw request log, one JSON line per API request tagged with the tool call or bk command that made it, is: $REQUEST_LOG"
+            echo
+            cat "$FANOUT_MD"
+        fi
     } > "$KLAREN_PROMPT_FILE"
     # klaren reads the transcript and inspects the repo; it needs read/search
     # tools. Same permission posture as the eval run above: CI bypasses via
@@ -879,6 +950,7 @@ run_entry() {
     [[ -s "$KLAREN_RESULT_FILE" ]] && cp "$KLAREN_RESULT_FILE" "$PREFIX.klaren.md"         || : > "$PREFIX.klaren.md"
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
     jq . <<<"$RUN_INFO" > "$PREFIX.run-info.json"
+    [[ -s "$FANOUT_MD" ]] && cp "$FANOUT_MD" "$PREFIX.api-fanout.md"
     echo "*** [$ENTRY_ID] run bundle: $PREFIX.*"
 
     # --- CI: upload the bundle as build artifacts (dual store) + annotate ---
@@ -893,6 +965,10 @@ run_entry() {
             "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED} · ${RUN_LABEL}" "success"
         annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics (${RUN_LABEL})" "$PREFIX.metrics.json"
         annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls (${RUN_LABEL})" "$PREFIX.tools.txt"
+        if [[ -s "$PREFIX.api-fanout.md" ]]; then
+            annotate_markdown "eval-fanout-$ENTRY_ID" ":satellite_antenna: [$ENTRY_ID] Eval — API fan-out" \
+                "$PREFIX.api-fanout.md" "$(jq -r '"\(.total_requests) API requests"' "$FANOUT_JSON") · ${RUN_LABEL}"
+        fi
         annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
             "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
     fi
