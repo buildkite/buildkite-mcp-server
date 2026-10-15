@@ -17,6 +17,9 @@ FROM ubuntu:22.04
 ARG NODE_VERSION="24"
 ARG GITHUB_CLI_VERSION
 ARG YQ_VERSION="v4.47.1"
+# The Buildkite CLI (bk) that `mode: cli` entries use when they set no
+# mode_params.download_url.
+ARG BK_CLI_VERSION="3.59.1"
 
 # Install system dependencies.
 RUN apt-get update && apt-get install -y \
@@ -25,6 +28,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     jq \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js.
@@ -41,6 +45,11 @@ RUN curl -fsSL https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/y
 # Install the GitHub CLI.
 RUN curl -fsSL https://github.com/cli/cli/releases/download/v${GITHUB_CLI_VERSION}/gh_${GITHUB_CLI_VERSION}_linux_amd64.tar.gz | tar -xz -C /tmp
 RUN cp /tmp/gh_${GITHUB_CLI_VERSION}_linux_amd64/bin/gh /usr/local/bin/
+
+# Install the Buildkite CLI (bk), pinned like the tools above.
+RUN curl -fsSL https://github.com/buildkite/cli/releases/download/v${BK_CLI_VERSION}/bk_${BK_CLI_VERSION}_linux_amd64.tar.gz | tar -xz -C /tmp \
+    && cp /tmp/bk_${BK_CLI_VERSION}_linux_amd64/bk /usr/local/bin/bk \
+    && bk --version
 
 # Install the Buildkite MCP server, built from source in the mcp-builder stage.
 COPY --from=mcp-builder /out/buildkite-mcp-server /usr/local/bin/buildkite-mcp-server
@@ -61,6 +70,7 @@ COPY evals/prompts /workspace/prompts
 COPY evals/package*.json /workspace/
 COPY evals/tsconfig.json /workspace/
 COPY evals/mcp_in_ci.json /workspace/
+COPY evals/mcp_none.json /workspace/
 COPY evals/mcp_cursor_cloud.json /workspace/
 COPY evals/evals.yaml /workspace/
 

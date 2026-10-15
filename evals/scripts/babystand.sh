@@ -116,6 +116,19 @@ else
 fi
 cd "$WORKDIR"
 
+# The MCP server binary mcp-mode entries talk to, and the commit it was built
+# from — recorded per entry in <run>.run-info.json. CI builds it into the image
+# from the commit under review (MCP_SRC_SHA=${BUILDKITE_COMMIT}); locally it is
+# the caller's `make build` of the harness checkout (uncommitted changes
+# included, so the SHA there is a hint, not a guarantee).
+if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
+  MCP_SERVER_BIN="buildkite-mcp-server"
+  MCP_SOURCE_SHA="${MCP_SRC_SHA:-}"
+else
+  MCP_SERVER_BIN="$WORKDIR/buildkite-mcp-server"
+  MCP_SOURCE_SHA="$(git -C "$HARNESS_ROOT" rev-parse HEAD 2>/dev/null || true)"
+fi
+
 # The org/pipeline the agent watches for the scenario branches' builds. This is
 # the EVAL repo's pipeline (see EVAL_REPO_SLUG above), NOT the ambient
 # BUILDKITE_ORGANIZATION_SLUG/BUILDKITE_PIPELINE_SLUG of the build running this
@@ -189,6 +202,87 @@ annotate_codeblock() {
         || echo "WARNING: failed to annotate '$context'" >&2
 }
 
+# harness_version <agent>  -- the agent harness's own version string, as it
+# reports it (e.g. "2.1.300 (Claude Code)"); "unknown" when it can't be read.
+# cursor-cloud runs Cursor's hosted harness, which reports no version to us.
+harness_version() {
+    local out=""
+    case "$1" in
+        claude)       out="$(claude --version 2>/dev/null | head -n1 || true)" ;;
+        cursor)       out="$(cursor-agent --version 2>/dev/null | head -n1 || true)" ;;
+        cursor-cloud) out="hosted (not reported)" ;;
+    esac
+    printf '%s' "${out:-unknown}"
+}
+
+# prepare_bk_cli <install_dir> <download_url> <org_slug> <token>  -- make the
+# Buildkite CLI (bk) ready for a `mode: cli` entry and set the caller's
+# BK_CLI_BIN / BK_CLI_VERSION / BK_CLI_ORG (dynamic scoping, like the runners).
+#   - download_url set: fetch it into <install_dir> — a .tar.gz/.tgz or .zip
+#     release archive (the bk binary is found inside it), or a bare binary.
+#   - download_url empty: use the bk already on PATH (CI: the version pinned
+#     in evals/Dockerfile).
+#   - org: the entry's org_slug, else the token's only organization (GET
+#     /v2/organizations), else none — the agent then has to name the org.
+# Returns non-zero (the entry fails) when no runnable bk can be produced.
+prepare_bk_cli() {
+    local dir="$1" url="$2" org="$3" token="$4"
+    BK_CLI_BIN="" BK_CLI_VERSION="" BK_CLI_ORG=""
+    if [[ -n "$url" ]]; then
+        if [[ "$url" != https://* ]]; then
+            echo "ERROR: [$ENTRY_ID] mode_params.download_url must be an https:// URL: $url" >&2
+            return 1
+        fi
+        rm -rf "$dir"
+        mkdir -p "$dir/bin" "$dir/extract"
+        echo "*** [$ENTRY_ID] downloading bk CLI: $url"
+        if ! curl -fsSL --retry 3 --max-time 300 -o "$dir/download" "$url"; then
+            echo "ERROR: [$ENTRY_ID] failed to download bk CLI from $url" >&2
+            return 1
+        fi
+        case "${url%%\?*}" in
+            *.tar.gz|*.tgz) tar -xzf "$dir/download" -C "$dir/extract" || return 1 ;;
+            *.zip)
+                command -v unzip >/dev/null || { echo "ERROR: [$ENTRY_ID] unzip is required for $url" >&2; return 1; }
+                unzip -q "$dir/download" -d "$dir/extract" || return 1 ;;
+            *) cp "$dir/download" "$dir/extract/bk" ;;
+        esac
+        local found; found="$(find "$dir/extract" -type f -name bk | head -n1)"
+        if [[ -z "$found" ]]; then
+            echo "ERROR: [$ENTRY_ID] no 'bk' binary found in $url" >&2
+            return 1
+        fi
+        mv "$found" "$dir/bin/bk"
+        chmod +x "$dir/bin/bk"
+        BK_CLI_BIN="$dir/bin/bk"
+    else
+        BK_CLI_BIN="$(command -v bk || true)"
+        if [[ -z "$BK_CLI_BIN" ]]; then
+            echo "ERROR: [$ENTRY_ID] mode 'cli' needs mode_params.download_url, or a bk binary on PATH" >&2
+            return 1
+        fi
+    fi
+    # `bk --version` prints "bk version X" with no network update check
+    # (unlike `bk version`). Running it also proves the binary fits this
+    # platform — a linux tarball on a macOS run fails here, loudly.
+    local raw
+    if ! raw="$("$BK_CLI_BIN" --version 2>&1 | head -n1)" || [[ -z "$raw" ]]; then
+        echo "ERROR: [$ENTRY_ID] $BK_CLI_BIN --version failed: $raw" >&2
+        return 1
+    fi
+    BK_CLI_VERSION="${raw#bk version }"
+    BK_CLI_ORG="$org"
+    if [[ -z "$BK_CLI_ORG" ]]; then
+        BK_CLI_ORG="$(curl -fsS --max-time 30 -H "Authorization: Bearer $token" \
+            "https://api.buildkite.com/v2/organizations" 2>/dev/null \
+            | jq -r 'if type == "array" and length == 1 then .[0].slug else empty end' 2>/dev/null || true)"
+        if [[ -z "$BK_CLI_ORG" ]]; then
+            echo "WARNING: [$ENTRY_ID] could not work out the token's single organization; set mode_params.org_slug. bk runs with no default organization." >&2
+        fi
+    fi
+    echo "*** [$ENTRY_ID] bk CLI: $BK_CLI_BIN (version $BK_CLI_VERSION, org ${BK_CLI_ORG:-none})"
+}
+
 # run_agent <agent> <rendered_prompt_file> <model> <log_file> -- dispatch to
 # the per-agent runner. Every runner shares one contract: stream the run to the
 # build log (via tee) and set the caller's SESSION_ID / TRANSCRIPT /
@@ -220,10 +314,12 @@ run_claude() {
     )
     # Permission posture (see the block near the top): CI adds nothing —
     # claude.sh bypasses; local either bypasses (opt-in) or gets an allowlist
-    # that must include the MCP server's tools.
+    # that must include the MCP server's tools (cli mode: the bk CLI instead).
     if [[ "${RUN_IN_CI:-false}" != "true" ]]; then
         if [[ "$LOCAL_BYPASS_PERMISSION" == "true" ]]; then
             args+=(--permission-mode bypassPermissions)
+        elif [[ "${EVAL_MODE:-mcp}" == "cli" ]]; then
+            args+=(--allowedTools "Edit" "Bash(go:*)" "Bash(make:*)" "Bash(git:*)" "Bash(bk:*)")
         else
             args+=(--allowedTools "Edit" "Bash(go:*)" "Bash(make:*)" "Bash(git:*)" "mcp__${MCP_SERVER_NAME}")
         fi
@@ -243,7 +339,11 @@ run_claude() {
     else
         # Local execution: run claude directly against the harness mcp.json (cwd
         # is the eval-repo clone, so a relative path would not resolve).
-        if ! claude -p "$(cat "$prompt_file")" --mcp-config "$ROOT_DIR/mcp.json" "${args[@]}" | tee "$log"; then
+        # cli mode: an empty MCP config, made --strict so MCP servers from the
+        # caller's own Claude settings (e.g. a Buildkite one) can't leak in.
+        local mcp_args=(--mcp-config "$ROOT_DIR/mcp.json")
+        [[ "${EVAL_MODE:-mcp}" == "cli" ]] && mcp_args=(--mcp-config "$ROOT_DIR/mcp_none.json" --strict-mcp-config)
+        if ! claude -p "$(cat "$prompt_file")" "${mcp_args[@]}" "${args[@]}" | tee "$log"; then
             return 1
         fi
         SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_id' "$log" | head -n1)
@@ -298,12 +398,15 @@ run_cursor() {
             echo "ERROR: cursor-agent not found on PATH (install: curl -fsS https://cursor.com/install | bash)" >&2
             return 1
         }
+        # cli mode: no project MCP config at all (an empty mcp_none.json).
+        local mcp_src="$ROOT_DIR/mcp.json"
+        [[ "${EVAL_MODE:-mcp}" == "cli" ]] && mcp_src="$ROOT_DIR/mcp_none.json"
         mkdir -p .cursor
         jq --arg cwd "$PWD" \
             '.mcpServers |= with_entries(
                .value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}"
                | .value.command |= (if startswith("./") then $cwd + ltrimstr(".") else . end))' \
-            "$ROOT_DIR/mcp.json" > .cursor/mcp.json
+            "$mcp_src" > .cursor/mcp.json
         # Diff hygiene, not a security control (the file holds no secret):
         # keep the generated config off the scenario branch the agent commits
         # and pushes to (see cursor.sh for the full rationale). The clone is
@@ -372,8 +475,13 @@ run_cursor_cloud() {
 run_entry() {
     local entry="$1"
     local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE
+    local MODE MODE_PARAMS
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
     AGENT=$(jq -r '.agent // "claude"'        <<<"$entry")
+    # How the agent reaches Buildkite: 'mcp' (the MCP server under test) or
+    # 'cli' (the bk CLI, no MCP server). mode_params is a per-mode hash.
+    MODE=$(jq -r '.mode // "mcp"'             <<<"$entry")
+    MODE_PARAMS=$(jq -c '.mode_params // {}'  <<<"$entry")
     MODEL=$(jq -r '.model // ""'              <<<"$entry")
     # Model ids are per-agent namespaces (cursor rejects claude-* ids; see
     # `cursor-agent --list-models`), so the default is agent-aware.
@@ -434,7 +542,38 @@ run_entry() {
             return 0
             ;;
     esac
-    if [[ -n "$MCP_VERSION" && "$MCP_VERSION" != "source" ]]; then
+    # --- Mode (mcp | cli) + mode_params --------------------------------------
+    # Unknown modes / params are config mistakes: skip loudly, like a bad
+    # token_env, rather than silently running the wrong setup.
+    if [[ "$(jq -r 'type' <<<"$MODE_PARAMS")" != "object" ]]; then
+        echo "WARNING: entry '$ENTRY_ID' has mode_params that is not a hash; skipping." >&2
+        return 0
+    fi
+    local KNOWN_PARAMS UNKNOWN_PARAMS
+    case "$MODE" in
+        mcp) KNOWN_PARAMS='[]' ;;
+        cli)
+            KNOWN_PARAMS='["download_url","org_slug"]'
+            # cursor-cloud runs in Cursor's VM: the bk install below happens
+            # on this host and would never reach it.
+            if [[ "$AGENT" == "cursor-cloud" ]]; then
+                echo "WARNING: entry '$ENTRY_ID': mode 'cli' is not supported for agent 'cursor-cloud' yet; skipping." >&2
+                return 0
+            fi
+            ;;
+        *)
+            echo "WARNING: entry '$ENTRY_ID' has unknown mode '$MODE' (want mcp or cli); skipping." >&2
+            return 0
+            ;;
+    esac
+    UNKNOWN_PARAMS="$(jq -r --argjson known "$KNOWN_PARAMS" 'keys - $known | join(", ")' <<<"$MODE_PARAMS")"
+    if [[ -n "$UNKNOWN_PARAMS" ]]; then
+        echo "WARNING: entry '$ENTRY_ID' has unknown mode_params for mode '$MODE': $UNKNOWN_PARAMS; skipping." >&2
+        return 0
+    fi
+    if [[ "$MODE" == "cli" && -n "$MCP_VERSION" && "$MCP_VERSION" != "source" ]]; then
+        echo "NOTICE: entry '$ENTRY_ID' sets mcp_version '$MCP_VERSION', which mode 'cli' ignores (no MCP server)." >&2
+    elif [[ -n "$MCP_VERSION" && "$MCP_VERSION" != "source" ]]; then
         echo "NOTICE: entry '$ENTRY_ID' requests mcp_version '$MCP_VERSION', which is not yet wired into the image build (follow-up); running the in-image 'source' binary." >&2
     fi
 
@@ -463,6 +602,51 @@ run_entry() {
     local RUN_DIR="$RUNS_ROOT/$ENTRY_ID"
     mkdir -p "$RUN_DIR"
     local PREFIX="$RUN_DIR/$RUN_KEY"
+
+    # --- Mode setup + run info (versions) -----------------------------------
+    # cli: install/locate bk BEFORE scenario setup, so a bad download_url
+    # fails the entry before it pushes anything. The install dir sits outside
+    # the eval-repo clone so the agent can't commit the binary.
+    local BK_CLI_BIN="" BK_CLI_VERSION="" BK_CLI_ORG=""   # set by prepare_bk_cli
+    local MCP_SERVER_VERSION=""
+    if [[ "$MODE" == "cli" ]]; then
+        echo "--- :terminal: [$ENTRY_ID] bk CLI setup"
+        if ! prepare_bk_cli "$HOME/.eval-bk-cli/$RUN_KEY" \
+                "$(jq -r '.download_url // ""' <<<"$MODE_PARAMS")" \
+                "$(jq -r '.org_slug // ""' <<<"$MODE_PARAMS")" \
+                "$ENTRY_TOKEN"; then
+            echo "ERROR: [$ENTRY_ID] bk CLI setup failed; entry not run." >&2
+            return 1
+        fi
+    else
+        # kong's --version prints the build's version ("dev" for source builds,
+        # hence MCP_SOURCE_SHA alongside it).
+        MCP_SERVER_VERSION="$("$MCP_SERVER_BIN" --version 2>/dev/null | head -n1 || true)"
+    fi
+    local HARNESS_VERSION; HARNESS_VERSION="$(harness_version "$AGENT")"
+    # One record of what this run used — written to the bundle as
+    # <run>.run-info.json, merged into <run>.metrics.json (so the metrics
+    # annotation, the comparison and the artifacts all carry it), and
+    # summarized in the annotation titles.
+    local RUN_INFO
+    RUN_INFO="$(jq -n \
+        --arg mode "$MODE" --argjson params "$MODE_PARAMS" \
+        --arg agent "$AGENT" --arg harness "$HARNESS_VERSION" --arg model "${MODEL:-default}" \
+        --arg bk_bin "$BK_CLI_BIN" --arg bk_ver "$BK_CLI_VERSION" --arg bk_org "$BK_CLI_ORG" \
+        --arg mcp_req "$MCP_VERSION" --arg mcp_ver "$MCP_SERVER_VERSION" --arg mcp_sha "$MCP_SOURCE_SHA" \
+        '{mode: $mode, mode_params: $params,
+          harness: {agent: $agent, version: $harness, model: $model},
+          bk_cli: (if $mode == "cli" then
+                     {version: $bk_ver, path: $bk_bin, download_url: ($params.download_url // null),
+                      org_slug: (if $bk_org == "" then null else $bk_org end)}
+                   else null end),
+          mcp_server: (if $mode == "mcp" then
+                         {requested: $mcp_req, version: $mcp_ver,
+                          source_sha: (if $mcp_sha == "" then null else $mcp_sha end)}
+                       else null end)}')"
+    local RUN_LABEL="mode: $MODE · $AGENT $HARNESS_VERSION"
+    [[ "$MODE" == "cli" ]] && RUN_LABEL+=" · bk $BK_CLI_VERSION"
+    echo "*** [$ENTRY_ID] run info: $(jq -c . <<<"$RUN_INFO")"
 
     # --- Scenario setup -----------------------------------------------------
     # setup bash runs in the eval-repo clone (cwd); it may push branches, etc.
@@ -512,6 +696,23 @@ run_entry() {
     if [[ -n "${UNRESOLVED// }" ]]; then
         echo "WARNING: [$ENTRY_ID] prompt has unresolved placeholder(s): ${UNRESOLVED% }" >&2
     fi
+    # Per-mode environment note (prompts/modes/<mode>.md), appended to the
+    # user prompt for every agent. An MCP server announces itself through its
+    # tool list; a CLI does not, so cli mode tells the agent bk is there.
+    local MODE_NOTE="$ROOT_DIR/prompts/modes/$MODE.md"
+    if [[ -f "$MODE_NOTE" ]]; then
+        local MODE_VARS; MODE_VARS="$(mktemp)"
+        {
+            printf 'BK_CLI_VERSION=%s\n' "$BK_CLI_VERSION"
+            if [[ -n "$BK_CLI_ORG" ]]; then
+                printf 'BK_CLI_ORG_NOTE=Its default organization is `%s` (set through `BUILDKITE_ORGANIZATION_SLUG`).\n' "$BK_CLI_ORG"
+            else
+                printf 'BK_CLI_ORG_NOTE=No default organization is set.\n'
+            fi
+        } > "$MODE_VARS"
+        printf '\n\n' >> "$RENDERED"
+        render_prompt "$MODE_NOTE" "$MODE_VARS" >> "$RENDERED"
+    fi
     echo "--- :scroll: [$ENTRY_ID] rendered prompt"
     cat "$RENDERED"; echo
 
@@ -519,7 +720,20 @@ run_entry() {
     local LOG="/tmp/babystand-$RUN_KEY.log"
     local SESSION_ID="" TRANSCRIPT="" EVAL_RESULT_FILE=""   # set by the runner (dynamic scope)
     local EVAL_START; EVAL_START=$(date +%s)
-    if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
+    # Agent env per mode. mcp: as before (ambient org slug untouched). cli: the
+    # entry token reaches bk through BUILDKITE_API_TOKEN (bk reads it before
+    # any stored credential), the org slug is the entry's — never the ambient
+    # one, which in CI names the org HOSTING the eval — and bk telemetry is
+    # off so eval runs don't count as real CLI usage. EVAL_MODE tells the
+    # runners (and claude.sh / cursor.sh) to leave the MCP server out.
+    local AGENT_PATH="$PATH" AGENT_ORG="${BUILDKITE_ORGANIZATION_SLUG:-}"
+    if [[ "$MODE" == "cli" ]]; then
+        AGENT_PATH="$(dirname "$BK_CLI_BIN"):$PATH"
+        AGENT_ORG="$BK_CLI_ORG"
+    fi
+    if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" EVAL_MODE="$MODE" PATH="$AGENT_PATH" \
+            BUILDKITE_ORGANIZATION_SLUG="$AGENT_ORG" BK_TELEMETRY=false \
+            run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
     fi
@@ -538,6 +752,15 @@ run_entry() {
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE" || true
     echo "--- :bar_chart: [$ENTRY_ID] session metrics"
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE" || true
+    # Attach the run info (mode, harness / bk CLI / MCP server versions). An
+    # empty or broken metrics file still gets a record holding just run_info.
+    local MERGED_METRICS; MERGED_METRICS="$(mktemp)"
+    if jq -e 'type == "object"' "$AUDIT_METRICS_FILE" >/dev/null 2>&1; then
+        jq --argjson ri "$RUN_INFO" '. + {run_info: $ri}' "$AUDIT_METRICS_FILE" > "$MERGED_METRICS"
+    else
+        jq -n --argjson ri "$RUN_INFO" '{run_info: $ri}' > "$MERGED_METRICS"
+    fi
+    mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
 
     # --- Goal outcome ---------------------------------------------------------
     # Scenario-shaped: entries whose setup pushed a scenario branch
@@ -584,8 +807,14 @@ run_entry() {
         --arg goal     "$GOAL_ACHIEVED" \
         --arg duration "$EVAL_ELAPSED_SECS" \
         --argjson end_ts "$(date +%s)" \
+        --arg mode     "$MODE" \
+        --arg harness  "$HARNESS_VERSION" \
+        --arg bk_cli   "$BK_CLI_VERSION" \
+        --arg mcp_ver  "$MCP_SERVER_VERSION" \
         '{entry: $entry, prompt: $prompt, agent: $agent, model: $model,
-          goal: $goal, duration_seconds: $duration, end_ts: $end_ts}' \
+          goal: $goal, duration_seconds: $duration, end_ts: $end_ts,
+          mode: $mode, harness_version: $harness, bk_cli_version: $bk_cli,
+          mcp_server_version: $mcp_ver}' \
         > "$PREFIX.dd.json"; then
         echo "WARNING: [$ENTRY_ID] failed to write $PREFIX.dd.json; Datadog publish will skip this entry" >&2
     fi
@@ -606,6 +835,12 @@ run_entry() {
         cat "$ROOT_DIR/prompts/klaren.md"
         echo
         echo "The LLM session log file to analyze is: $TRANSCRIPT"
+        echo
+        if [[ "$MODE" == "cli" ]]; then
+            echo "Run context: the agent had NO Buildkite MCP server; it reached Buildkite through the Buildkite CLI \`bk\` (version $BK_CLI_VERSION) via Bash. Judge the bk commands, flags and output as the tools under review."
+        else
+            echo "Run context: the agent reached Buildkite through the Buildkite MCP server (mode: mcp)."
+        fi
     } > "$KLAREN_PROMPT_FILE"
     # klaren reads the transcript and inspects the repo; it needs read/search
     # tools. Same permission posture as the eval run above: CI bypasses via
@@ -643,6 +878,7 @@ run_entry() {
     [[ -s "$AUDIT_TOOLS_FILE"   ]] && cp "$AUDIT_TOOLS_FILE"   "$PREFIX.tools.txt"         || : > "$PREFIX.tools.txt"
     [[ -s "$KLAREN_RESULT_FILE" ]] && cp "$KLAREN_RESULT_FILE" "$PREFIX.klaren.md"         || : > "$PREFIX.klaren.md"
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
+    jq . <<<"$RUN_INFO" > "$PREFIX.run-info.json"
     echo "*** [$ENTRY_ID] run bundle: $PREFIX.*"
 
     # --- CI: upload the bundle as build artifacts (dual store) + annotate ---
@@ -654,9 +890,9 @@ run_entry() {
             || echo "WARNING: failed to upload run bundle for '$ENTRY_ID'" >&2
 
         annotate_markdown "eval-final-$ENTRY_ID"  ":robot_face: [$ENTRY_ID] Eval — final output" \
-            "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED}" "success"
-        annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics" "$PREFIX.metrics.json"
-        annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls" "$PREFIX.tools.txt"
+            "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED} · ${RUN_LABEL}" "success"
+        annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics (${RUN_LABEL})" "$PREFIX.metrics.json"
+        annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls (${RUN_LABEL})" "$PREFIX.tools.txt"
         annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
             "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
     fi

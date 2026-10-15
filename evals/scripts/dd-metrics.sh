@@ -30,6 +30,11 @@
 #   AGENT                   claude | cursor | cursor-cloud -> tag agent:
 #   MODEL                   model id ("default" if unset)  -> tag model:
 #   GOAL_ACHIEVED           true | false | unknown         -> tag goal:
+#   MODE                    mcp | cli (default mcp)        -> tag mode:
+#   HARNESS_VERSION         agent harness version, as reported (e.g.
+#                           "2.1.300 (Claude Code)")       -> tag harness_version:
+#                           (its first dotted version only; omitted if none)
+#   BK_CLI_VERSION          bk CLI version, cli mode only  -> tag bk_cli_version:
 #   EVAL_DURATION_SECONDS   agent wall-clock measured by run_entry
 #   METRICS_FILE            path to the metrics JSON. May be empty or hold
 #                           null fields (cursor runs emit no token usage);
@@ -48,6 +53,7 @@
 #                                       (wait_for_build / Bash sleep; claude only)
 #   <prefix>.tool_calls.total
 #   <prefix>.tool_calls.buildkite_mcp   calls with the mcp__ prefix
+#   <prefix>.tool_calls.bk_cli          shell tool calls that ran the bk CLI
 #   <prefix>.tokens.input / .output / .cache_read / .cache_write
 #
 set -euo pipefail
@@ -96,6 +102,9 @@ PAYLOAD="$(jq -n \
     --arg agent    "${AGENT:-unknown}" \
     --arg model    "${MODEL:-default}" \
     --arg goal     "${GOAL_ACHIEVED:-unknown}" \
+    --arg mode     "${MODE:-mcp}" \
+    --arg harness  "${HARNESS_VERSION:-}" \
+    --arg bk_cli   "${BK_CLI_VERSION:-}" \
     --arg duration "${EVAL_DURATION_SECONDS:-}" \
     --arg build    "${BUILDKITE_BUILD_NUMBER:-}" \
     --argjson now  "$TS" \
@@ -107,8 +116,15 @@ PAYLOAD="$(jq -n \
       else {metric: "\($prefix).\($name)", type: 3,
             points: [{timestamp: $now, value: ($v | tonumber)}], tags: $tags}
       end;
+    # Version tags carry only the dotted version ("2.1.300 (Claude Code)" ->
+    # "2.1.300"): Datadog tags must not hold spaces or parentheses.
+    def version_tag($name; $v):
+      ([$v | scan("[0-9]+(?:\\.[0-9]+)+")] | first) as $num
+      | if $num == null then [] else ["\($name):\($num)"] end;
     ([ "entry:\($entry)", "prompt:\($prompt)", "agent:\($agent)",
-       "model:\($model)", "goal:\($goal)" ]
+       "model:\($model)", "goal:\($goal)", "mode:\($mode)" ]
+     + version_tag("harness_version"; $harness)
+     + version_tag("bk_cli_version"; $bk_cli)
      + (if $build != "" then ["buildkite_build:\($build)"] else [] end)) as $tags
     | ($m.tokens // {}) as $tok
     # claude reports the cache-write split (5m/1h); cursor-cloud a single
@@ -124,6 +140,7 @@ PAYLOAD="$(jq -n \
         gauge("wait_seconds"; (($m.wait // {}) | .seconds // null); $tags),
         gauge("tool_calls.total"; ($m.tool_calls_total // null); $tags),
         gauge("tool_calls.buildkite_mcp"; ($m.tool_calls_mcp // null); $tags),
+        gauge("tool_calls.bk_cli"; ($m.tool_calls_bk_cli // null); $tags),
         gauge("tokens.input"; ($tok.input // null); $tags),
         gauge("tokens.output"; ($tok.output // null); $tags),
         gauge("tokens.cache_read"; ($tok.cache_read // null); $tags),

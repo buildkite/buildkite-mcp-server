@@ -38,6 +38,28 @@ A set of artifacts, and annotations in the Buildkite build showing:
 
 The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
 
+## Modes: MCP server or Buildkite CLI
+
+Each entry also picks HOW its agent reaches Buildkite (`mode:`, default `mcp`), with per-mode settings in `mode_params:` (a hash; unknown keys skip the entry loudly). Full field docs are at the top of `evals.yaml`.
+
+* `mcp` — the MCP server under test (see `mcp_version`). Takes no `mode_params`.
+* `cli` — the [Buildkite CLI](https://github.com/buildkite/cli) (`bk`) and NO MCP server, so the same scenario can be compared across the two. For `claude` and `cursor` agents (cursor-cloud is skipped: bk is installed on this host, not in Cursor's VM).
+  * `mode_params.download_url` — an https release archive (`.tar.gz`/`.tgz`/`.zip`) or bare binary. It is fetched into `~/.eval-bk-cli/<run>/bin/` (outside the eval-repo clone) and put first on the agent's PATH. Without it, the `bk` already on PATH is used — in CI that is `BK_CLI_VERSION` pinned in `evals/Dockerfile`. `bk --version` must run, so a linux archive fails a local macOS run loudly.
+  * `mode_params.org_slug` — bk's default org (`BUILDKITE_ORGANIZATION_SLUG`). Default: the token's only org from `GET /v2/organizations`, else none. The ambient `BUILDKITE_ORGANIZATION_SLUG` is never passed through: in CI it names the org hosting the eval.
+  * The entry token (`token_env`) reaches bk as `BUILDKITE_API_TOKEN`, which bk reads before any stored credential. `BK_TELEMETRY=false`, so eval runs don't count as real CLI usage.
+  * The MCP config is `mcp_none.json` (empty). Locally, claude also gets `--strict-mcp-config`, so MCP servers from your own Claude settings don't leak in, and the restricted allowlist (`LOCAL_BYPASS_PERMISSION=false`) swaps the MCP tools for `Bash(bk:*)`.
+  * `prompts/modes/cli.md` is appended to the prompt: one line saying bk (with its version and default org) is installed and authenticated. An MCP server announces itself through its tool list; a CLI does not.
+  * klaren runs as normal on the transcript, with one line telling it the run used bk, not MCP.
+
+Every run records what it used — mode, `mode_params`, the harness (agent CLI) version, and the bk CLI version (cli) or MCP server version + source SHA (mcp):
+
+* `runs/<id>/<run>.run-info.json` (bundle + build artifact)
+* `run_info` inside `<run>.metrics.json`, so it shows in the `eval-metrics-<id>` annotation, and the comparison report gets a "Run setup" table (base vs target, `same`/`changed`)
+* the `eval-final` / `eval-metrics` / `eval-tools` annotation titles, e.g. `mode: cli · claude 2.1.300 (Claude Code) · bk 3.59.1`
+* Datadog tags `mode:`, `harness_version:`, `bk_cli_version:`
+
+`bk-tool-audit-v2.sh metrics` also reports `tool_calls_bk_cli` (shell tool calls that ran bk) and `bk_cli_commands_by_name` (e.g. `2 bk build view`) for every agent and mode — an MCP run that shells out to bk shows up too. Detection is a heuristic: bk must be in command position (start of the command, or after `;` `&&` `|` `(` `$(` etc.).
+
 ## Permission posture
 
 In CI the LLM agent runs with `--permission-mode bypassPermissions` (claude) / `--force --approve-mcps` (cursor) and NO tool allowlist. (cursor-cloud has no posture to pick — the agent runs unrestricted inside Cursor's own VM sandbox, never on our host; see "Supported agents".) This is deliberate: real users rarely restrict tools, so tool CHOICE is part of what the eval measures — an agent that reaches for `curl` against the Buildkite API instead of the MCP tools is signal that the tools aren't compelling. Check the `eval-tools` annotation on each build to see what was actually called.
@@ -159,6 +181,8 @@ All new code are mostly in `evals/` folder
     * Given an buildkite mcp version, build that buildkite mcp version into a docker image (not implemented yet, currently it just builds the buildkite mcp based on current code
   * mcp_in_ci.json
     * The mcp config used when `babystand.sh` is running in ci
+  * mcp_none.json
+    * The empty mcp config used by `mode: cli` entries (see "Modes" above)
   * mcp.json
     * The mcp config used when `babystand.sh` is running locally
   * mcp_cursor_cloud.json

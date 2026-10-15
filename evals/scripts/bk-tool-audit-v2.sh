@@ -13,7 +13,7 @@
 #   ./bk-tool-audit.sh <session.jsonl>       # a specific transcript
 #   ./bk-tool-audit.sh list                  # list this project's sessions (newest first)
 #   ./bk-tool-audit.sh diff <a.jsonl> <b.jsonl>   # diff tool/param calls between two sessions
-#   ./bk-tool-audit.sh metrics [session.jsonl]    # token totals, cost, tool counts, duration
+#   ./bk-tool-audit.sh metrics [session.jsonl]    # token totals, cost, tool counts, bk CLI counts, duration
 #
 # Options (before the positional args):
 #   --all        Include all tools, not just mcp__buildkite-mcp-server__*
@@ -167,6 +167,22 @@ CURSOR_CLOUD_CALLS_JQ='
          and (($a.toolName // $a.name // null) != null)
       then "mcp__\($a.server // $a.serverIdentifier // $a.providerIdentifier // "mcp")__\($a.toolName // $a.name)"
       else $n end;'
+# bk CLI usage (mode: cli entries — and any mcp run that shells out to bk).
+# bk_cli_invocations turns one shell command string into its bk invocations,
+# named by up to two subcommand words ("bk build view", "bk api", "bk").
+# Heuristic: bk must sit in command position — start of the string, or after
+# ; & | ( $( ` or a newline, optionally behind VAR=val / sudo / time / exec /
+# command / do / then / else and a path prefix (./bk, /usr/local/bin/bk) — so `echo bk` and
+# `grep bk` don't count. bk_cli_summary($per_call) takes one invocation list
+# per shell tool call and reports how many calls ran bk, plus a per-command
+# count list shaped like tool_calls_by_name.
+BK_CLI_JQ='
+  def bk_cli_invocations:
+    [ scan("(?:^|[;&|(`\\n]|\\$\\()\\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\\S*|sudo|time|exec|command|do|then|else)\\s+)*(?:[^\\s;&|()`]*/)?bk(?:\\s+([a-z][a-z-]*))?(?:\\s+([a-z][a-z-]*))?(?=\\s|$|[;&|)`])")
+      | "bk" + (map(select(. != null) | " " + .) | join("")) ];
+  def bk_cli_summary($per_call):
+    { tool_calls_bk_cli: ($per_call | map(select(length > 0)) | length),
+      bk_cli_commands_by_name: ($per_call | add // [] | group_by(.) | map("\(length) \(.[0])") | sort | reverse) };'
 extract() {
   local f="$1"
   if [[ "$AGENT" == "cursor-cloud" ]]; then
@@ -280,7 +296,7 @@ metrics() {
   # Anthropic pricing and does not model Cursor's.
   if [[ "$AGENT" == "cursor-cloud" ]]; then
     echo "# session: $f" >&2
-    jq -nr "$CURSOR_CLOUD_CALLS_JQ"'
+    jq -nr "$CURSOR_CLOUD_CALLS_JQ$BK_CLI_JQ"'
       [inputs | select(type=="object")] as $all
       | ($all | cloud_tool_events | dedupe_calls) as $tools
       | ($all | map(select(.type=="result")) | last | .data // {}) as $res
@@ -305,6 +321,7 @@ metrics() {
           wait: null,
           est_cost_usd: null
         }
+        + bk_cli_summary($tools | map((.args.command? // "") | if type == "string" then bk_cli_invocations else [] end))
     ' "$snap"
     return
   fi
@@ -319,10 +336,13 @@ metrics() {
     echo "# session: $f" >&2
     # Tool names use the same normalization as extract() (mcpToolCall ->
     # mcp__<server>__<tool>), so metrics and tool listings agree.
-    jq -nr "$CURSOR_TOOL_NAME_JQ"'
+    jq -nr "$CURSOR_TOOL_NAME_JQ$BK_CLI_JQ"'
       [inputs | select(type=="object")] as $all
       | ($all | cursor_calls
               | map((.tool_call | to_entries[0]) as $t | cursor_tool_name($t))) as $tools
+      | ($all | cursor_calls
+              | map(.tool_call | to_entries[0] | select(.key == "shellToolCall")
+                    | (.value.args.command // "") | if type == "string" then bk_cli_invocations else [] end)) as $bk
       | ($all | map(select(.type=="result")) | last) as $res
       | ($all | map(select(.type=="system" and .subtype=="init")) | first) as $init
       | {
@@ -341,6 +361,7 @@ metrics() {
           wait: null,
           est_cost_usd: null
         }
+        + bk_cli_summary($bk)
     ' "$snap"
     return
   fi
@@ -354,7 +375,7 @@ metrics() {
       c1h: ($c1h|tonumber), cread: ($cr|tonumber)}')"
 
   echo "# session: $f" >&2
-  jq -nr --argjson p "$prices" '
+  jq -nr --argjson p "$prices" "$BK_CLI_JQ"'
     def n: . // 0;
     def tsec: sub("\\.[0-9]+";"") | fromdateiso8601;
     [inputs] as $all
@@ -408,6 +429,7 @@ metrics() {
         },
         est_cost_usd: (($cost*100|round)/100)
       }
+      + bk_cli_summary($tools | map(select(.name == "Bash") | (.input.command? // "") | if type == "string" then bk_cli_invocations else [] end))
   ' "$snap"
 }
 

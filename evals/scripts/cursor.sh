@@ -134,9 +134,15 @@ $prompt_content"
 # server-spawn time from this process's environment. Fail-safe: a cursor
 # version that failed to resolve it would hand the server the literal
 # placeholder and 401 loudly — a visible failure, not a leak.
+# EVAL_MODE=cli (set by babystand.sh for `mode: cli` entries): an empty server
+# list — the agent reaches Buildkite through the bk CLI on PATH instead.
+MCP_SRC="$ROOT_DIR/mcp_in_ci.json"
+if [[ "${EVAL_MODE:-mcp}" == "cli" ]]; then
+    MCP_SRC="$ROOT_DIR/mcp_none.json"
+fi
 mkdir -p .cursor
 jq '.mcpServers |= with_entries(.value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}")' \
-    "$ROOT_DIR/mcp_in_ci.json" > .cursor/mcp.json
+    "$MCP_SRC" > .cursor/mcp.json
 # Diff hygiene, not a security control (the file holds no secret): the agent
 # is told to commit and push its fixes, and a plain `git add -A` would drag
 # this generated file onto the scenario branch. info/exclude is local-only
