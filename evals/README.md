@@ -77,6 +77,10 @@ Each run also records every Buildkite API request the agent caused, so you can s
 * Supported for `claude` (tool_result `is_error`, `Exit code N`) and `cursor` (`failure` results, shell `exitCode` / `aborted`, MCP `isError`), both checked against real transcripts. **Not implemented for `cursor-cloud` yet**: the run logs a WARNING and the annotation says so (no numbers, so nothing reads as zero failures).
 * Output: the `eval-struggles-<id>` annotation (and `<run>.struggles.md`), `struggles` in `<run>.metrics.json`, comparison rows (failed calls, longest streak, calls failing 2+ times), Datadog `tool_errors.failed` / `.likely_harmless` / `.longest_streak` / `.repeated`, and klaren's prompt.
 
+### Model API retries
+
+Separate from the agent's own struggles: `bk-tool-audit-v2.sh model-retries` counts the agent harness retrying its call to the **model API** — Claude Code's `{"type":"system","subtype":"api_retry", error_status, retry_delay_ms, ...}` stream events, e.g. a 504 or 429 from the model gateway (Buildkite Hosted Models in CI). These are not Buildkite API requests and not tool calls, so neither the fan-out nor the struggles report sees them, but they add wall-clock time. Grouped by status with the time spent waiting; read from claude.sh's raw stream (`CLAUDE_RAW_LOG`). Claude only — other agents show "not available". Shown at the bottom of the `eval-struggles-<id>` annotation (count in its title), as `model_api_retries` in `<run>.metrics.json`, a "Model API retries" comparison row, and Datadog `model_api.retries` / `.retry_wait_seconds`.
+
 `bk-tool-audit-v2.sh metrics` also reports `tool_calls_bk_cli` (shell tool calls that ran bk) and `bk_cli_commands_by_name` (e.g. `2 bk build view`) for every agent and mode — an MCP run that shells out to bk shows up too. Detection is a heuristic: bk must be in command position (start of the command, or after `;` `&&` `|` `(` `$(` etc.).
 
 ## Permission posture

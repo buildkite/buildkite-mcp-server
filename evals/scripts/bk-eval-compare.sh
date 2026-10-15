@@ -157,6 +157,9 @@ metrics_table() {
                                       (if $C.struggles.implemented? then $C.struggles.longest_failure_streak else null end)),
           r("Calls failing 2+ times"; (if $B.struggles.implemented? then ($B.struggles.repeated_failures | length) else null end);
                                       (if $C.struggles.implemented? then ($C.struggles.repeated_failures | length) else null end)),
+          # Harness-level, not the agent: model API retries (504 / 429 ...).
+          r("Model API retries";   (if $B.model_api_retries.available? then $B.model_api_retries.retries else null end);
+                                   (if $C.model_api_retries.available? then $C.model_api_retries.retries else null end)),
           r("Assistant responses"; $B.assistant_responses;   $C.assistant_responses),
           r("User messages";       $B.user_messages;         $C.user_messages),
           r("Duration (min)";      $B.duration_min;          $C.duration_min),

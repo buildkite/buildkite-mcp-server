@@ -63,6 +63,8 @@
 #   <prefix>.tool_errors.repeated       distinct calls that failed 2+ times
 #                                       (tool_errors.* omitted when struggles
 #                                       are not implemented, e.g. cursor-cloud)
+#   <prefix>.model_api.retries          the harness retrying its MODEL API
+#   <prefix>.model_api.retry_wait_seconds  call (504/429...); claude only
 #   <prefix>.tokens.input / .output / .cache_read / .cache_write
 #
 set -euo pipefail
@@ -159,6 +161,11 @@ PAYLOAD="$(jq -n \
           gauge("tool_errors.likely_harmless"; $s.likely_harmless; $tags),
           gauge("tool_errors.longest_streak"; $s.longest_failure_streak; $tags),
           gauge("tool_errors.repeated"; ($s.repeated_failures | length); $tags)
+        else empty end),
+        # Model API retries (harness, not the agent); absent when unavailable.
+        (($m.model_api_retries // {}) as $r | if ($r.available // false) then
+          gauge("model_api.retries"; $r.retries; $tags),
+          gauge("model_api.retry_wait_seconds"; $r.wait_seconds; $tags)
         else empty end),
         gauge("tokens.input"; ($tok.input // null); $tags),
         gauge("tokens.output"; ($tok.output // null); $tags),
