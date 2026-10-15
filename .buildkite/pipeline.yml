@@ -78,3 +78,8 @@ steps:
   - label: ":docker: build image"
     depends_on: quality-checks
     command: docker build -t buildkite-mcp-server:latest -f Dockerfile.local .
+
+  - name: ":memo: Trigger docs draft"
+    if: build.branch == "main"
+    soft_fail: true
+    command: .buildkite/steps/trigger-docs-draft.sh
