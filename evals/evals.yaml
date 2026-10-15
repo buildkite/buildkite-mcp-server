@@ -195,7 +195,7 @@ matrix:
   - id: red-to-green-comment-only
     agent: claude
     model: claude-opus-4-8
-    mode: mcp
+    mode: cli
     mode_params: {}
     prompt: red-to-green-comment-only
     scenario:
