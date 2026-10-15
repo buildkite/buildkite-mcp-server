@@ -462,15 +462,19 @@ metrics() {
 # reports {"implemented": false}.
 STRUGGLES_JQ='
   def first_line: tostring | split("\n") | map(select(test("\\S"))) | (.[0] // "") | .[0:160];
+  # The first real program in the command, across all lines: skips comment
+  # lines and cd/export/VAR= setup (e.g. "cd /tmp\n# note\nsed ..." -> "sed").
+  # Always a string, even for a command that is only setup.
   def shell_program:
     ([bk_cli_invocations[]] | first) // (
-      split("\n")[0]
-      | [splits("\\s*(?:&&|\\|\\||;|\\|)\\s*")]
+      split("\n")
+      | map(select(test("^\\s*#") | not))
+      | map([splits("\\s*(?:&&|\\|\\||;|\\|)\\s*")]) | add // []
       | map(sub("^\\s+"; "") | sub("^(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+"; ""))
       | map(select(. != ""
                     and (test("^(?:cd|export|set|source|\\.)(?:\\s|$)") | not)
                     and (test("^[A-Za-z_][A-Za-z0-9_]*=\\S*$") | not)))
-      | (.[0] // "") | split(" ")[0] | sub(".*/"; ""));
+      | (.[0] // "") | (split(" ")[0] // "") | sub(".*/"; ""));
   def harmless_programs: ["grep", "egrep", "fgrep", "rg", "test", "[", "[[", "diff", "cmp", "false", "pgrep", "which", "command"];
   def struggle_summary:
     . as $calls
