@@ -109,6 +109,12 @@ cmd_json() {
           bk_cli: {
             requests: ($bkreq | length),
             invocations: ($bkinv | length),
+            # bk runs that exited non-zero. A run can fail with no failed API
+            # request at all (bad flags, nothing found locally, ...), so these
+            # are listed apart from errors_by_status.
+            failed_runs: ($bkinv | map(select((.exit_code // 0) != 0)
+              | {command: bk_command, exit_code, requests: (.requests // 0),
+                 argv: ((.argv // []) | map(tostring) | join(" ") | .[0:160])})),
             commands: ([($bkinv | map(bk_command)), ($bkreq | map(bk_command))] | add | unique
               | map(. as $cmd
                   | ($bkinv | map(select(bk_command == $cmd))) as $inv
@@ -157,8 +163,32 @@ cmd_markdown() {
     ' "$fanout"
 }
 
+# Errors only (for the struggles annotation): failed API requests by status
+# then tool / bk command, and bk runs that exited non-zero.
+cmd_errors_markdown() {
+    local fanout="$1"
+    jq -r '
+      "**Buildkite API errors** (failed API requests from the MCP server and bk, by status → tool / bk command):",
+      "",
+      (if ((.errors_by_status // {}) | length) > 0 then
+        "```",
+        (.errors_by_status | to_entries[] | "\(.key):", (.value | to_entries[] | "  \(.key): \(.value)")),
+        "```"
+       else "_None — every API request got a successful response._" end),
+      "",
+      (if ((.bk_cli.failed_runs // []) | length) > 0 then
+        "**Failed bk runs** (\(.bk_cli.failed_runs | length) — exit code, and API requests made before failing; 0 requests = failed before calling the API, e.g. bad flags):",
+        "",
+        (.bk_cli.failed_runs[0:10][] | "- `\(.command)` → exit \(.exit_code), \(.requests) request\(if .requests == 1 then "" else "s" end): `\(.argv | gsub("`"; "\u0027"))`"),
+        (if (.bk_cli.failed_runs | length) > 10 then "- … and \((.bk_cli.failed_runs | length) - 10) more" else empty end),
+        ""
+       else empty end)
+    ' "$fanout"
+}
+
 case "${1:-}" in
     json)     cmd_json "${2:?api-fanout.sh json <requests.jsonl> [metrics.json]}" "${3:-}" ;;
     markdown) cmd_markdown "${2:?api-fanout.sh markdown <fanout.json>}" ;;
+    errors-markdown) cmd_errors_markdown "${2:?api-fanout.sh errors-markdown <fanout.json>}" ;;
     *) sed -n '2,25p' "$0"; exit 2 ;;
 esac

@@ -851,6 +851,15 @@ run_entry() {
         : > "$STRUGGLES_MD"
     fi
 
+    # Buildkite API errors (from the fan-out): failed API requests by status
+    # then tool / bk command, and bk runs that exited non-zero — the API-side
+    # view of the same struggles, repeated here so it sits next to them.
+    if [[ -n "$FANOUT_JSON" ]]; then
+        { echo; "$SCRIPT_DIR/api-fanout.sh" errors-markdown "$FANOUT_JSON"; } | tee -a "$STRUGGLES_MD"
+    else
+        printf '\n**Buildkite API errors:** _not available for agent `%s` (no API request log)._\n' "$AGENT" | tee -a "$STRUGGLES_MD"
+    fi
+
     # Model API retries: the harness retrying its call to the model API (e.g.
     # 504 / 429 from the model gateway) — infrastructure, not the agent. From
     # the raw stream (claude only). Merged into metrics.json as
@@ -954,7 +963,7 @@ run_entry() {
         fi
         if [[ -s "$STRUGGLES_MD" ]]; then
             echo
-            echo "Failed tool calls and struggle patterns, from the session log (\"likely harmless\" = e.g. grep with no match). Use them as leads, and check each in the log:"
+            echo "Failed tool calls and struggle patterns from the session log (\"likely harmless\" = e.g. grep with no match), failed Buildkite API requests and failed bk runs from the request log, and model API retries (harness-level, not the agent). Use them as leads, and check each in the log:"
             echo
             cat "$STRUGGLES_MD"
         fi
@@ -1028,6 +1037,12 @@ run_entry() {
             local STRUGGLES_META STRUGGLES_STYLE="info"
             STRUGGLES_META="$(jq -r 'if .implemented then "\(.failed_calls) failed of \(.tool_calls) tool calls · longest streak \(.longest_failure_streak)" else "not implemented for this agent" end' "$STRUGGLES_JSON")"
             jq -e '.implemented | not' "$STRUGGLES_JSON" >/dev/null 2>&1 && STRUGGLES_STYLE="warning"
+            if [[ -n "$FANOUT_JSON" ]]; then
+                STRUGGLES_META+="$(jq -r '
+                    def s(n): if n == 1 then "" else "s" end;
+                    (if .errors > 0 then " · \(.errors) API error\(s(.errors))" else "" end)
+                    + ((.bk_cli.failed_runs // []) | length | if . > 0 then " · \(.) failed bk run\(s(.))" else "" end)' "$FANOUT_JSON")"
+            fi
             if [[ -n "$RETRIES_JSON" ]] && jq -e '(.retries // 0) > 0' "$RETRIES_JSON" >/dev/null 2>&1; then
                 STRUGGLES_META+="$(jq -r '" · \(.retries) model API retries"' "$RETRIES_JSON")"
             fi
