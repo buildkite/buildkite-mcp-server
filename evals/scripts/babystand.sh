@@ -827,6 +827,26 @@ run_entry() {
         fi
     fi
 
+    # --- Struggles (failed tool calls + patterns) ---------------------------
+    # From the transcript: failures by type and tool, likely-harmless ones
+    # (grep with no match), failure streaks, repeated failing calls, and
+    # retries. Merged into metrics.json as `struggles`; rendered for the
+    # eval-struggles annotation and klaren. cursor-cloud is not implemented
+    # yet — the audit script warns and the annotation says so.
+    echo "--- :face_with_spiral_eyes: [$ENTRY_ID] struggles"
+    local STRUGGLES_JSON STRUGGLES_MD
+    STRUGGLES_JSON="$(mktemp)"; STRUGGLES_MD="$(mktemp)"
+    if "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" struggles "$TRANSCRIPT" > "$STRUGGLES_JSON" \
+            && "$SCRIPT_DIR/bk-tool-audit-v2.sh" struggles-markdown "$STRUGGLES_JSON" > "$STRUGGLES_MD"; then
+        cat "$STRUGGLES_MD"
+        MERGED_METRICS="$(mktemp)"
+        jq --slurpfile s "$STRUGGLES_JSON" '. + {struggles: $s[0]}' "$AUDIT_METRICS_FILE" > "$MERGED_METRICS" \
+            && mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
+    else
+        echo "WARNING: [$ENTRY_ID] struggles summary failed (transcript: $TRANSCRIPT)" >&2
+        : > "$STRUGGLES_MD"
+    fi
+
     # --- Goal outcome ---------------------------------------------------------
     # Scenario-shaped: entries whose setup pushed a scenario branch
     # (SCENARIO_BRANCH in the vars file; last value wins, matching
@@ -912,6 +932,12 @@ run_entry() {
             echo
             cat "$FANOUT_MD"
         fi
+        if [[ -s "$STRUGGLES_MD" ]]; then
+            echo
+            echo "Failed tool calls and struggle patterns, from the session log (\"likely harmless\" = e.g. grep with no match). Use them as leads, and check each in the log:"
+            echo
+            cat "$STRUGGLES_MD"
+        fi
     } > "$KLAREN_PROMPT_FILE"
     # klaren reads the transcript and inspects the repo; it needs read/search
     # tools. Same permission posture as the eval run above: CI bypasses via
@@ -950,7 +976,13 @@ run_entry() {
     [[ -s "$KLAREN_RESULT_FILE" ]] && cp "$KLAREN_RESULT_FILE" "$PREFIX.klaren.md"         || : > "$PREFIX.klaren.md"
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
     jq . <<<"$RUN_INFO" > "$PREFIX.run-info.json"
-    [[ -s "$FANOUT_MD" ]] && cp "$FANOUT_MD" "$PREFIX.api-fanout.md"
+    if [[ -s "$FANOUT_MD" ]]; then
+        cp "$FANOUT_MD" "$PREFIX.api-fanout.md"
+    elif [[ -z "$REQUEST_LOG" ]]; then
+        echo "WARNING: [$ENTRY_ID] API fan-out is not implemented for agent '$AGENT' yet (no request log)." >&2
+        printf '> ⚠️ **API fan-out not implemented for agent `%s` yet** — its MCP server and any bk calls run in its own VM, where the request log cannot be collected.\n' "$AGENT" > "$PREFIX.api-fanout.md"
+    fi
+    [[ -s "$STRUGGLES_MD" ]] && cp "$STRUGGLES_MD" "$PREFIX.struggles.md"
     echo "*** [$ENTRY_ID] run bundle: $PREFIX.*"
 
     # --- CI: upload the bundle as build artifacts (dual store) + annotate ---
@@ -965,9 +997,19 @@ run_entry() {
             "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED} · ${RUN_LABEL}" "success"
         annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics (${RUN_LABEL})" "$PREFIX.metrics.json"
         annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls (${RUN_LABEL})" "$PREFIX.tools.txt"
-        if [[ -s "$PREFIX.api-fanout.md" ]]; then
+        if [[ -s "$PREFIX.api-fanout.md" && -n "$FANOUT_JSON" ]]; then
             annotate_markdown "eval-fanout-$ENTRY_ID" ":satellite_antenna: [$ENTRY_ID] Eval — API fan-out" \
                 "$PREFIX.api-fanout.md" "$(jq -r '"\(.total_requests) API requests"' "$FANOUT_JSON") · ${RUN_LABEL}"
+        elif [[ -s "$PREFIX.api-fanout.md" ]]; then
+            annotate_markdown "eval-fanout-$ENTRY_ID" ":satellite_antenna: [$ENTRY_ID] Eval — API fan-out" \
+                "$PREFIX.api-fanout.md" "not implemented for $AGENT" "warning"
+        fi
+        if [[ -s "$PREFIX.struggles.md" ]]; then
+            local STRUGGLES_META STRUGGLES_STYLE="info"
+            STRUGGLES_META="$(jq -r 'if .implemented then "\(.failed_calls) failed of \(.tool_calls) tool calls · longest streak \(.longest_failure_streak)" else "not implemented for this agent" end' "$STRUGGLES_JSON")"
+            jq -e '.implemented | not' "$STRUGGLES_JSON" >/dev/null 2>&1 && STRUGGLES_STYLE="warning"
+            annotate_markdown "eval-struggles-$ENTRY_ID" ":face_with_spiral_eyes: [$ENTRY_ID] Eval — struggles" \
+                "$PREFIX.struggles.md" "${STRUGGLES_META} · ${RUN_LABEL}" "$STRUGGLES_STYLE"
         fi
         annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
             "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"

@@ -150,6 +150,13 @@ metrics_table() {
           r("Tool calls (total)";  $B.tool_calls_total;      $C.tool_calls_total),
           r("Shell calls running bk"; $B.tool_calls_bk_cli;  $C.tool_calls_bk_cli),
           r("API requests (total)"; $B.api_fanout.total_requests?; $C.api_fanout.total_requests?),
+          # Struggles: real failures only (likely-harmless ones left out).
+          r("Failed tool calls";   (if $B.struggles.implemented? then $B.struggles.failed_calls - $B.struggles.likely_harmless else null end);
+                                   (if $C.struggles.implemented? then $C.struggles.failed_calls - $C.struggles.likely_harmless else null end)),
+          r("Longest failure streak"; (if $B.struggles.implemented? then $B.struggles.longest_failure_streak else null end);
+                                      (if $C.struggles.implemented? then $C.struggles.longest_failure_streak else null end)),
+          r("Calls failing 2+ times"; (if $B.struggles.implemented? then ($B.struggles.repeated_failures | length) else null end);
+                                      (if $C.struggles.implemented? then ($C.struggles.repeated_failures | length) else null end)),
           r("Assistant responses"; $B.assistant_responses;   $C.assistant_responses),
           r("User messages";       $B.user_messages;         $C.user_messages),
           r("Duration (min)";      $B.duration_min;          $C.duration_min),

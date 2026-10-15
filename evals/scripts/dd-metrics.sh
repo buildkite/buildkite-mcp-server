@@ -57,6 +57,12 @@
 #   <prefix>.api_requests.total         Buildkite API requests (fan-out; from
 #   <prefix>.api_requests.mcp           the run's request log — omitted when
 #   <prefix>.api_requests.bk_cli        no log was collected, e.g. cursor-cloud)
+#   <prefix>.tool_errors.failed         failed tool calls, minus likely harmless
+#   <prefix>.tool_errors.likely_harmless  e.g. grep with no match
+#   <prefix>.tool_errors.longest_streak most failed calls in a row
+#   <prefix>.tool_errors.repeated       distinct calls that failed 2+ times
+#                                       (tool_errors.* omitted when struggles
+#                                       are not implemented, e.g. cursor-cloud)
 #   <prefix>.tokens.input / .output / .cache_read / .cache_write
 #
 set -euo pipefail
@@ -147,6 +153,13 @@ PAYLOAD="$(jq -n \
         gauge("api_requests.total"; ($m.api_fanout.total_requests? // null); $tags),
         gauge("api_requests.mcp"; ($m.api_fanout.mcp.requests? // null); $tags),
         gauge("api_requests.bk_cli"; ($m.api_fanout.bk_cli.requests? // null); $tags),
+        # Struggles; absent (not zero) when not implemented for the agent.
+        (($m.struggles // {}) as $s | if ($s.implemented // false) then
+          gauge("tool_errors.failed"; ($s.failed_calls - $s.likely_harmless); $tags),
+          gauge("tool_errors.likely_harmless"; $s.likely_harmless; $tags),
+          gauge("tool_errors.longest_streak"; $s.longest_failure_streak; $tags),
+          gauge("tool_errors.repeated"; ($s.repeated_failures | length); $tags)
+        else empty end),
         gauge("tokens.input"; ($tok.input // null); $tags),
         gauge("tokens.output"; ($tok.output // null); $tags),
         gauge("tokens.cache_read"; ($tok.cache_read // null); $tags),

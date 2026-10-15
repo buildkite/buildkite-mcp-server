@@ -13,9 +13,13 @@
 // the same base URL). The proxy forwards each request unchanged to the real
 // endpoint over HTTPS and logs it. bk's stdin/stdout/stderr are inherited
 // untouched and its exit code is passed through, so the agent sees normal bk.
-// Not seen: requests bk sends to absolute URLs from API responses (e.g.
-// following a redirect), and bk's non-API HTTP (self-update, skill
-// downloads) — neither goes through the endpoint settings.
+// Artifact downloads: `bk artifacts download` fetches each file from the
+// artifact's absolute download_url, so for that command the proxy rewrites
+// those URLs in the artifact list to point back at itself (see
+// rewriteDownloadURLs) and the download requests are logged too.
+// Not seen: other requests bk sends to absolute URLs from API responses
+// (e.g. the S3 redirect after a download — not a Buildkite API request),
+// and bk's non-API HTTP (self-update, skill downloads).
 //
 // Log lines (source "bk"):
 //   {"source":"bk","type":"request", invocation, argv, api: rest|graphql,
@@ -79,6 +83,21 @@ function runBk(env, onExit) {
 }
 
 
+// isArtifactsDownload reports whether args run `bk artifacts download` (flags
+// before the subcommand words are skipped).
+function isArtifactsDownload(args) {
+  const words = [];
+  for (const a of args) {
+    if (a.startsWith("-")) {
+      if (words.length === 0) continue;
+      break;
+    }
+    words.push(a);
+    if (words.length === 2) break;
+  }
+  return /^artifacts?$/.test(words[0] || "") && words[1] === "download";
+}
+
 function startProxyAndRun() {
   const invocation = crypto.randomUUID();
   // The upstreams bk would have used without the shim (honouring any override
@@ -88,6 +107,25 @@ function startProxyAndRun() {
     graphql: new URL(process.env.BUILDKITE_GRAPHQL_ENDPOINT || "https://graphql.buildkite.com/v1"),
   };
   let requests = 0;
+  // Set once the proxy is listening (before bk starts, so before any request).
+  let localRestBase = "";
+  // `bk artifacts download` fetches each file from the artifact's own
+  // download_url — an absolute API URL taken from the artifact list, which
+  // would skip this proxy. For that command only, rewrite those URLs in the
+  // proxied JSON responses to point back at the proxy, so the downloads are
+  // logged too. Safe there because the command never prints the URLs (it
+  // prints "Downloaded: <path>"); other commands, e.g. `bk artifacts list`,
+  // may show them to the agent, so their responses are left untouched.
+  const rewriteDownloadURLs = isArtifactsDownload(argv);
+  const restUpstreamBase = upstreams.rest.origin + upstreams.rest.pathname;
+
+  // Point absolute REST URLs (plain and JSON-escaped "\/" forms) at the proxy.
+  function rewriteURLs(text) {
+    const escaped = (u) => u.replace(/\//g, "\\/");
+    return text
+      .split(restUpstreamBase).join(localRestBase)
+      .split(escaped(restUpstreamBase)).join(escaped(localRestBase));
+  }
 
   const server = http.createServer((req, res) => {
     const api = req.url.startsWith("/__graphql/") ? "graphql" : "rest";
@@ -115,9 +153,27 @@ function startProxyAndRun() {
         }
       }
       const headers = { ...req.headers, host: target.host };
+      const rewrite = rewriteDownloadURLs && api === "rest";
+      // Ask for a plain body, so a JSON response can be rewritten.
+      if (rewrite) delete headers["accept-encoding"];
       const client = target.protocol === "http:" ? http : https;
       const upstreamReq = client.request(target, { method: req.method, headers }, (upstreamRes) => {
         let bytes = 0;
+        const isJSON = String(upstreamRes.headers["content-type"] || "").includes("json");
+        if (rewrite && isJSON && !upstreamRes.headers["content-encoding"]) {
+          const parts = [];
+          upstreamRes.on("data", (c) => { bytes += c.length; parts.push(c); });
+          upstreamRes.on("end", () => {
+            const out = Buffer.from(rewriteURLs(Buffer.concat(parts).toString("utf8")), "utf8");
+            const outHeaders = { ...upstreamRes.headers, "content-length": String(out.length) };
+            delete outHeaders["transfer-encoding"];
+            requests++;
+            writeLog({ ...record, status: upstreamRes.statusCode, duration_ms: Date.now() - started, bytes });
+            res.writeHead(upstreamRes.statusCode ?? 502, outHeaders);
+            res.end(out);
+          });
+          return;
+        }
         res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
         upstreamRes.on("data", (c) => { bytes += c.length; res.write(c); });
         upstreamRes.on("end", () => {
@@ -139,6 +195,7 @@ function startProxyAndRun() {
   server.listen(0, "127.0.0.1", () => {
     const { port } = server.address();
     const local = `http://127.0.0.1:${port}`;
+    localRestBase = `${local}/__rest${upstreams.rest.pathname}`;
     const env = {
       ...childEnv,
       BUILDKITE_REST_API_ENDPOINT: `${local}/__rest${upstreams.rest.pathname}`,
