@@ -23,6 +23,9 @@
 # builds/:build), and any other number / uuid becomes :id. GraphQL requests
 # are grouped by operation name. Heuristic, for reading, not exact routing.
 #
+# Failed requests (HTTP >= 400, or no response: "network error") are also
+# grouped by status, then by MCP tool / bk command (errors_by_status).
+#
 set -euo pipefail
 
 command -v jq >/dev/null || { echo "api-fanout: jq is required" >&2; exit 1; }
@@ -76,6 +79,18 @@ cmd_json() {
       | {
           total_requests: ($mcp + $bkreq | length),
           errors: ($mcp + $bkreq | map(select((.error // null) != null or (.status // 0) >= 400)) | length),
+          # Failed requests grouped by HTTP status ("network error" when no
+          # response came back), then by the MCP tool / bk command that made
+          # them: {"429": {"get_build": 2}, "504": {"bk build view": 1}}.
+          errors_by_status: (
+            ($mcp | map(. + {who: (if (.tool // "") == "" then "(no tool call)" else .tool end)}))
+            + ($bkreq | map(. + {who: bk_command}))
+            | map(select((.error // null) != null or (.status // 0) >= 400)
+                  | . + {status_key: (if (.error // null) != null then "network error" else (.status | tostring) end)})
+            | group_by(.status_key)
+            | map({key: .[0].status_key,
+                   value: (group_by(.who) | sort_by(-length, .[0].who) | map({key: .[0].who, value: length}) | from_entries)})
+            | from_entries),
           mcp: {
             requests: ($mcp | length),
             unattributed_requests: ($mcp | map(select((.tool // "") == "")) | length),
@@ -117,6 +132,14 @@ cmd_markdown() {
       def eps: (.endpoints // [])[0:3] | map("`\(.)`") | join("<br>");
       "**Buildkite API requests: \(.total_requests)** (MCP server: \(.mcp.requests), bk CLI: \(.bk_cli.requests); 4xx/5xx or failed: \(.errors))",
       "",
+      (if ((.errors_by_status // {}) | length) > 0 then
+        "**API errors by status** (status → MCP tool / bk command → failed requests):",
+        "",
+        "```",
+        (.errors_by_status | to_entries[] | "\(.key):", (.value | to_entries[] | "  \(.key): \(.value)")),
+        "```",
+        ""
+       else empty end),
       (if (.mcp.tools | length) > 0 then
         "| MCP tool | Calls | API requests | Avg / call | Max / call | Top endpoints |",
         "|---|---:|---:|---:|---:|---|",
