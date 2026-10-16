@@ -339,6 +339,17 @@ func TestListBuilds(t *testing.T) {
 		assert.True(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.CreatedFrom))
 		assert.True(time.Date(2026, 10, 8, 0, 30, 0, 0, time.UTC).Equal(capturedOptions.CreatedTo))
 		assert.True(time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.FinishedFrom))
+
+		// A date-only created_to covers that whole day, as it does in the API.
+		_, _, err = handler(ctx, createMCPRequest(t, map[string]any{}), ListBuildsArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			CreatedFrom:  "2026-10-13",
+			CreatedTo:    "2026-10-13",
+		})
+		assert.NoError(err)
+		assert.True(time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.CreatedFrom))
+		assert.True(time.Date(2026, 10, 13, 23, 59, 59, 0, time.UTC).Equal(capturedOptions.CreatedTo))
 	})
 
 	t.Run("InvalidTimeFilter", func(t *testing.T) {

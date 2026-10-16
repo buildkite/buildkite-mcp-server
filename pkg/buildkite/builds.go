@@ -114,7 +114,7 @@ type ListBuildsArgs struct {
 	Commit       string `json:"commit,omitempty" jsonschema:"Full commit SHA"`
 	Creator      string `json:"creator,omitempty" jsonschema:"Filter builds by creator user UUID (a build's creator.id), or me"`
 	CreatedFrom  string `json:"created_from,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
-	CreatedTo    string `json:"created_to,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
+	CreatedTo    string `json:"created_to,omitempty" jsonschema:"RFC 3339 timestamp, or YYYY-MM-DD (UTC) to include that whole day"`
 	FinishedFrom string `json:"finished_from,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
@@ -282,18 +282,19 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				options.Creator = args.Creator
 			}
 			for _, filter := range []struct {
-				name  string
-				value string
-				dest  *time.Time
+				name     string
+				value    string
+				dest     *time.Time
+				endOfDay bool
 			}{
-				{"created_from", args.CreatedFrom, &options.CreatedFrom},
-				{"created_to", args.CreatedTo, &options.CreatedTo},
-				{"finished_from", args.FinishedFrom, &options.FinishedFrom},
+				{"created_from", args.CreatedFrom, &options.CreatedFrom, false},
+				{"created_to", args.CreatedTo, &options.CreatedTo, true},
+				{"finished_from", args.FinishedFrom, &options.FinishedFrom, false},
 			} {
 				if filter.value == "" {
 					continue
 				}
-				t, err := parseBuildTimeFilter(filter.value)
+				t, err := parseBuildTimeFilter(filter.value, filter.endOfDay)
 				if err != nil {
 					return utils.NewToolResultError(fmt.Sprintf("invalid %s %q: use an RFC 3339 timestamp such as 2026-10-01T00:00:00Z or a date such as 2026-10-01", filter.name, filter.value)), nil, nil
 				}
@@ -323,13 +324,19 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 		}, []string{"read_builds"}
 }
 
-// parseBuildTimeFilter accepts an RFC 3339 timestamp or a YYYY-MM-DD date,
-// which is treated as midnight UTC.
-func parseBuildTimeFilter(value string) (time.Time, error) {
+// parseBuildTimeFilter accepts an RFC 3339 timestamp or a YYYY-MM-DD date in
+// UTC. A date is the start of that day, or with endOfDay its last second, which
+// matches how the API reads a date-only created_to. The filter is sent as a
+// whole-second timestamp, so the API cannot apply that rule itself.
+func parseBuildTimeFilter(value string, endOfDay bool) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, value); err == nil {
 		return t, nil
 	}
-	return time.Parse(time.DateOnly, value)
+	t, err := time.Parse(time.DateOnly, value)
+	if err == nil && endOfDay {
+		t = t.AddDate(0, 0, 1).Add(-time.Second)
+	}
+	return t, err
 }
 
 func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRunsArgs, any], []string) {
