@@ -2,9 +2,12 @@ package buildkite
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
@@ -51,14 +54,25 @@ type BuildsClient interface {
 
 // BuildSummary - Essential build fields for list responses
 type BuildSummary struct {
-	ID        string               `json:"id"`
-	Number    int                  `json:"number"`
-	State     string               `json:"state"`
-	Branch    string               `json:"branch"`
-	Commit    string               `json:"commit"`
-	Message   string               `json:"message"`
-	WebURL    string               `json:"web_url"`
-	CreatedAt *buildkite.Timestamp `json:"created_at"`
+	ID           string               `json:"id"`
+	Number       int                  `json:"number"`
+	PipelineSlug string               `json:"pipeline_slug,omitempty"`
+	State        string               `json:"state"`
+	Branch       string               `json:"branch"`
+	Commit       string               `json:"commit"`
+	Message      string               `json:"message"`
+	WebURL       string               `json:"web_url"`
+	Creator      *BuildCreator        `json:"creator,omitempty"`
+	CreatedAt    *buildkite.Timestamp `json:"created_at"`
+	FinishedAt   *buildkite.Timestamp `json:"finished_at,omitempty"`
+}
+
+// BuildCreator identifies the user who created a build. ID is the user UUID
+// accepted by list_builds' creator filter.
+type BuildCreator struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 // AnnotationSummary contains enough metadata to identify and fetch an
@@ -80,9 +94,7 @@ type BuildDetail struct {
 	Author               buildkite.Author              `json:"author"`
 	ScheduledAt          *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
 	StartedAt            *buildkite.Timestamp          `json:"started_at,omitempty"`
-	FinishedAt           *buildkite.Timestamp          `json:"finished_at,omitempty"`
 	MetaData             map[string]string             `json:"meta_data,omitempty"`
-	Creator              buildkite.Creator             `json:"creator"`
 	Source               string                        `json:"source,omitempty"`
 	RebuiltFrom          *buildkite.RebuiltFrom        `json:"rebuilt_from,omitempty"`
 	PullRequest          *buildkite.PullRequest        `json:"pull_request,omitempty"`
@@ -100,7 +112,10 @@ type ListBuildsArgs struct {
 	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
 	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled, running, passed, failed, canceled, skipped)"`
 	Commit       string `json:"commit,omitempty" jsonschema:"Full commit SHA"`
-	Creator      string `json:"creator,omitempty" jsonschema:"Filter builds by build creator"`
+	Creator      string `json:"creator,omitempty" jsonschema:"Filter builds by creator user UUID (a build's creator.id), or me"`
+	CreatedFrom  string `json:"created_from,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
+	CreatedTo    string `json:"created_to,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
+	FinishedFrom string `json:"finished_from,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
@@ -125,16 +140,38 @@ type GetBuildTestEngineRunsArgs struct {
 
 // summarizeBuild converts a buildkite.Build to BuildSummary
 func summarizeBuild(build buildkite.Build) BuildSummary {
-	return BuildSummary{
-		ID:        build.ID,
-		Number:    build.Number,
-		State:     build.State,
-		Branch:    build.Branch,
-		Commit:    build.Commit,
-		Message:   build.Message,
-		WebURL:    build.WebURL,
-		CreatedAt: build.CreatedAt,
+	var creator *BuildCreator
+	if build.Creator.ID != "" {
+		creator = &BuildCreator{ID: build.Creator.ID, Name: build.Creator.Name, Email: build.Creator.Email}
 	}
+	return BuildSummary{
+		ID:           build.ID,
+		Number:       build.Number,
+		PipelineSlug: buildPipelineSlug(build),
+		State:        build.State,
+		Branch:       build.Branch,
+		Commit:       build.Commit,
+		Message:      build.Message,
+		WebURL:       build.WebURL,
+		Creator:      creator,
+		CreatedAt:    build.CreatedAt,
+		FinishedAt:   build.FinishedAt,
+	}
+}
+
+// buildPipelineSlug returns the build's pipeline slug. List responses exclude
+// the pipeline object, so fall back to the slug in the build's API URL
+// (.../organizations/{org}/pipelines/{slug}/builds/{number}).
+func buildPipelineSlug(build buildkite.Build) string {
+	if build.Pipeline != nil {
+		return build.Pipeline.Slug
+	}
+	_, rest, ok := strings.Cut(build.URL, "/pipelines/")
+	if !ok {
+		return ""
+	}
+	slug, _, _ := strings.Cut(rest, "/")
+	return slug
 }
 
 func detailBuild(build buildkite.Build, annotations []buildkite.Annotation, annotationsTruncated bool) BuildDetail {
@@ -144,9 +181,7 @@ func detailBuild(build buildkite.Build, annotations []buildkite.Annotation, anno
 		Author:               build.Author,
 		ScheduledAt:          build.ScheduledAt,
 		StartedAt:            build.StartedAt,
-		FinishedAt:           build.FinishedAt,
 		MetaData:             build.MetaData,
-		Creator:              build.Creator,
 		Source:               build.Source,
 		RebuiltFrom:          build.RebuiltFrom,
 		PullRequest:          build.PullRequest,
@@ -188,7 +223,7 @@ func createPaginatedBuildResult[T any](builds []buildkite.Build, converter func(
 func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_builds",
-			Description: "List builds for a pipeline or across all pipelines in an organization, returning a lightweight summary of each build. When pipeline_slug is omitted, lists builds across all pipelines in the organization. Jobs are not included — use list_jobs or get_job for job detail",
+			Description: "List builds, newest first, for a pipeline or, when pipeline_slug is omitted, across all pipelines in an organization. Returns lightweight summaries including pipeline_slug, creator and finished_at; jobs are not included — use list_jobs or get_job for job detail. Org-wide listings without created_from can time out. For questions spanning many builds, filter by state, branch, creator and date with per_page 100 instead of calling get_build per build",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Builds",
 				ReadOnlyHint: true,
@@ -205,6 +240,9 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				attribute.String("state", args.State),
 				attribute.String("commit", args.Commit),
 				attribute.String("creator", args.Creator),
+				attribute.String("created_from", args.CreatedFrom),
+				attribute.String("created_to", args.CreatedTo),
+				attribute.String("finished_from", args.FinishedFrom),
 				attribute.Int("page", args.Page),
 				attribute.Int("per_page", args.PerPage),
 			)
@@ -243,6 +281,24 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			if args.Creator != "" {
 				options.Creator = args.Creator
 			}
+			for _, filter := range []struct {
+				name  string
+				value string
+				dest  *time.Time
+			}{
+				{"created_from", args.CreatedFrom, &options.CreatedFrom},
+				{"created_to", args.CreatedTo, &options.CreatedTo},
+				{"finished_from", args.FinishedFrom, &options.FinishedFrom},
+			} {
+				if filter.value == "" {
+					continue
+				}
+				t, err := parseBuildTimeFilter(filter.value)
+				if err != nil {
+					return utils.NewToolResultError(fmt.Sprintf("invalid %s %q: use an RFC 3339 timestamp such as 2026-10-01T00:00:00Z or a date such as 2026-10-01", filter.name, filter.value)), nil, nil
+				}
+				*filter.dest = t
+			}
 
 			deps := DepsFromContext(ctx)
 			var builds []buildkite.Build
@@ -265,6 +321,15 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 
 			return mcpTextResult(span, result)
 		}, []string{"read_builds"}
+}
+
+// parseBuildTimeFilter accepts an RFC 3339 timestamp or a YYYY-MM-DD date,
+// which is treated as midnight UTC.
+func parseBuildTimeFilter(value string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.DateOnly, value)
 }
 
 func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRunsArgs, any], []string) {
