@@ -67,8 +67,8 @@ type BuildSummary struct {
 	FinishedAt   *buildkite.Timestamp `json:"finished_at,omitempty"`
 }
 
-// BuildCreator identifies the user who created a build. ID is the user UUID
-// accepted by list_builds' creator filter.
+// BuildCreator is the user who created a build. ID is the UUID accepted by
+// list_builds' creator filter.
 type BuildCreator struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
@@ -112,7 +112,7 @@ type ListBuildsArgs struct {
 	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
 	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled, running, passed, failed, canceled, skipped)"`
 	Commit       string `json:"commit,omitempty" jsonschema:"Full commit SHA"`
-	Creator      string `json:"creator,omitempty" jsonschema:"Filter builds by creator user UUID (a build's creator.id), or me"`
+	Creator      string `json:"creator,omitempty" jsonschema:"Creator's user UUID (a build's creator.id), or me"`
 	CreatedFrom  string `json:"created_from,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
 	CreatedTo    string `json:"created_to,omitempty" jsonschema:"RFC 3339 timestamp, or YYYY-MM-DD (UTC) to include that whole day"`
 	FinishedFrom string `json:"finished_from,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
@@ -159,9 +159,8 @@ func summarizeBuild(build buildkite.Build) BuildSummary {
 	}
 }
 
-// buildPipelineSlug returns the build's pipeline slug. List responses exclude
-// the pipeline object, so fall back to the slug in the build's API URL
-// (.../organizations/{org}/pipelines/{slug}/builds/{number}).
+// buildPipelineSlug falls back to the build's API URL
+// (.../pipelines/{slug}/builds/{number}) when the pipeline is excluded.
 func buildPipelineSlug(build buildkite.Build) string {
 	if build.Pipeline != nil {
 		return build.Pipeline.Slug
@@ -281,24 +280,8 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			if args.Creator != "" {
 				options.Creator = args.Creator
 			}
-			for _, filter := range []struct {
-				name     string
-				value    string
-				dest     *time.Time
-				endOfDay bool
-			}{
-				{"created_from", args.CreatedFrom, &options.CreatedFrom, false},
-				{"created_to", args.CreatedTo, &options.CreatedTo, true},
-				{"finished_from", args.FinishedFrom, &options.FinishedFrom, false},
-			} {
-				if filter.value == "" {
-					continue
-				}
-				t, err := parseBuildTimeFilter(filter.value, filter.endOfDay)
-				if err != nil {
-					return utils.NewToolResultError(fmt.Sprintf("invalid %s %q: use an RFC 3339 timestamp such as 2026-10-01T00:00:00Z or a date such as 2026-10-01", filter.name, filter.value)), nil, nil
-				}
-				*filter.dest = t
+			if err := setBuildTimeFilters(options, args); err != nil {
+				return utils.NewToolResultError(err.Error()), nil, nil
 			}
 
 			deps := DepsFromContext(ctx)
@@ -324,11 +307,33 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 		}, []string{"read_builds"}
 }
 
-// parseBuildTimeFilter accepts an RFC 3339 timestamp or a YYYY-MM-DD date in
-// UTC. A date is the start of that day, or with endOfDay its last second, which
-// matches how the API reads a date-only created_to. The filter is sent as a
-// whole-second timestamp, so the API cannot apply that rule itself.
-func parseBuildTimeFilter(value string, endOfDay bool) (time.Time, error) {
+// setBuildTimeFilters parses the date filters in args into options.
+func setBuildTimeFilters(options *buildkite.BuildsListOptions, args ListBuildsArgs) error {
+	for _, f := range []struct {
+		name, value string
+		dest        *time.Time
+		endOfDay    bool
+	}{
+		{"created_from", args.CreatedFrom, &options.CreatedFrom, false},
+		{"created_to", args.CreatedTo, &options.CreatedTo, true},
+		{"finished_from", args.FinishedFrom, &options.FinishedFrom, false},
+	} {
+		if f.value == "" {
+			continue
+		}
+		t, err := parseBuildTime(f.value, f.endOfDay)
+		if err != nil {
+			return fmt.Errorf("invalid %s %q: use an RFC 3339 timestamp such as 2026-10-01T00:00:00Z or a date such as 2026-10-01", f.name, f.value)
+		}
+		*f.dest = t
+	}
+	return nil
+}
+
+// parseBuildTime parses an RFC 3339 timestamp or a UTC YYYY-MM-DD date. With
+// endOfDay, a date becomes its last second, matching how the API reads a
+// date-only created_to.
+func parseBuildTime(value string, endOfDay bool) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, value); err == nil {
 		return t, nil
 	}
