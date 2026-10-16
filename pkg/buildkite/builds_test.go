@@ -102,6 +102,7 @@ func TestGetBuild(t *testing.T) {
 						Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
 					},
 					CreatedAt: &buildkite.Timestamp{},
+					Creator:   buildkite.Creator{ID: "user-uuid", Name: "Jane", AvatarURL: "https://example.com/a.png"},
 				}, &buildkite.Response{
 					Response: &http.Response{StatusCode: 200},
 				}, nil
@@ -138,6 +139,9 @@ func TestGetBuild(t *testing.T) {
 		requireJSONPathEqual(t, text, "123", "id")
 		requireJSONPathEqual(t, text, 1, "number")
 		requireJSONPathEqual(t, text, "passed", "state")
+		// Build detail keeps the full creator, unlike list summaries.
+		requireJSONPathEqual(t, text, "user-uuid", "creator", "id")
+		requireJSONPathEqual(t, text, "https://example.com/a.png", "creator", "avatar_url")
 		// Job detail lives in list_jobs/get_job, not here.
 		assert.NotContains(text, `"jobs":`)
 		// Build env and pipeline config are intentionally omitted from read_builds.

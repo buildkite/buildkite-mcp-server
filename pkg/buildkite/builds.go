@@ -96,6 +96,7 @@ type BuildDetail struct {
 	ScheduledAt          *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
 	StartedAt            *buildkite.Timestamp          `json:"started_at,omitempty"`
 	MetaData             map[string]string             `json:"meta_data,omitempty"`
+	Creator              buildkite.Creator             `json:"creator"`
 	Source               string                        `json:"source,omitempty"`
 	RebuiltFrom          *buildkite.RebuiltFrom        `json:"rebuilt_from,omitempty"`
 	PullRequest          *buildkite.PullRequest        `json:"pull_request,omitempty"`
@@ -181,6 +182,7 @@ func detailBuild(build buildkite.Build, annotations []buildkite.Annotation, anno
 		ScheduledAt:          build.ScheduledAt,
 		StartedAt:            build.StartedAt,
 		MetaData:             build.MetaData,
+		Creator:              build.Creator,
 		Source:               build.Source,
 		RebuiltFrom:          build.RebuiltFrom,
 		PullRequest:          build.PullRequest,
