@@ -2,7 +2,9 @@ package buildkite
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
@@ -47,6 +49,9 @@ func handleBuildkiteError(err error) (*mcp.CallToolResult, any, error) {
 
 	var errResp *buildkite.ErrorResponse
 	if errors.As(err, &errResp) {
+		if errResp.Response != nil && errResp.Response.StatusCode == http.StatusTooManyRequests {
+			return utils.NewToolResultError(rateLimitedMessage(errResp)), nil, nil
+		}
 		if errResp.RawBody != nil {
 			return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
 		}
@@ -55,4 +60,18 @@ func handleBuildkiteError(err error) (*mcp.CallToolResult, any, error) {
 		}
 	}
 	return utils.NewToolResultError(err.Error()), nil, nil
+}
+
+// rateLimitedMessage explains a 429 to the agent. It prefers the API's
+// message, which names the exceeded limit and its reset time; RateLimit-Reset
+// reports the organization's window even when a per-user limit was exceeded.
+func rateLimitedMessage(errResp *buildkite.ErrorResponse) string {
+	detail := "Retry in a minute."
+	if errResp.Message != "" {
+		detail = errResp.Message
+	} else if secs, err := strconv.Atoi(errResp.Response.Header.Get("RateLimit-Reset")); err == nil && secs >= 0 {
+		detail = fmt.Sprintf("The limit resets in %d seconds.", secs)
+	}
+	return "Buildkite API rate limit exceeded (HTTP 429). " + detail +
+		" To stay under the limit, make fewer, broader calls, such as filtered list calls with a larger per_page, rather than one call per build or job."
 }

@@ -103,6 +103,9 @@ func run(ctx context.Context, cmd *kong.Context) error {
 		gobuildkite.WithUserAgent(commands.UserAgent(version)),
 		gobuildkite.WithHTTPClient(httpClient),
 		gobuildkite.WithBaseURL(cli.BaseURL),
+		// Return 429s immediately: waiting out RateLimit-Reset (up to a minute
+		// per retry) outlasts MCP client request timeouts.
+		gobuildkite.WithMaxRetries(0),
 	}
 	if !usesRequestAuthorization {
 		clientOptions = append(clientOptions, gobuildkite.WithTokenAuth(apiToken))
