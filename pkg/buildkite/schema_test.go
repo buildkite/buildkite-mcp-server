@@ -61,7 +61,7 @@ func TestListBuildsArgsSchema(t *testing.T) {
 	require.Contains(t, s.Properties, "per_page")
 
 	// Optional fields must NOT be in required
-	for _, opt := range []string{"pipeline_slug", "branch", "state", "commit", "creator", "page", "per_page"} {
+	for _, opt := range []string{"pipeline_slug", "branch", "state", "commit", "creator", "created_from", "created_to", "finished_from", "page", "per_page"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
 
