@@ -16,6 +16,8 @@
 #   ./bk-tool-audit.sh metrics [session.jsonl]    # token totals, cost, tool counts, duration
 #   ./bk-tool-audit.sh struggles [session.jsonl]  # failed tool calls by type + struggle patterns (JSON)
 #   ./bk-tool-audit.sh struggles-markdown <struggles.json>   # render it
+#   ./bk-tool-audit.sh model-retries <raw-stream.jsonl>      # model API retries by status (JSON; claude only)
+#   ./bk-tool-audit.sh model-retries-markdown <retries.json> # render it
 #
 # Options (before the positional args):
 #   --all        Include all tools, not just mcp__buildkite-mcp-server__*
@@ -632,8 +634,68 @@ struggles_markdown() {
   ' "$1"
 }
 
+# --- model API retries -----------------------------------------------------
+# The agent harness retrying its call to the MODEL API (e.g. a 504 or 429
+# from the model gateway) — not a tool call (and not a Buildkite API
+# request), so the struggles report does not see it. Claude Code emits
+# one {"type":"system","subtype":"api_retry", attempt, max_retries,
+# retry_delay_ms, error_status, error} event per retry in its stream-json
+# output (claude.sh's raw log, CLAUDE_RAW_LOG). Grouped by status; a null
+# status (no HTTP response) is keyed by the error name. Other agents emit no
+# known equivalent yet: {"available": false}.
+model_retries() {
+  local f="${1:-}"
+  if [[ "$AGENT" != "claude" || -z "$f" || ! -f "$f" ]]; then
+    jq -n --arg agent "$AGENT" '{available: false, reason: "no model API retry events known for agent \($agent) (or no raw stream captured)"}'
+    return
+  fi
+  # The raw stream may hold non-JSON lines; skip them.
+  jq -Rn '
+    [inputs | fromjson? | select(type == "object" and .type == "system" and .subtype == "api_retry")] as $r
+    | {
+        available: true,
+        retries: ($r | length),
+        wait_seconds: ((($r | map(.retry_delay_ms // 0) | add) // 0) / 1000 | . * 10 | round / 10),
+        max_attempt: ($r | map(.attempt // 0) | max // 0),
+        max_retries: ($r | map(.max_retries // 0) | max // 0),
+        by_status: ($r
+          | map(. + {key: (if .error_status != null then (.error_status | tostring) else (.error // "unknown") end)})
+          | group_by(.key)
+          | map({key: .[0].key,
+                 value: {retries: length,
+                         wait_seconds: ((map(.retry_delay_ms // 0) | add) / 1000 | . * 10 | round / 10),
+                         error: (map(.error // empty) | unique | join(", "))}})
+          | from_entries)
+      }' "$f"
+}
+
+# model_retries_markdown <model-retries.json>  -- render it.
+model_retries_markdown() {
+  jq -r '
+    "**Model API retries** (the agent harness retrying its call to the model API — not the agent, not Buildkite):",
+    "",
+    if (.available // false) | not then
+      "_Not available: \(.reason // "unknown")._"
+    elif .retries == 0 then
+      "_None._"
+    else
+      "```",
+      (.by_status | to_entries[] | "\(.key): \(.value.retries) retr\(if .value.retries == 1 then "y" else "ies" end) (\(.value.wait_seconds)s waiting\(if .value.error != "" then ", \(.value.error)" else "" end))"),
+      "```",
+      "",
+      "Total: \(.retries) retries, \(.wait_seconds)s waiting; highest attempt \(.max_attempt) of \(.max_retries)."
+    end
+  ' "$1"
+}
+
 # --- dispatch --------------------------------------------------------------
 case "${1:-}" in
+  model-retries)
+    model_retries "${2:-}"
+    ;;
+  model-retries-markdown)
+    model_retries_markdown "${2:?model-retries-markdown needs the model-retries JSON}"
+    ;;
   struggles)
     f="${2:-$(newest_session)}"
     [[ -n "$f" ]] || { echo "no sessions in $PROJECT_DIR" >&2; exit 1; }
