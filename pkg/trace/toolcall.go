@@ -2,6 +2,8 @@ package trace
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"strconv"
 	"sync/atomic"
 )
@@ -11,13 +13,23 @@ import (
 type ToolCall struct {
 	// Name is the MCP tool name, e.g. "get_build".
 	Name string
-	// ID is unique per tool call within this server process.
+	// ID is unique per tool call, also across server processes writing to
+	// the same request log: a random per-process prefix plus a counter.
 	ID string
 }
 
 type toolCallKey struct{}
 
-var toolCallCounter atomic.Uint64
+var (
+	toolCallCounter atomic.Uint64
+	toolCallPrefix  = newToolCallPrefix()
+)
+
+func newToolCallPrefix() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b) // crypto/rand.Read never returns an error
+	return hex.EncodeToString(b)
+}
 
 // WithToolCall returns a context carrying tc.
 func WithToolCall(ctx context.Context, tc ToolCall) context.Context {
@@ -30,7 +42,7 @@ func ToolCallFromContext(ctx context.Context) (ToolCall, bool) {
 	return tc, ok
 }
 
-// newToolCall returns a ToolCall for name with the next process-unique ID.
+// newToolCall returns a ToolCall for name with the next unique ID.
 func newToolCall(name string) ToolCall {
-	return ToolCall{Name: name, ID: strconv.FormatUint(toolCallCounter.Add(1), 10)}
+	return ToolCall{Name: name, ID: toolCallPrefix + "-" + strconv.FormatUint(toolCallCounter.Add(1), 10)}
 }

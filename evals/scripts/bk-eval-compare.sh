@@ -183,7 +183,9 @@ tool_table() {
 }
 
 # fanout_table BASE_JSON CUR_JSON  -> Buildkite API requests per MCP tool
-# (metrics.json's api_fanout), base vs target.
+# (metrics.json's api_fanout), base vs target. A run without api_fanout
+# (recorded before request logging, or cursor-cloud) was not measured, so
+# deltas against it are N/A; a tool missing from a measured run counts as 0.
 fanout_table() {
     jq -rn --slurpfile b "$1" --slurpfile c "$2" '
         def rows(f): ((f // {}) as $f
@@ -199,7 +201,9 @@ fanout_table() {
             "|---|---:|---:|---:|---:|---:|"]
            + ($names | map(. as $n
                | ($B[$n].requests // 0) as $bv | ($C[$n].requests // 0) as $cv
-               | "| `\($n)` | \(cell($B[$n].calls)) | \(cell($B[$n].requests)) | \(cell($C[$n].calls)) | \(cell($C[$n].requests)) | \(if ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) |")))
+               | (if $BF == null or $CF == null then "N/A"
+                  elif ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) as $delta
+               | "| `\($n)` | \(cell($B[$n].calls)) | \(cell($B[$n].requests)) | \(cell($C[$n].calls)) | \(cell($C[$n].requests)) | \($delta) |")))
           | .[]
         end'
 }
