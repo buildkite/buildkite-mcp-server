@@ -199,10 +199,11 @@ judge() {
     if [[ -s "$report" ]]; then
         conclusion_source="the agent's final report"
         if (( $(wc -c < "$report") > DIGEST_OVER )); then
-            if digest "$report" > "$conclusion_file"; then
+            # Dry runs call nothing, the digest model included.
+            if [[ "$DRY_RUN" != "true" ]] && digest "$report" > "$conclusion_file"; then
                 conclusion_source="digest of the final report by $DIGEST_MODEL ($(wc -c < "$report") → $(wc -c < "$conclusion_file") bytes)"
             else
-                echo "yilong: digest unavailable; truncating the final report instead" >&2
+                [[ "$DRY_RUN" == "true" ]] || echo "yilong: digest unavailable; truncating the final report instead" >&2
                 cp "$report" "$conclusion_file"
                 conclusion_source="final report, truncated to fit"
             fi
