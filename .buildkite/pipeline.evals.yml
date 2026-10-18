@@ -114,10 +114,10 @@ steps:
       # the CURSOR_API_KEY env line above.
       CURSOR_API_KEY: MCP_EVAL_FRAMEWORK_CURSOR_API_KEY
 
-  # Judge every yilong entry with Jev, OUTSIDE the agent container.
-  # SECURITY: same reasoning as dd-publish below — the evaluated agent has
-  # unrestricted Bash, so MCP_EVAL_JEV_KEY must never be mapped into the eval
-  # step. babystand.sh leaves runs/<id>/<run-key>.judge.json in the run
+  # Judge every yilong entry with Jev (TypeSafe's System One API), OUTSIDE
+  # the agent container. SECURITY: same reasoning as dd-publish below — the
+  # evaluated agent has unrestricted Bash, so MCP_EVAL_FRAMEWORK_JEV_TOKEN
+  # must never be mapped into the eval step. babystand.sh leaves runs/<id>/<run-key>.judge.json in the run
   # bundle; this step downloads those and uploads <run-key>.yilong.json.
   - label: "🧑🏻‍⚖️ yilong"
     key: yilong
@@ -125,13 +125,13 @@ steps:
     depends_on:
       - step: agent
         allow_failure: true
-    # Best-effort like the klaren review it replaces: Jev abstaining or being
+    # Best-effort like the klaren review it replaces: the TypeSafe API being
     # unavailable must never fail the build.
     soft_fail: true
     agents:
       queue: hosted
     secrets:
-      MCP_EVAL_JEV_KEY: MCP_EVAL_JEV_KEY
+      MCP_EVAL_FRAMEWORK_JEV_TOKEN: MCP_EVAL_FRAMEWORK_JEV_TOKEN
 
   # Publish per-entry run metrics to Datadog, OUTSIDE the agent container.
   # SECURITY: the eval step above runs the evaluated agent with unrestricted

@@ -46,9 +46,9 @@
 #     vars        Static KEY=VALUE map substituted into the prompt template.
 #   evaluator     Optional. How the agent's run is judged afterwards:
 #                 'yilong' (default) — scripts/yilong.sh, in its own pipeline
-#                 step: three cheap Jev multiple-choice questions, each
+#                 step: three cheap Jev (TypeSafe) scored questions, each
 #                 recorded as a verdict (and a mcp_eval.yilong.* Datadog score
-#                 of 0 / 0.5 / 1), or undetermined when Jev abstains:
+#                 of 0 / 0.5 / 1), or undetermined when the API call fails:
 #                   conclusion     bollocks | sorta | yeah-baby
 #                   investigation  homer-simpson | scooby-doo | sherlock
 #                   fix            airshot | duct-tape | sweeet

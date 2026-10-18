@@ -687,8 +687,8 @@ run_entry() {
     fi
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
     # yilong's input. The judging itself happens in the pipeline's yilong step
-    # (scripts/yilong.sh), outside this container: MCP_EVAL_JEV_KEY must never
-    # be visible to the agent under test. yilong reads this file plus the
+    # (scripts/yilong.sh), outside this container: MCP_EVAL_FRAMEWORK_JEV_TOKEN must
+    # never be visible to the agent under test. yilong reads this file plus the
     # bundle's eval-final.md and tools.txt.
     if [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
         if ! jq -n \
@@ -727,7 +727,7 @@ run_entry() {
                 "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
         fi
     elif [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
-        echo "*** [$ENTRY_ID] to judge locally: MCP_EVAL_JEV_KEY=... $SCRIPT_DIR/yilong.sh $PREFIX.judge.json"
+        echo "*** [$ENTRY_ID] to judge locally: MCP_EVAL_FRAMEWORK_JEV_TOKEN=... $SCRIPT_DIR/yilong.sh $PREFIX.judge.json"
     fi
 
     # --- Compare against the baseline (best-effort) -------------------------

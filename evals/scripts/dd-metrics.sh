@@ -55,7 +55,7 @@
 #   <prefix>.yilong.<question>          verdict score (0 / 0.5 / 1) per yilong
 #                                       question (conclusion, investigation,
 #                                       fix); omitted when n/a or undetermined
-#   <prefix>.yilong.undetermined        questions Jev abstained on or failed
+#   <prefix>.yilong.undetermined        questions whose Jev API call failed
 #
 set -euo pipefail
 

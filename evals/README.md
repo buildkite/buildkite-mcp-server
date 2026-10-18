@@ -43,7 +43,7 @@ The klaren reviewer always runs on claude regardless of the entry's agent — it
 
 Each `evals.yaml` entry picks how its run is judged with `evaluator:`. Set `EVALUATOR=klaren` (or `yilong`) in the environment when creating a build to override every entry.
 
-* `yilong` (default) — cheap and fast. `scripts/yilong.sh` asks [Jev](https://github.com/buildkite/jev-mcp) three multiple-choice questions per run (rubric: `prompts/yilong.json`):
+* `yilong` (default) — cheap and fast. `scripts/yilong.sh` asks Jev, [TypeSafe](https://docs.typesafe.ai)'s System One model, three scored questions per run (rubric: `prompts/yilong.json`):
 
   | Question | Verdicts (score 0 → 0.5 → 1) |
   | --- | --- |
@@ -51,11 +51,11 @@ Each `evals.yaml` entry picks how its run is judged with `evaluator:`. Set `EVAL
   | Quality of investigation | homer-simpson → scooby-doo → sherlock |
   | Correctness of fix | airshot → duct-tape → sweeet |
 
-  * Jev only compares the evidence it is given and caps requests at ~8 KB, so yilong sends condensed evidence: the goal, the final report (digested to ~1.8 KB by a cheap Claude model — `YILONG_DIGEST_MODEL`, default `claude-haiku-4-5` — when it is long), the tool-call sequence, the pushed diff or proposed fix, and the final build state.
+  * yilong calls the System One API directly (`POST https://api.typesafe.ai/v1/systemone`, model `YILONG_MODEL`, default `jev-1.14.0`), one Score request per question. Each request's state holds only that question's evidence: the goal, the agent's final report, the condensed tool-call sequence, the pushed diff or proposed fix, the final build state, and the reference answer. Each record is capped at 16,000 characters (head and tail kept), well inside the API's 32k tokens per question.
   * Conclusion and fix are graded against the entry's reference answer in `expected/<id>/root_cause.md` and `expected/<id>/fix.md`; without them those questions are `n/a`. The answers are kept out of `evals.yaml` because the image (and so the agent under test) gets `evals.yaml` — never copy `expected/` into it. (They are still public in this repo, and in any fork the eval clones.)
-  * A question is `undetermined` when Jev abstains (any confidence below 0.8), is rate-limited past retries, or errors. Jev's per-choice probabilities and an expected score are kept in `<run>.yilong.json` either way.
-  * Runs in its own `yilong` pipeline step, outside the agent container, because `MCP_EVAL_JEV_KEY` must never be visible to the agent under test (same reasoning as Datadog below). babystand.sh leaves `<run>.judge.json` in the run bundle; the step downloads it with `eval-final.md` and `tools.txt`, uploads `<run>.yilong.json` and annotates the build (`yilong-<id>`).
-  * Locally: `MCP_EVAL_JEV_KEY=... ./evals/scripts/yilong.sh evals/runs/<id>/<run>.judge.json` (`YILONG_DRY_RUN=true` prints the Jev requests without a key).
+  * The verdict is the level Jev finds most probable. Its per-level probabilities, expected score, confidence and token usage are kept in `<run>.yilong.json`; low confidence means Jev was split between levels. A question is `undetermined` only when the API call fails (rate limits and 5xx are retried with backoff first).
+  * Runs in its own `yilong` pipeline step, outside the agent container, because `MCP_EVAL_FRAMEWORK_JEV_TOKEN` must never be visible to the agent under test (same reasoning as Datadog below). babystand.sh leaves `<run>.judge.json` in the run bundle; the step downloads it with `eval-final.md` and `tools.txt`, uploads `<run>.yilong.json` and annotates the build (`yilong-<id>`).
+  * Locally: `MCP_EVAL_FRAMEWORK_JEV_TOKEN=... ./evals/scripts/yilong.sh evals/runs/<id>/<run>.judge.json` (`YILONG_DRY_RUN=true` prints the Jev requests without a key).
 * `klaren` — the full session review (`prompts/klaren.md`), run inside the eval step after the agent. Detailed and useful, but slow and token-hungry, so use it on demand. The comparison annotation only compares klaren reports when both the base and target runs have one.
 
 ## Permission posture
@@ -208,4 +208,4 @@ All new code are mostly in `evals/` folder
       * Github to access scenarios (read/write) in external repo, e.g., where scnearios are, so we can access/create branches and push, etc.
       * Buildkite for bk org to retrieve the last successful build (read) to compare
       * Buildkite for orgs where the scenario pipelines (read) are (to monitor scenarios from red-to-green)
-      * Jev (`MCP_EVAL_JEV_KEY`), mapped only into the `yilong` step
+      * TypeSafe Jev (`MCP_EVAL_FRAMEWORK_JEV_TOKEN`), mapped only into the `yilong` step
