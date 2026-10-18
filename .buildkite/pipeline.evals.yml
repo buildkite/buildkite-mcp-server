@@ -119,7 +119,7 @@ steps:
   # unrestricted Bash, so MCP_EVAL_JEV_KEY must never be mapped into the eval
   # step. babystand.sh leaves runs/<id>/<run-key>.judge.json in the run
   # bundle; this step downloads those and uploads <run-key>.yilong.json.
-  - label: ":judge: yilong"
+  - label: "🧑🏻‍⚖️ yilong"
     key: yilong
     command: ./evals/scripts/yilong.sh
     depends_on:

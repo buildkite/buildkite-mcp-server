@@ -329,7 +329,7 @@ judge() {
     # Summary markdown (annotation in CI, stdout locally).
     jq -r '
         def pct: if . == null then "–" else (. * 100 | round | tostring) + "%" end;
-        "<details open><summary>:judge: [\(.entry)] yilong — verdicts</summary>\n",
+        "<details open><summary>🧑🏻‍⚖️ [\(.entry)] yilong — verdicts</summary>\n",
         "| Question | Verdict | Jev probabilities | Note |",
         "| --- | --- | --- | --- |",
         (.questions[] |
@@ -345,7 +345,7 @@ judge() {
 FAILED=0
 for judge_file in "${JUDGE_FILES[@]}"; do
     ENTRY="$(jq -r '.entry // "unknown"' "$judge_file" 2>/dev/null || echo unknown)"
-    echo "--- :judge: [$ENTRY] yilong"
+    echo "--- 🧑🏻‍⚖️ [$ENTRY] yilong"
     SUMMARY="$WORK_DIR/summary.md"
     if ! judge "$judge_file" > "$SUMMARY"; then
         echo "WARNING: yilong: failed to judge $judge_file" >&2
