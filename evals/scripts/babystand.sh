@@ -549,7 +549,8 @@ run_entry() {
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE" || true
     # The steps below merge their results into the metrics, so it must be an
     # object even when the audit produced nothing.
-    jq -e 'type == "object"' "$AUDIT_METRICS_FILE" >/dev/null 2>&1 || echo '{}' > "$AUDIT_METRICS_FILE"
+    # (-s: plain `jq -e` exits 0 on an empty file.)
+    jq -e -s 'length == 1 and (.[0] | type == "object")' "$AUDIT_METRICS_FILE" >/dev/null 2>&1 || echo '{}' > "$AUDIT_METRICS_FILE"
 
     # --- Struggles (failed tool calls + patterns) ---------------------------
     # From the transcript: failures by type and tool, likely-harmless ones

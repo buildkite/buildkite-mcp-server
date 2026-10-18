@@ -440,8 +440,14 @@ metrics() {
 #   longest_failure_streak  most failed calls in a row
 #   repeated_failures       the same call (tool + exact input) failing 2+ times
 #   retries_after_failure   a failed call followed straight away by another
-#                           call with the same label; recovered_after_retry =
-#                           how many of those retries succeeded
+#                           call with the same label, made after the failure's
+#                           result came back (calls sent together in one turn
+#                           are not retries); recovered_after_retry = how many
+#                           of those retries succeeded. Each call carries pos
+#                           (when it was made) and result_pos (when the agent
+#                           could see its result): claude uses the model
+#                           response (message.id) order for both, cursor the
+#                           stream position of its first and completed events
 # Dialects: claude (tool_result is_error; "Exit code N" text; toolUseResult
 # interrupted) and cursor (completed tool_call events: a `failure` result,
 # shell failure.exitCode / aborted / stderr, MCP success.isError) — both
@@ -470,7 +476,9 @@ STRUGGLES_JQ='
     | (reduce ($calls[] | select((.failed and .harmless) | not)) as $c ({cur: 0, max: 0};
          if $c.failed then .cur += 1 | .max = ([.max, .cur] | max) else .cur = 0 end) | .max) as $streak
     | ([range(0; ($calls | length) - 1) as $i
-         | select($calls[$i].failed and ($calls[$i].harmless | not) and $calls[$i + 1].label == $calls[$i].label)
+         | select($calls[$i].failed and ($calls[$i].harmless | not) and $calls[$i + 1].label == $calls[$i].label
+                  and $calls[$i].result_pos != null and $calls[$i + 1].pos != null
+                  and $calls[$i].result_pos < $calls[$i + 1].pos)
          | $calls[$i + 1].failed | not]) as $retries
     | {
         implemented: true,
@@ -511,6 +519,12 @@ struggles() {
                            and (.tool_call | type) == "object"))
               | map({key: (.call_id | tostring), value: (.tool_call | to_entries[0].value.result // {})})
               | from_entries) as $results
+      # Stream positions per call_id: first event (when the call was made) and
+      # completed event (when its result came back).
+      | ([range(0; $all | length) as $i | $all[$i]
+          | select(.type == "tool_call" and (.call_id // "") != "") | {id: (.call_id | tostring), i: $i, done: (.subtype == "completed")}]) as $evs
+      | ($evs | reduce .[] as $e ({}; if has($e.id) then . else .[$e.id] = $e.i end)) as $first
+      | ($evs | map(select(.done)) | reduce .[] as $e ({}; .[$e.id] = $e.i)) as $done
       | [ $all | cursor_calls | .[]
           | (.tool_call | to_entries[0]) as $t
           | ($t.value.args // {}) as $a
@@ -520,7 +534,9 @@ struggles() {
           | ($t.key == "shellToolCall") as $shell
           | (if $shell then ($a.command // "" | shell_program | "Bash: " + .)
              else (cursor_tool_name($t) | sub("^mcp__[^_]+(?:_[^_]+)*?__"; "")) end) as $lbl
+          | ((.call_id // "") | tostring) as $cid
           | {label: $lbl,
+             pos: $first[$cid], result_pos: $done[$cid],
              input: (if $t.key == "mcpToolCall" then ($a.args // $a.arguments // {}) else $a end),
              failed: ($fail != null or $mcp_err),
              type: (if $mcp_err then "MCP tool error"
@@ -539,8 +555,16 @@ struggles() {
   fi
   jq -n "$STRUGGLES_JQ"'
     [inputs] as $all
+    # Model responses in order (message.id -> 1, 2, ...). Claude Code writes
+    # each tool_use of a response on its own line and may run the first before
+    # writing the next, so line order cannot tell parallel calls from retries;
+    # the response they came from can. A call sees the results of every call
+    # made in an earlier response.
+    | (reduce ($all[] | select(.type == "assistant") | .message.id // empty) as $m
+         ({}; if has($m) then . else .[$m] = (length + 1) end)) as $turn
     # tool_use blocks in transcript order (deduped by id, first seen wins)
-    | (reduce ($all[] | (.message.content? // []) | select(type == "array") | .[] | select(.type == "tool_use")) as $u
+    | (reduce ($all[] | . as $l | (.message.content? // []) | select(type == "array") | .[]
+                | select(.type == "tool_use") | . + {_turn: $turn[$l.message.id? // ""]}) as $u
          ({seen: {}, out: []}; if .seen[$u.id] then . else .seen[$u.id] = true | .out += [$u] end) | .out) as $uses
     | ($all | [ .[] | . as $l | (.message.content? // []) | select(type == "array") | .[]
                 | select(.type == "tool_result" and .tool_use_id != null)
@@ -556,6 +580,7 @@ struggles() {
         # null (not empty) when there is no exit code, or the call would be dropped
         | ([$r.text | capture("^Exit code (?<n>[0-9]+)")? | .n] | first) as $exit
         | {label: (if $shell then ($cmd | shell_program | "Bash: " + .) else (.name | sub("^mcp__[^_]+(?:_[^_]+)*?__"; "")) end),
+           pos: ._turn, result_pos: ._turn,
            input: .input,
            failed: ($r.is_error or ($r.tur.interrupted? // false)),
            type: (if ($r.tur.interrupted? // false) or ($r.text | test("\\[Request interrupted")) then "interrupted"
