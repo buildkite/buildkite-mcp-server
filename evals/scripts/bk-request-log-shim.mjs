@@ -13,10 +13,10 @@
 // the same base URL). The proxy forwards each request unchanged to the real
 // endpoint over HTTPS and logs it. bk's stdin/stdout/stderr are inherited
 // untouched and its exit code is passed through, so the agent sees normal bk.
-// Artifact downloads: `bk artifacts download` fetches each file from the
-// artifact's absolute download_url, so for that command the proxy rewrites
-// those URLs in the artifact list to point back at itself (see
-// rewriteDownloadURLs) and the download requests are logged too.
+// Artifact downloads: `bk artifacts download` and `bk build download` fetch
+// each file from the artifact's absolute download_url, so for those commands
+// the proxy rewrites those URLs in the artifact list to point back at itself
+// (see rewriteDownloadURLs) and the download requests are logged too.
 // Not seen: other requests bk sends to absolute URLs from API responses
 // (e.g. the S3 redirect after a download — not a Buildkite API request),
 // and bk's non-API HTTP (self-update, skill downloads).
@@ -83,19 +83,13 @@ function runBk(env, onExit) {
 }
 
 
-// isArtifactsDownload reports whether args run `bk artifacts download` (flags
-// before the subcommand words are skipped).
-function isArtifactsDownload(args) {
-  const words = [];
-  for (const a of args) {
-    if (a.startsWith("-")) {
-      if (words.length === 0) continue;
-      break;
-    }
-    words.push(a);
-    if (words.length === 2) break;
-  }
-  return /^artifacts?$/.test(words[0] || "") && words[1] === "download";
+// isDownload reports whether args run a command that downloads artifacts
+// from their absolute download_url: `bk artifacts download` or
+// `bk build download`. Flags are skipped wherever they sit among the command
+// words (bk's global flags, e.g. --quiet, take no value).
+function isDownload(args) {
+  const words = args.filter((a) => !a.startsWith("-")).slice(0, 2);
+  return /^(artifacts?|build)$/.test(words[0] || "") && words[1] === "download";
 }
 
 function startProxyAndRun() {
@@ -109,14 +103,14 @@ function startProxyAndRun() {
   let requests = 0;
   // Set once the proxy is listening (before bk starts, so before any request).
   let localRestBase = "";
-  // `bk artifacts download` fetches each file from the artifact's own
-  // download_url — an absolute API URL taken from the artifact list, which
-  // would skip this proxy. For that command only, rewrite those URLs in the
-  // proxied JSON responses to point back at the proxy, so the downloads are
-  // logged too. Safe there because the command never prints the URLs (it
-  // prints "Downloaded: <path>"); other commands, e.g. `bk artifacts list`,
-  // may show them to the agent, so their responses are left untouched.
-  const rewriteDownloadURLs = isArtifactsDownload(argv);
+  // `bk artifacts download` and `bk build download` fetch each file from the
+  // artifact's own download_url — an absolute API URL taken from the artifact
+  // list, which would skip this proxy. For those commands only, rewrite those
+  // URLs in the proxied JSON responses to point back at the proxy, so the
+  // downloads are logged too. Safe there because they never print the URLs
+  // (they print the downloaded paths); other commands, e.g. `bk artifacts
+  // list`, may show them to the agent, so their responses are left untouched.
+  const rewriteDownloadURLs = isDownload(argv);
   const restUpstreamBase = upstreams.rest.origin + upstreams.rest.pathname;
 
   // Point absolute REST URLs (plain and JSON-escaped "\/" forms) at the proxy.
@@ -159,6 +153,24 @@ function startProxyAndRun() {
       const client = target.protocol === "http:" ? http : https;
       const upstreamReq = client.request(target, { method: req.method, headers }, (upstreamRes) => {
         let bytes = 0;
+        let done = false;
+        const logOnce = (extra) => {
+          if (done) return;
+          done = true;
+          requests++;
+          writeLog({ ...record, status: upstreamRes.statusCode, duration_ms: Date.now() - started, bytes, ...extra });
+        };
+        // The connection can drop after the headers arrived: the body then
+        // ends with "close" (and possibly "error") but no "end". Log the
+        // request as failed and cut bk's connection too, so bk fails the
+        // way it would have against the API directly instead of waiting
+        // forever.
+        const fail = (err) => {
+          logOnce({ error: `response interrupted: ${err?.message || "connection closed"}` });
+          res.destroy();
+        };
+        upstreamRes.on("error", fail);
+        upstreamRes.on("close", () => { if (!done) fail(); });
         const isJSON = String(upstreamRes.headers["content-type"] || "").includes("json");
         if (rewrite && isJSON && !upstreamRes.headers["content-encoding"]) {
           const parts = [];
@@ -167,8 +179,7 @@ function startProxyAndRun() {
             const out = Buffer.from(rewriteURLs(Buffer.concat(parts).toString("utf8")), "utf8");
             const outHeaders = { ...upstreamRes.headers, "content-length": String(out.length) };
             delete outHeaders["transfer-encoding"];
-            requests++;
-            writeLog({ ...record, status: upstreamRes.statusCode, duration_ms: Date.now() - started, bytes });
+            logOnce({});
             res.writeHead(upstreamRes.statusCode ?? 502, outHeaders);
             res.end(out);
           });
@@ -177,8 +188,7 @@ function startProxyAndRun() {
         res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
         upstreamRes.on("data", (c) => { bytes += c.length; res.write(c); });
         upstreamRes.on("end", () => {
-          requests++;
-          writeLog({ ...record, status: upstreamRes.statusCode, duration_ms: Date.now() - started, bytes });
+          logOnce({});
           res.end();
         });
       });

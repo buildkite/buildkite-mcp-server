@@ -714,7 +714,14 @@ run_entry() {
         : > "$REQUEST_LOG"
         if [[ "$MODE" == "cli" ]]; then
             BK_SHIM_DIR="$HOME/.eval-bk-cli/$RUN_KEY/shim"
-            install_bk_shim "$BK_SHIM_DIR" "$BK_CLI_BIN" "$REQUEST_LOG" || BK_SHIM_DIR=""
+            # Without the wrapper bk runs unlogged: report fan-out as not
+            # available rather than as zero requests.
+            if ! install_bk_shim "$BK_SHIM_DIR" "$BK_CLI_BIN" "$REQUEST_LOG"; then
+                BK_SHIM_DIR=""
+                rm -f "$REQUEST_LOG"
+                REQUEST_LOG=""
+                NO_REQUEST_LOG="node is not installed, so bk's API requests could not be logged"
+            fi
         fi
     fi
     local HARNESS_VERSION; HARNESS_VERSION="$(harness_version "$AGENT")"
