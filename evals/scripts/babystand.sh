@@ -591,6 +591,15 @@ run_entry() {
                 echo "WARNING: entry '$ENTRY_ID': mode 'cli' is not supported for agent 'cursor-cloud' yet; skipping." >&2
                 return 0
             fi
+            # cursor-agent also loads the user's global ~/.cursor/mcp.json, and
+            # an empty project config can't switch those servers off
+            # (--approve-mcps then enables them), so a cli run could quietly
+            # use MCP. Skip rather than report a mixed run as CLI-only.
+            if [[ "$AGENT" == "cursor" ]] \
+                    && jq -e '(.mcpServers // {}) | length > 0' "$HOME/.cursor/mcp.json" >/dev/null 2>&1; then
+                echo "WARNING: entry '$ENTRY_ID': mode 'cli' with agent 'cursor' needs no MCP servers in $HOME/.cursor/mcp.json (cursor-agent loads them too); skipping." >&2
+                return 0
+            fi
             ;;
         *)
             echo "WARNING: entry '$ENTRY_ID' has unknown mode '$MODE' (want mcp or cli); skipping." >&2
