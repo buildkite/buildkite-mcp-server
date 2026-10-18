@@ -594,10 +594,13 @@ run_entry() {
             # cursor-agent also loads the user's global ~/.cursor/mcp.json, and
             # an empty project config can't switch those servers off
             # (--approve-mcps then enables them), so a cli run could quietly
-            # use MCP. Skip rather than report a mixed run as CLI-only.
-            if [[ "$AGENT" == "cursor" ]] \
-                    && jq -e '(.mcpServers // {}) | length > 0' "$HOME/.cursor/mcp.json" >/dev/null 2>&1; then
-                echo "WARNING: entry '$ENTRY_ID': mode 'cli' with agent 'cursor' needs no MCP servers in $HOME/.cursor/mcp.json (cursor-agent loads them too); skipping." >&2
+            # use MCP. Skip rather than report a mixed run as CLI-only. A file
+            # jq can't read (Cursor accepts // comments) may hold servers too,
+            # so it skips as well.
+            local CURSOR_GLOBAL_MCP="$HOME/.cursor/mcp.json"
+            if [[ "$AGENT" == "cursor" && -e "$CURSOR_GLOBAL_MCP" ]] \
+                    && ! jq -e '(.mcpServers // {}) | length == 0' "$CURSOR_GLOBAL_MCP" >/dev/null 2>&1; then
+                echo "WARNING: entry '$ENTRY_ID': mode 'cli' with agent 'cursor' needs $CURSOR_GLOBAL_MCP to define no MCP servers (cursor-agent loads them too; a file jq can't parse counts as having some); skipping." >&2
                 return 0
             fi
             ;;
