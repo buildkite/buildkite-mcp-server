@@ -106,19 +106,30 @@ function startProxyAndRun() {
   // `bk artifacts download` and `bk build download` fetch each file from the
   // artifact's own download_url — an absolute API URL taken from the artifact
   // list, which would skip this proxy. For those commands only, rewrite those
-  // URLs in the proxied JSON responses to point back at the proxy, so the
-  // downloads are logged too. Safe there because they never print the URLs
+  // download_url values in the proxied JSON responses to point back at the
+  // proxy, so the downloads are logged too. Safe there because they never print the URLs
   // (they print the downloaded paths); other commands, e.g. `bk artifacts
   // list`, may show them to the agent, so their responses are left untouched.
   const rewriteDownloadURLs = isDownload(argv);
   const restUpstreamBase = upstreams.rest.origin + upstreams.rest.pathname;
 
-  // Point absolute REST URLs (plain and JSON-escaped "\/" forms) at the proxy.
-  function rewriteURLs(text) {
-    const escaped = (u) => u.replace(/\//g, "\\/");
-    return text
-      .split(restUpstreamBase).join(localRestBase)
-      .split(escaped(restUpstreamBase)).join(escaped(localRestBase));
+  // Point artifacts' download_url values at the proxy, and nothing else: the
+  // same response types also carry content the agent reads (e.g. `bk build
+  // download` saves job logs fetched as JSON), which must stay untouched.
+  // Returns the body unchanged when it isn't JSON or has no such URL.
+  function rewriteDownloadURLsIn(body) {
+    let data;
+    try { data = JSON.parse(body.toString("utf8")); } catch { return body; }
+    let changed = false;
+    const fix = (a) => {
+      if (a && typeof a === "object" && typeof a.download_url === "string"
+          && a.download_url.startsWith(restUpstreamBase)) {
+        a.download_url = localRestBase + a.download_url.slice(restUpstreamBase.length);
+        changed = true;
+      }
+    };
+    if (Array.isArray(data)) data.forEach(fix); else fix(data);
+    return changed ? Buffer.from(JSON.stringify(data), "utf8") : body;
   }
 
   const server = http.createServer((req, res) => {
@@ -176,7 +187,7 @@ function startProxyAndRun() {
           const parts = [];
           upstreamRes.on("data", (c) => { bytes += c.length; parts.push(c); });
           upstreamRes.on("end", () => {
-            const out = Buffer.from(rewriteURLs(Buffer.concat(parts).toString("utf8")), "utf8");
+            const out = rewriteDownloadURLsIn(Buffer.concat(parts));
             const outHeaders = { ...upstreamRes.headers, "content-length": String(out.length) };
             delete outHeaders["transfer-encoding"];
             logOnce({});

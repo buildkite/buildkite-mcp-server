@@ -48,8 +48,10 @@ FANOUT_JQ='
       | "\($method) \(join("/"))"
     end;
   def bk_command:
+    # Flags are skipped wherever they sit among the command words: the bk
+    # global flags (--quiet, --yes, ...) take no value.
     (.argv // []) | map(tostring)
-    | (until(length == 0 or (.[0] | startswith("-") | not); .[1:])) as $rest
+    | map(select(startswith("-") | not)) as $rest
     | ([ $rest[0:2][] ] | until(length == 0 or all(test("^[a-z][a-z-]*$")); .[0:-1])) as $words
     | "bk" + ($words | map(" " + .) | join(""));
   def top_endpoints: group_by(endpoint) | map("\(length) \(.[0] | endpoint)") | sort_by(split(" ")[0] | tonumber) | reverse;
