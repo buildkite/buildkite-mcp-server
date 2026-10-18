@@ -337,7 +337,7 @@ judge() {
           + (if .probabilities then ([.probabilities | to_entries[] | "\(.key) \(.value | pct)"] | join(" · ")) else "–" end)
           + " | \(if .status == "ok" then "" else (.reason // "") end) |"),
         "",
-        "_Conclusion evidence: \(.conclusion_source)._ Undetermined means Jev abstained or was unavailable; n/a means the entry lacks the evidence (add its reference answer under `evals/expected/<id>/`).",
+        "_Conclusion evidence: \(.conclusion_source)._ Undetermined means Jev abstained or was unavailable; n/a means the entry lacks the evidence (add its reference answer under `evals/expected/\(.entry)/`).",
         "</details>"
     ' "$out"
 }
