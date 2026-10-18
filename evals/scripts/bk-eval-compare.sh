@@ -179,6 +179,12 @@ semantic_compare() {
     local b_eval="$1" c_eval="$2" b_klaren="$3" c_klaren="$4"
     [[ -s "$c_eval" || -s "$c_klaren" ]] || return 0
 
+    # Klaren runs only on demand (evaluator: klaren), so either side may lack a
+    # report; scoring one against nothing would read as every issue resolved
+    # (or new). Compare klaren only when both runs have one.
+    local with_klaren=false
+    [[ -s "$b_klaren" && -s "$c_klaren" ]] && with_klaren=true
+
     local PROMPT; PROMPT="$(mktemp)"
     {
         cat <<'PROMPT_HEADER'
@@ -193,6 +199,9 @@ Output ONLY GitHub-flavored markdown (no preamble). Use exactly these sections:
 ### Plan Steps
 - SIDE-BY-SIDE table: Step | Base | Target.
 - Then bullet the notable DIFFERENCES (steps added, dropped, reordered, or done differently).
+PROMPT_HEADER
+        if [[ "$with_klaren" == "true" ]]; then
+            cat <<'PROMPT_KLAREN'
 
 ## :female-detective: Klaren
 ### Score
@@ -209,13 +218,16 @@ Categorize issues across the two reports (match by substance, not wording):
   - **Resolved (gone):** in base but not target.
   - **New:** in target but not base.
   - **Remaining:** in both (note any severity/frequency change).
-
-Keep it tight and skimmable.
-PROMPT_HEADER
+PROMPT_KLAREN
+        fi
+        echo
+        echo "Keep it tight and skimmable."
         echo; echo "=== BASE — EVAL SUMMARY ===";  _sect "$b_eval"
         echo; echo "=== TARGET — EVAL SUMMARY ==="; _sect "$c_eval"
-        echo; echo "=== BASE — KLAREN REPORT ===";  _sect "$b_klaren"
-        echo; echo "=== TARGET — KLAREN REPORT ==="; _sect "$c_klaren"
+        if [[ "$with_klaren" == "true" ]]; then
+            echo; echo "=== BASE — KLAREN REPORT ===";  _sect "$b_klaren"
+            echo; echo "=== TARGET — KLAREN REPORT ==="; _sect "$c_klaren"
+        fi
     } > "$PROMPT"
 
     local LOG; LOG="$(mktemp)"; local RESULT=""

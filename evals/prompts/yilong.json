@@ -1,0 +1,41 @@
+{
+  "_comment": "yilong rubric: one Jev jev_owner_route call per question. 'evidence' names records yilong.sh builds (goal, expected_root_cause, expected, conclusion, trace, fix, outcome); a question whose 'requires' records are missing is reported as n/a. Level ids are the verdict values; scores feed Datadog. Every byte here counts against Jev's 8,000-byte request budget (candidates are serialized twice), so keep descriptions short.",
+  "questions": [
+    {
+      "key": "conclusion",
+      "title": "Correctness of conclusion",
+      "evidence": ["expected_root_cause", "conclusion"],
+      "requires": ["expected_root_cause", "conclusion"],
+      "task": "Grade an AI agent's diagnosis of a failing CI build. Record 'conclusion' is what the agent concluded; record 'expected_root_cause' is the known correct root cause. Pick the candidate that best describes how well the agent's root cause matches the reference. Judge only the diagnosis, not its style, length or proposed fix.",
+      "levels": [
+        { "id": "bollocks", "label": "Bollocks", "score": 0, "description": "Wrong: the agent's root cause does not match the reference, or blames something the reference rules out." },
+        { "id": "sorta", "label": "Sorta", "score": 0.5, "description": "Partly right: right area or some of the reference causes, but misses or misstates a material part." },
+        { "id": "yeah-baby", "label": "Yeah baby", "score": 1, "description": "Right: matches the reference root cause for every failing part, with no material errors." }
+      ]
+    },
+    {
+      "key": "investigation",
+      "title": "Quality of investigation",
+      "evidence": ["goal", "trace", "conclusion"],
+      "requires": ["trace", "conclusion"],
+      "task": "Grade how an AI agent reached its conclusion. Record 'trace' lists the agent's tool calls in order; record 'conclusion' is what it concluded and the evidence it cites. Decide whether the conclusion was earned by evidence the agent actually retrieved. Judge rigor only, not efficiency and not whether the conclusion is correct.",
+      "levels": [
+        { "id": "homer-simpson", "label": "Homer Simpson", "score": 0, "description": "Unfounded: key claims rest on nothing retrieved in the trace, or invent facts such as log lines, tests or files." },
+        { "id": "scooby-doo", "label": "Scooby-Doo", "score": 0.5, "description": "Lucky or unverified: concluded before retrieving the decisive logs or tests, guessed from names, or left key claims unchecked." },
+        { "id": "sherlock", "label": "Sherlock", "score": 1, "description": "Earned: every key claim traces to logs, test results, exit codes or files retrieved in the trace before concluding." }
+      ]
+    },
+    {
+      "key": "fix",
+      "title": "Correctness of fix",
+      "evidence": ["expected", "fix", "outcome"],
+      "requires": ["expected", "fix"],
+      "task": "Grade an AI agent's fix for a failing CI build. Record 'fix' is the change the agent made or proposed; record 'expected' is the known root cause and correct fix; record 'outcome', when present, is the build result after the change. Decide whether the fix resolves the root cause in the best way.",
+      "levels": [
+        { "id": "airshot", "label": "Airshot", "score": 0, "description": "Misses: does not address the root cause, would not make the build pass, or breaks something else." },
+        { "id": "duct-tape", "label": "Duct tape", "score": 0.5, "description": "Hides the symptom: deletes, skips or loosens tests, adds retries, or masks the error instead of fixing the cause." },
+        { "id": "sweeet", "label": "Sweeet", "score": 1, "description": "Right fix: addresses the reference root cause minimally, without weakening tests or hiding errors." }
+      ]
+    }
+  ]
+}

@@ -63,6 +63,8 @@ COPY evals/tsconfig.json /workspace/
 COPY evals/mcp_in_ci.json /workspace/
 COPY evals/mcp_cursor_cloud.json /workspace/
 COPY evals/evals.yaml /workspace/
+# Never copy evals/expected/: it is yilong's answer key, and the agent under
+# test runs in this image with unrestricted Bash.
 
 # Run the build.
 RUN npm ci && npm run build

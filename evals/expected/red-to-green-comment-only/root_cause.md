@@ -1,0 +1,5 @@
+Build 204234 failed because two shards of the `:rspec: Run` step each failed one test, for two unrelated reasons. The Verify job and the 153 broken (conditionally skipped) jobs are consequences, not causes.
+
+1. `spec/features/admin/search_records_spec.rb:14`: test-order pollution, not the branch and not random flakiness. The admin search returned a 500 because `Buildkite::Console::Magic.find_all_records_by_uuid` (`lib/buildkite/console/magic.rb:252`) raised `NameError: uninitialized constant SoftDestroyableModel`: a test-only model from `spec/models/concerns/soft_destroyable_spec.rb`, which ran earlier in the same rspec process, leaked into ActiveRecord's model list, so the UUID search queried it and failed to load it. Calling this a flaky or environmental 500 that a retry fixes is wrong.
+
+2. `spec/features/viewing_build_waterfall_spec.rb:44`: a real Tailwind v4 upgrade regression. The drawer container has both `flex-row-reverse` and `flex-col-reverse`; row wins, so the bottom-docked drawer collapses to a narrow column and the truncated job name "rspec" in its header is invisible ("found 1 time including non-visible text"). It fails deterministically.

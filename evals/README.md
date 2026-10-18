@@ -7,8 +7,9 @@ There is a [pipeline](https://buildkite.com/buildkite/buildkite-mcp-server-evals
 A set of artifacts, and annotations in the Buildkite build showing:
 * LLM agent metrics
   * Tool calls, input/output tokens, input/output cache tokens, etc.
-* Quantitative evaluation report
-  * List of things order by criticality that the LLM agent could have done better, due to harness loop, tool call choices, etc.
+* Evaluation of each run, by the entry's `evaluator` (see "Evaluators")
+  * yilong (default): three verdicts — correctness of conclusion, quality of investigation, correctness of fix
+  * klaren (on demand): list of things ordered by criticality that the LLM agent could have done better, due to harness loop, tool call choices, etc.
 * Comparison reports
   * LLM agent metrics
   * High-level steps taken by LLM agent to complete scenarios
@@ -37,6 +38,25 @@ A set of artifacts, and annotations in the Buildkite build showing:
   * Ops notes: the launch endpoint is strictly rate-limited (~1/user/min; the script retries a 429 once per attempt cycle), runs are capped at `CURSOR_CLOUD_TIMEOUT_MINS` (default 90 — reconnects get the *remaining* budget) and cancelled best-effort on abort/timeout, and dropped SSE connections reconnect with `Last-Event-ID` resume plus a status-poll fallback that synthesizes the terminal `result` record if the stream missed it (if the server ignores the resume header and replays events, tool audits stay correct — calls dedupe by `callId`).
 
 The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
+
+## Evaluators
+
+Each `evals.yaml` entry picks how its run is judged with `evaluator:`. Set `EVALUATOR=klaren` (or `yilong`) in the environment when creating a build to override every entry.
+
+* `yilong` (default) — cheap and fast. `scripts/yilong.sh` asks [Jev](https://github.com/buildkite/jev-mcp) three multiple-choice questions per run (rubric: `prompts/yilong.json`):
+
+  | Question | Verdicts (score 0 → 0.5 → 1) |
+  | --- | --- |
+  | Correctness of conclusion | bollocks → sorta → yeah-baby |
+  | Quality of investigation | homer-simpson → scooby-doo → sherlock |
+  | Correctness of fix | airshot → duct-tape → sweeet |
+
+  * Jev only compares the evidence it is given and caps requests at ~8 KB, so yilong sends condensed evidence: the goal, the final report (digested to ~1.8 KB by a cheap Claude model — `YILONG_DIGEST_MODEL`, default `claude-haiku-4-5` — when it is long), the tool-call sequence, the pushed diff or proposed fix, and the final build state.
+  * Conclusion and fix are graded against the entry's reference answer in `expected/<id>/root_cause.md` and `expected/<id>/fix.md`; without them those questions are `n/a`. The answers are kept out of `evals.yaml` because the image (and so the agent under test) gets `evals.yaml` — never copy `expected/` into it. (They are still public in this repo, and in any fork the eval clones.)
+  * A question is `undetermined` when Jev abstains (any confidence below 0.8), is rate-limited past retries, or errors. Jev's per-choice probabilities and an expected score are kept in `<run>.yilong.json` either way.
+  * Runs in its own `yilong` pipeline step, outside the agent container, because `MCP_EVAL_JEV_KEY` must never be visible to the agent under test (same reasoning as Datadog below). babystand.sh leaves `<run>.judge.json` in the run bundle; the step downloads it with `eval-final.md` and `tools.txt`, uploads `<run>.yilong.json` and annotates the build (`yilong-<id>`).
+  * Locally: `MCP_EVAL_JEV_KEY=... ./evals/scripts/yilong.sh evals/runs/<id>/<run>.judge.json` (`YILONG_DRY_RUN=true` prints the Jev requests without a key).
+* `klaren` — the full session review (`prompts/klaren.md`), run inside the eval step after the agent. Detailed and useful, but slow and token-hungry, so use it on demand. The comparison annotation only compares klaren reports when both the base and target runs have one.
 
 ## Permission posture
 
@@ -72,13 +92,16 @@ All new code are mostly in `evals/` folder
 * In 'evals/prompts/' folder:
   * klaren.md
     * Review LLM agent session log and complain loudly about what could've been better
+  * yilong.json
+    * The yilong rubric: each question's task, evidence records and verdict levels
   * Other `<name>.md` files are prompt templates referenced by evals.yaml entries,
     rendered per entry with `{{.KEY}}` substitution (globals + scenario vars +
     setup vars)
 * In 'evals/scripts/' folder:
   * babystand.sh
     * Drives the evals.yaml matrix: per entry it runs the scenario setup, renders
-      the prompt, runs the LLM agent, audits the session, runs the klaren review,
+      the prompt, runs the LLM agent, audits the session, runs the klaren review
+      (evaluator: klaren) or writes yilong's judge.json (evaluator: yilong),
       writes a run bundle to `evals/runs/<id>/<id>-<datetime>.<ext>` (eval-final,
       metrics, tools, klaren, transcript; gitignored; also uploaded as build
       artifacts in CI), publishes per-entry annotations (`eval-final-<id>`,
@@ -116,12 +139,17 @@ All new code are mostly in `evals/` folder
       cursor-cloud streams carry no per-event timestamps, so `wait` /
       `tool_time_seconds` are null there (their result event still reports
       total duration)
+  * yilong.sh
+    * The default evaluator — see "Evaluators" above. CI's `yilong` step runs
+      it with no arguments; locally, pass `<run>.judge.json` paths
   * dd-metrics.sh
     * Publish one entry's run metrics to Datadog (metrics v2 series API) as
       `mcp_eval.*` gauges — run count, goal_achieved (1/0), duration /
       tool-time / wait seconds, tool call counts (total + `mcp__`-prefixed),
-      and token usage (input / output / cache read / cache write) — tagged
-      `entry:`, `prompt:`, `agent:`, `model:`, `goal:`, `buildkite_build:`
+      token usage (input / output / cache read / cache write), and yilong
+      verdict scores (`yilong.conclusion` / `.investigation` / `.fix`, plus
+      `yilong.undetermined`) — tagged `entry:`, `prompt:`, `agent:`,
+      `model:`, `goal:`, `evaluator:`, `buildkite_build:`
     * Best-effort by design: skips loudly when `DD_API_KEY` is unset (local
       runs, forks), and a publish failure never fails the entry. `DD_SITE`
       picks the Datadog site, `DD_METRIC_PREFIX` the namespace (default
@@ -180,3 +208,4 @@ All new code are mostly in `evals/` folder
       * Github to access scenarios (read/write) in external repo, e.g., where scnearios are, so we can access/create branches and push, etc.
       * Buildkite for bk org to retrieve the last successful build (read) to compare
       * Buildkite for orgs where the scenario pipelines (read) are (to monitor scenarios from red-to-green)
+      * Jev (`MCP_EVAL_JEV_KEY`), mapped only into the `yilong` step
