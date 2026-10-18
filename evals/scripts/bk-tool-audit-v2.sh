@@ -14,6 +14,8 @@
 #   ./bk-tool-audit.sh list                  # list this project's sessions (newest first)
 #   ./bk-tool-audit.sh diff <a.jsonl> <b.jsonl>   # diff tool/param calls between two sessions
 #   ./bk-tool-audit.sh metrics [session.jsonl]    # token totals, cost, tool counts, duration
+#   ./bk-tool-audit.sh struggles [session.jsonl]  # failed tool calls by type + struggle patterns (JSON)
+#   ./bk-tool-audit.sh struggles-markdown <struggles.json>   # render it
 #
 # Options (before the positional args):
 #   --all        Include all tools, not just mcp__buildkite-mcp-server__*
@@ -422,8 +424,190 @@ metrics() {
   ' "$snap"
 }
 
+# --- struggles -------------------------------------------------------------
+# Failed tool calls and the patterns around them — signs the agent was
+# struggling. Each call is normalized to {label, input, failed, type, text,
+# harmless} and summarized by STRUGGLES_JQ:
+#   errors_by_type   failure type -> tool label -> count, where type is
+#                    "exit N" (shell exit code), "timeout", "interrupted",
+#                    "blocked" (permission / harness refusal), "MCP tool
+#                    error" or "tool error"; shell calls are labelled by
+#                    their first real program, skipping cd / export / plain
+#                    VAR=value parts ("Bash: git", "Bash: go")
+#   likely harmless  exit 1 with no output from grep/rg/test/diff/... ("no
+#                    match" / "false", not a struggle) — counted under
+#                    "exit 1 (likely harmless)" and left out of the patterns
+#   longest_failure_streak  most failed calls in a row
+#   repeated_failures       the same call (tool + exact input) failing 2+ times
+#   retries_after_failure   a failed call followed straight away by another
+#                           call with the same label; recovered_after_retry =
+#                           how many of those retries succeeded
+# Dialects: claude (tool_result is_error; "Exit code N" text; toolUseResult
+# interrupted) and cursor (completed tool_call events: a `failure` result,
+# shell failure.exitCode / aborted / stderr, MCP success.isError) — both
+# checked against real transcripts. cursor-cloud is not implemented yet: it
+# reports {"implemented": false}.
+STRUGGLES_JQ='
+  def first_line: tostring | split("\n") | map(select(test("\\S"))) | (.[0] // "") | .[0:160];
+  # The first real program in the command, across all lines: skips comment
+  # lines and cd/export/VAR= setup (e.g. "cd /tmp\n# note\nsed ..." -> "sed").
+  # Always a string, even for a command that is only setup.
+  def shell_program:
+    split("\n")
+    | map(select(test("^\\s*#") | not))
+    | map([splits("\\s*(?:&&|\\|\\||;|\\|)\\s*")]) | add // []
+    | map(sub("^\\s+"; "") | sub("^(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+"; ""))
+    | map(select(. != ""
+                  and (test("^(?:cd|export|set|source|\\.)(?:\\s|$)") | not)
+                  and (test("^[A-Za-z_][A-Za-z0-9_]*=\\S*$") | not)))
+    | (.[0] // "") | (split(" ")[0] // "") | sub(".*/"; "");
+  def harmless_programs: ["grep", "egrep", "fgrep", "rg", "test", "[", "[[", "diff", "cmp", "false", "pgrep", "which", "command"];
+  def struggle_summary:
+    . as $calls
+    | ($calls | map(select(.failed))) as $failed
+    | ($failed | map(select(.harmless | not))) as $real
+    # longest run of real failures (a harmless failure neither extends nor breaks it)
+    | (reduce ($calls[] | select((.failed and .harmless) | not)) as $c ({cur: 0, max: 0};
+         if $c.failed then .cur += 1 | .max = ([.max, .cur] | max) else .cur = 0 end) | .max) as $streak
+    | ([range(0; ($calls | length) - 1) as $i
+         | select($calls[$i].failed and ($calls[$i].harmless | not) and $calls[$i + 1].label == $calls[$i].label)
+         | $calls[$i + 1].failed | not]) as $retries
+    | {
+        implemented: true,
+        tool_calls: ($calls | length),
+        failed_calls: ($failed | length),
+        likely_harmless: ($failed | map(select(.harmless)) | length),
+        errors_by_type: ($failed
+          | map(. + {type: (if .harmless then "exit 1 (likely harmless)" else .type end)})
+          | group_by(.type)
+          | map({key: .[0].type,
+                 value: (group_by(.label) | sort_by(-length, .[0].label) | map({key: .[0].label, value: length}) | from_entries)})
+          | from_entries),
+        longest_failure_streak: $streak,
+        repeated_failures: ($real | group_by([.label, (.input | tojson)]) | map(select(length > 1))
+          | map({label: .[0].label, count: length,
+                 call: ((.[0].input.command? // (.[0].input | tojson)) | tostring | .[0:160])})
+          | sort_by(-.count)),
+        retries_after_failure: ($retries | length),
+        recovered_after_retry: ($retries | map(select(.)) | length),
+        examples: ($real | group_by(.type)
+          | map({key: .[0].type, value: (map("\(.label): \(.text | first_line)") | unique | .[0:3])})
+          | from_entries)
+      };'
+
+struggles() {
+  local f="$1"
+  [[ -f "$f" ]] || { echo "no such transcript: $f" >&2; exit 1; }
+  if [[ "$AGENT" == "cursor-cloud" ]]; then
+    echo "WARNING: struggles are not implemented for cursor-cloud yet (its failed-call format is unverified)." >&2
+    jq -n '{implemented: false, reason: "not implemented for cursor-cloud yet"}'
+    return
+  fi
+  if [[ "$AGENT" == "cursor" ]]; then
+    jq -n "$CURSOR_TOOL_NAME_JQ$STRUGGLES_JQ"'
+      [inputs | select(type == "object")] as $all
+      # Results come on the completed events, keyed by call_id.
+      | ($all | map(select(.type == "tool_call" and .subtype == "completed" and (.call_id // "") != ""
+                           and (.tool_call | type) == "object"))
+              | map({key: (.call_id | tostring), value: (.tool_call | to_entries[0].value.result // {})})
+              | from_entries) as $results
+      | [ $all | cursor_calls | .[]
+          | (.tool_call | to_entries[0]) as $t
+          | ($t.value.args // {}) as $a
+          | ($results[(.call_id // "") | tostring] // {}) as $r
+          | ($r.failure // null) as $fail
+          | (($t.key == "mcpToolCall") and (($r.success.isError? // false) == true)) as $mcp_err
+          | ($t.key == "shellToolCall") as $shell
+          | (if $shell then ($a.command // "" | shell_program | "Bash: " + .)
+             else (cursor_tool_name($t) | sub("^mcp__[^_]+(?:_[^_]+)*?__"; "")) end) as $lbl
+          | {label: $lbl,
+             input: (if $t.key == "mcpToolCall" then ($a.args // $a.arguments // {}) else $a end),
+             failed: ($fail != null or $mcp_err),
+             type: (if $mcp_err then "MCP tool error"
+                    elif $fail == null then null
+                    elif ($fail.aborted? // false) then "interrupted"
+                    elif ($fail.exitCode? // null) != null then "exit \($fail.exitCode)"
+                    else "tool error" end),
+             text: (if $mcp_err then ($r.success.content // [] | map(.text // "") | join(" "))
+                    else ($fail.stderr? // $fail.message? // $fail.error? // ($fail | tojson)) end),
+             harmless: ($shell and ($fail.exitCode? // null) == 1
+                        and ((($fail.stdout? // "") + ($fail.stderr? // "")) | test("\\S") | not)
+                        and (($a.command // "" | shell_program) as $p | harmless_programs | index($p) != null))} ]
+      | struggle_summary
+    ' "$f"
+    return
+  fi
+  jq -n "$STRUGGLES_JQ"'
+    [inputs] as $all
+    # tool_use blocks in transcript order (deduped by id, first seen wins)
+    | (reduce ($all[] | (.message.content? // []) | select(type == "array") | .[] | select(.type == "tool_use")) as $u
+         ({seen: {}, out: []}; if .seen[$u.id] then . else .seen[$u.id] = true | .out += [$u] end) | .out) as $uses
+    | ($all | [ .[] | . as $l | (.message.content? // []) | select(type == "array") | .[]
+                | select(.type == "tool_result" and .tool_use_id != null)
+                | {key: .tool_use_id,
+                   value: {is_error: (.is_error // false),
+                           text: ((.content // "") | if type == "array" then (map(.text // "") | join("")) else tostring end),
+                           tur: (if ($l.toolUseResult | type) == "object" then $l.toolUseResult else {} end)}} ]
+              | from_entries) as $results
+    | [ $uses[]
+        | ($results[.id] // {is_error: false, text: "", tur: {}}) as $r
+        | (.name == "Bash") as $shell
+        | (.input.command? // "" | tostring) as $cmd
+        # null (not empty) when there is no exit code, or the call would be dropped
+        | ([$r.text | capture("^Exit code (?<n>[0-9]+)")? | .n] | first) as $exit
+        | {label: (if $shell then ($cmd | shell_program | "Bash: " + .) else (.name | sub("^mcp__[^_]+(?:_[^_]+)*?__"; "")) end),
+           input: .input,
+           failed: ($r.is_error or ($r.tur.interrupted? // false)),
+           type: (if ($r.tur.interrupted? // false) or ($r.text | test("\\[Request interrupted")) then "interrupted"
+                  elif $exit != null then "exit \($exit)"
+                  elif ($r.text | test("timed out"; "i")) then "timeout"
+                  elif ($r.text | test("not permitted|permission|haven.t granted|requires approval|denied|isolated in the worktree|Refusing to run|blocked"; "i")) then "blocked"
+                  elif (.name | startswith("mcp__")) then "MCP tool error"
+                  else "tool error" end),
+           text: ($r.text | sub("^Exit code [0-9]+\n?"; "")),
+           harmless: ($shell and $exit == "1"
+                      and ($r.text | sub("^Exit code [0-9]+\n?"; "") | test("\\S") | not)
+                      and (($cmd | shell_program) as $p | harmless_programs | index($p) != null))} ]
+    | struggle_summary
+  ' "$f"
+}
+
+# struggles_markdown <struggles.json>  -- render the struggles summary.
+struggles_markdown() {
+  jq -r '
+    if (.implemented // false) | not then
+      "> ⚠️ **Struggles report not implemented for this agent yet** (\(.reason // "unknown reason")). Failed tool calls are not counted."
+    else
+      "**Tool calls: \(.tool_calls), failed: \(.failed_calls)** (likely harmless: \(.likely_harmless), e.g. grep with no match)",
+      "",
+      (if (.errors_by_type | length) > 0 then
+        "**Failed tool calls by type** (type → tool → failed calls):", "", "```",
+        (.errors_by_type | to_entries[] | "\(.key):", (.value | to_entries[] | "  \(.key): \(.value)")),
+        "```", ""
+       else empty end),
+      "- Longest run of failed calls in a row: **\(.longest_failure_streak)**",
+      "- Failed, then the same tool straight away: **\(.retries_after_failure)** (succeeded on that retry: \(.recovered_after_retry))",
+      "- Same call failing more than once: **\(.repeated_failures | length)**",
+      (.repeated_failures[0:5][] | "  - \(.count)× `\(.label)`: `\(.call | gsub("`"; "\u0027"))`"),
+      (if (.examples | length) > 0 then
+        "", "<details><summary>Example errors</summary>", "",
+        (.examples | to_entries[] | "**\(.key)**", (.value[] | "- `\(gsub("`"; "\u0027"))`"), ""),
+        "</details>"
+       else empty end)
+    end
+  ' "$1"
+}
+
 # --- dispatch --------------------------------------------------------------
 case "${1:-}" in
+  struggles)
+    f="${2:-$(newest_session)}"
+    [[ -n "$f" ]] || { echo "no sessions in $PROJECT_DIR" >&2; exit 1; }
+    struggles "$f"
+    ;;
+  struggles-markdown)
+    struggles_markdown "${2:?struggles-markdown needs the struggles JSON}"
+    ;;
   list)
     echo "# project dir: $PROJECT_DIR"
     ls -lt "$PROJECT_DIR"/*.jsonl 2>/dev/null || echo "(no sessions found)"

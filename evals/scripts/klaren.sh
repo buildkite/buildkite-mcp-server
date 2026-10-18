@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the detailed reviewer, export rubric verdicts and candidate answer keys.
 # Usage: ENTRY_ID=id PROMPT_NAME=prompt SCENARIO_ID=scenario AGENT=claude
-#        klaren.sh transcript goal final-report diff prefix
+#        klaren.sh transcript goal final-report diff prefix [struggles-markdown]
 # CI loads checked-in references from MCP_SRC_SHA only AFTER the evaluated run;
 # expected/ remains excluded from the agent image. Local runs use expected/.
 set -euo pipefail
@@ -11,6 +11,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TRANSCRIPT="${1:?transcript required}" GOAL="${2:?goal required}"
 REPORT="${3:?final report required}" DIFF="${4:?diff file required}"
 PREFIX="${5:?output prefix required}"
+STRUGGLES_MD="${6:-}"
 : "${ENTRY_ID:?entry id required}"
 : "${PROMPT_NAME:?prompt name required}"
 SCENARIO_ID="${SCENARIO_ID:-}"
@@ -74,6 +75,10 @@ jq -n --rawfile goal "$GOAL" --rawfile conclusion "$REPORT" \
 {
     cat "$ROOT_DIR/prompts/klaren.md"
     printf '\nThe LLM session log file to analyze is: %s\n' "$TRANSCRIPT"
+    if [[ -s "$STRUGGLES_MD" ]]; then
+        printf '\nFailed tool calls and struggle patterns from the session log ("likely harmless" = e.g. grep with no match). Use them as leads, and check each in the log:\n\n'
+        cat "$STRUGGLES_MD"
+    fi
     printf '\nCanonical rubric (verdict IDs, criteria and required evidence):\n'
     cat "$ROOT_DIR/prompts/rubric.json"
     printf '\nHarness evidence and reviewed references (empty strings mean unavailable):\n'
