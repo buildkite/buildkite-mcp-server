@@ -89,6 +89,41 @@
 #                 BUILDKITE_API_TOKEN for this entry's run only; entries whose
 #                 named var is unset are skipped loudly. Default: the ambient
 #                 BUILDKITE_API_TOKEN.
+#   mode          Optional. How the agent reaches Buildkite: 'mcp' (default — the
+#                 MCP server under test, see mcp_version; bk is NOT available:
+#                 a stub `bk` first on PATH fails like a missing command) or
+#                 'cli' (the Buildkite CLI, `bk`, and NO MCP server). Either
+#                 way, shell calls that run bk are counted (tool_calls_bk_cli),
+#                 so an mcp run is expected to show 0. In cli mode the agent gets an
+#                 empty MCP config (claude: --strict-mcp-config, so no MCP server
+#                 from the caller's own settings leaks in), bk on PATH, the entry
+#                 token (token_env) as BUILDKITE_API_TOKEN — bk reads it before
+#                 any stored credential — BUILDKITE_ORGANIZATION_SLUG set to the
+#                 entry's org (never the ambient one), BK_TELEMETRY=false, and a
+#                 one-line note appended to the prompt saying bk is there
+#                 (prompts/modes/cli.md; an MCP server announces itself through
+#                 its tool list, a CLI does not). Supported for agents claude and
+#                 cursor; cursor-cloud entries in cli mode are skipped loudly
+#                 (bk is installed on this host, not in Cursor's VM).
+#   mode_params   Optional hash of per-mode settings. Unknown keys skip the entry
+#                 loudly. mode 'mcp' takes none. mode 'cli' takes:
+#                   download_url  https URL of a bk release archive (.tar.gz /
+#                                 .tgz / .zip — the bk binary inside is used)
+#                                 or a bare binary, e.g.
+#                                 https://github.com/buildkite/cli/releases/download/v3.59.1/bk_3.59.1_linux_amd64.tar.gz
+#                                 (CI is linux/amd64; a local macOS run needs a
+#                                 macOS build). Default: the bk pinned in
+#                                 evals/Dockerfile, installed off PATH at
+#                                 /opt/bk/bin/bk; else (local runs) the bk on PATH.
+#                   org_slug      bk's default organization. Default: the
+#                                 token's only organization (GET
+#                                 /v2/organizations), else none.
+#                 Every run records what it used — mode, mode_params, the
+#                 harness (agent CLI) version, and the bk CLI or MCP server
+#                 version — in <run>.run-info.json, in <run>.metrics.json under
+#                 run_info (so in the eval-metrics annotation and comparisons),
+#                 in the eval-metrics / eval-tools annotation titles, and as
+#                 Datadog tags (mode:, harness_version:, bk_cli_version:).
 #   mcp_version   MCP server version this run's agent talks to: a release tag, a
 #                 branch, a commit SHA, or 'source' (the in-image binary built
 #                 from the code under review). NOTE: overrides other than 'source'
@@ -192,6 +227,8 @@ matrix:
   - id: red-to-green-comment-only
     agent: claude
     model: claude-opus-4-8
+    mode: mcp
+    mode_params: {}
     prompt: red-to-green-comment-only
     scenario:
       id: buildkite-204234
@@ -200,6 +237,23 @@ matrix:
     # The build above lives in the `buildkite` org, not the default eval org.
     token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
     mcp_version: source
+
+  # The same diagnosis driven through the Buildkite CLI (bk) instead of the MCP
+  # server — compare its tool calls / tokens / klaren review against the entry
+  # above. Uncomment to run. Drop download_url to use the bk pinned in
+  # evals/Dockerfile.
+  # - id: red-to-green-comment-only-cli
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   mode: cli
+  #   mode_params:
+  #     download_url: https://github.com/buildkite/cli/releases/download/v3.59.1/bk_3.59.1_linux_amd64.tar.gz
+  #     org_slug: buildkite
+  #   prompt: red-to-green-comment-only
+  #   scenario:
+  #     vars:
+  #       BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+  #   token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
 
   # A no-build scenario: analyze an existing build and propose speedups. Produces
   # only a written proposal — no git push, no new Buildkite build — so it is

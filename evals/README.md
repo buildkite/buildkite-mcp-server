@@ -209,6 +209,29 @@ three categories with the level markers above. Yilong publishes matching
 Run the focused checks with
 `python3 -B -m unittest discover -s evals/scripts -p 'test_*.py' -v`.
 
+## Modes: MCP server or Buildkite CLI
+
+Each entry also picks HOW its agent reaches Buildkite (`mode:`, default `mcp`), with per-mode settings in `mode_params:` (a hash; unknown keys skip the entry loudly). Full field docs are at the top of `evals.yaml`.
+
+* `mcp` — the MCP server under test (see `mcp_version`). Takes no `mode_params`. bk is not available: the CI image installs it off PATH, and a stub `bk` first on the agent's PATH fails like a missing command (exit 127), so a bk on your own PATH can't leak into a local run either.
+* `cli` — the [Buildkite CLI](https://github.com/buildkite/cli) (`bk`) and NO MCP server, so the same scenario can be compared across the two. For `claude` and `cursor` agents (cursor-cloud is skipped: bk is installed on this host, not in Cursor's VM).
+  * `mode_params.download_url` — an https release archive (`.tar.gz`/`.tgz`/`.zip`) or bare binary. It is fetched into `~/.eval-bk-cli/<run>/bin/` (outside the eval-repo clone) and put first on the agent's PATH. Without it, the bk at `/opt/bk/bin/bk` is used — `BK_CLI_VERSION` pinned in `evals/Dockerfile`, installed off PATH — or, locally, the `bk` on PATH. `bk --version` must run, so a linux archive fails a local macOS run loudly.
+  * `mode_params.org_slug` — bk's default org (`BUILDKITE_ORGANIZATION_SLUG`). Default: the token's only org from `GET /v2/organizations`, else none. The ambient `BUILDKITE_ORGANIZATION_SLUG` is never passed through: in CI it names the org hosting the eval.
+  * The entry token (`token_env`) reaches bk as `BUILDKITE_API_TOKEN`, which bk reads before any stored credential. `BK_TELEMETRY=false`, so eval runs don't count as real CLI usage.
+  * The MCP config is `mcp_none.json` (empty). Locally, claude also gets `--strict-mcp-config`, so MCP servers from your own Claude settings don't leak in, and the restricted allowlist (`LOCAL_BYPASS_PERMISSION=false`) swaps the MCP tools for `Bash(bk:*)`.
+  * `prompts/modes/cli.md` is appended to the prompt: one line saying bk (with its version and default org) is installed and authenticated. An MCP server announces itself through its tool list; a CLI does not.
+  * klaren runs as normal on the transcript, with one line telling it the run used bk, not MCP.
+  * API fan-out is not implemented for cli runs yet; the `eval-fanout` annotation says so.
+
+`bk-tool-audit-v2.sh metrics` reports `tool_calls_bk_cli` (shell tool calls that ran bk) and `bk_cli_commands_by_name` (e.g. `2 bk build view`) for every agent and mode, so an mcp run is expected to show 0 (attempts against the stub still count). Detection is a heuristic: bk must be in command position (start of the command, or after `;` `&&` `|` `(` `$(` etc.). The comparison report gets a "Shell calls running bk" row and a per-command table, and Datadog `tool_calls.bk_cli`.
+
+Every run records what it used — mode, `mode_params`, the harness (agent CLI) version, and the bk CLI version (cli) or MCP server version + source SHA (mcp):
+
+* `runs/<id>/<run>.run-info.json` (bundle + build artifact)
+* `run_info` inside `<run>.metrics.json`, so it shows in the `eval-metrics-<id>` annotation, and the comparison report gets a "Run setup" table (base vs target, `same`/`changed`)
+* the `eval-final` / `eval-metrics` / `eval-tools` annotation titles, e.g. `mode: cli · claude 2.1.300 (Claude Code) · bk 3.59.1`
+* Datadog tags `mode:`, `harness_version:`, `bk_cli_version:`
+
 ## API fan-out
 
 Each run also records every Buildkite API request the MCP server makes, so you can see how many requests sit behind each MCP tool call ("fan-out"). Not available for `cursor-cloud` (its MCP server runs inside Cursor's VM).
@@ -222,7 +245,7 @@ Each run also records every Buildkite API request the MCP server makes, so you c
 
 `bk-tool-audit-v2.sh struggles` reads the transcript for failed tool calls and the patterns around them — signs the agent was struggling:
 
-* Failed calls grouped by type, then tool: `exit N` (shell exit code), `timeout`, `interrupted`, `blocked` (permission / harness refusal), `MCP tool error`, `tool error`. Shell calls are labelled by their first real program (`Bash: git`, `Bash: go`).
+* Failed calls grouped by type, then tool: `exit N` (shell exit code), `timeout`, `interrupted`, `blocked` (permission / harness refusal), `MCP tool error`, `tool error`. Shell calls are labelled by their first real program (`Bash: git`, `Bash: bk build view`).
 * "Likely harmless" failures — exit 1 with no output from `grep`/`rg`/`test`/`diff`/... (no match / false) — are counted separately and left out of the patterns.
 * Patterns: longest run of failed calls in a row, the same call (tool + exact input) failing 2+ times, and a failed call followed straight away by the same tool (and whether that retry worked). Example error lines per type.
 * Supported for `claude` (tool_result `is_error`, `Exit code N`) and `cursor` (`failure` results, shell `exitCode` / `aborted`, MCP `isError`), both checked against real transcripts. **Not implemented for `cursor-cloud` yet**: the run logs a WARNING and the annotation says so (no numbers, so nothing reads as zero failures).
@@ -364,6 +387,8 @@ All new code are mostly in `evals/` folder
     * Given an buildkite mcp version, build that buildkite mcp version into a docker image (not implemented yet, currently it just builds the buildkite mcp based on current code
   * mcp_in_ci.json
     * The mcp config used when `babystand.sh` is running in ci
+  * mcp_none.json
+    * The empty mcp config used by `mode: cli` entries (see "Modes" above)
   * api-fanout.sh
     * Per-run API request log summary (see "API fan-out" above)
   * mcp.json

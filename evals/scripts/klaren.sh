@@ -76,6 +76,11 @@ jq -n --rawfile goal "$GOAL" --rawfile conclusion "$REPORT" \
 {
     cat "$ROOT_DIR/prompts/klaren.md"
     printf '\nThe LLM session log file to analyze is: %s\n' "$TRANSCRIPT"
+    if [[ "${MODE:-mcp}" == "cli" ]]; then
+        printf '\nRun context: the agent had NO Buildkite MCP server; it reached Buildkite through the Buildkite CLI `bk` (version %s) via Bash. Judge the bk commands, flags and output as the tools under review.\n' "${BK_CLI_VERSION:-}"
+    else
+        printf '\nRun context: the agent reached Buildkite through the Buildkite MCP server (mode: mcp).\n'
+    fi
     if [[ -s "$FANOUT_MD" ]]; then
         printf '\nBuildkite API requests behind each MCP tool call (fan-out). Use it to quantify waste. The raw request log, one JSON line per API request tagged with the tool call that made it, is: %s\n\n' "$REQUEST_LOG"
         cat "$FANOUT_MD"
