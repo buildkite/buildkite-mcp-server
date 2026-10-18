@@ -53,6 +53,9 @@
 #                                       (wait_for_build / Bash sleep; claude only)
 #   <prefix>.tool_calls.total
 #   <prefix>.tool_calls.buildkite_mcp   calls with the mcp__ prefix
+#   <prefix>.api_requests.total         Buildkite API requests (fan-out; from
+#   <prefix>.api_requests.mcp           the run's request log — omitted when
+#                                       no log was collected, e.g. cursor-cloud)
 #   <prefix>.tool_errors.failed         failed tool calls, minus likely harmless
 #   <prefix>.tool_errors.likely_harmless  e.g. grep with no match
 #   <prefix>.tool_errors.longest_streak most failed calls in a row
@@ -162,6 +165,8 @@ PAYLOAD="$(jq -n \
         gauge("wait_seconds"; (($m.wait // {}) | .seconds // null); $tags),
         gauge("tool_calls.total"; ($m.tool_calls_total // null); $tags),
         gauge("tool_calls.buildkite_mcp"; ($m.tool_calls_mcp // null); $tags),
+        gauge("api_requests.total"; ($m.api_fanout.total_requests? // null); $tags),
+        gauge("api_requests.mcp"; ($m.api_fanout.mcp.requests? // null); $tags),
         # Struggles; absent (not zero) when not implemented for the agent.
         (($m.struggles // {}) as $s | if ($s.implemented // false) then
           gauge("tool_errors.failed"; ($s.failed_calls - $s.likely_harmless); $tags),

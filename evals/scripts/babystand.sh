@@ -305,6 +305,7 @@ run_cursor() {
         jq --arg cwd "$PWD" \
             '.mcpServers |= with_entries(
                .value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}"
+               | .value.env.BUILDKITE_REQUEST_LOG = "${env:BUILDKITE_REQUEST_LOG}"
                | .value.command |= (if startswith("./") then $cwd + ltrimstr(".") else . end))' \
             "$ROOT_DIR/mcp.json" > .cursor/mcp.json
         # Diff hygiene, not a security control (the file holds no secret):
@@ -473,6 +474,18 @@ run_entry() {
     mkdir -p "$RUN_DIR"
     local PREFIX="$RUN_DIR/$RUN_KEY"
 
+    # API request log (fan-out): one JSON line per Buildkite API request the
+    # MCP server makes (--request-log via BUILDKITE_REQUEST_LOG in the MCP
+    # configs), tagged with the tool call that made it. NO_REQUEST_LOG says
+    # why a run has none.
+    local REQUEST_LOG="" NO_REQUEST_LOG=""
+    if [[ "$AGENT" == "cursor-cloud" ]]; then
+        NO_REQUEST_LOG="agent \`$AGENT\` runs its MCP server in Cursor's VM, where the request log cannot be collected"
+    else
+        REQUEST_LOG="$PREFIX.api-requests.jsonl"
+        : > "$REQUEST_LOG"
+    fi
+
     # --- Scenario setup -----------------------------------------------------
     # setup bash runs in the eval-repo clone (cwd); it may push branches, etc.
     # It exposes values to the prompt by appending KEY=VALUE lines to
@@ -532,7 +545,8 @@ run_entry() {
     local SESSION_ID="" TRANSCRIPT="" EVAL_RESULT_FILE=""   # set by the runner (dynamic scope)
     local RAW_STREAM=""   # claude only: raw stream-json, for model API retries
     local EVAL_START; EVAL_START=$(date +%s)
-    if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
+    if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" BUILDKITE_REQUEST_LOG="$REQUEST_LOG" \
+            run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
     fi
@@ -555,6 +569,27 @@ run_entry() {
     # object even when the audit produced nothing.
     # (-s: plain `jq -e` exits 0 on an empty file.)
     jq -e -s 'length == 1 and (.[0] | type == "object")' "$AUDIT_METRICS_FILE" >/dev/null 2>&1 || echo '{}' > "$AUDIT_METRICS_FILE"
+    local MERGED_METRICS
+
+    # --- API fan-out (requests per MCP tool call) ---------------------------
+    # From the request log; merged into metrics.json as api_fanout (so the
+    # comparison and Datadog see it) and rendered as markdown for the
+    # eval-fanout annotation and klaren.
+    local FANOUT_JSON="" FANOUT_MD=""
+    if [[ -n "$REQUEST_LOG" ]]; then
+        echo "--- :satellite_antenna: [$ENTRY_ID] API fan-out"
+        FANOUT_JSON="$(mktemp)"; FANOUT_MD="$(mktemp)"
+        if "$SCRIPT_DIR/api-fanout.sh" json "$REQUEST_LOG" "$AUDIT_METRICS_FILE" > "$FANOUT_JSON" \
+                && "$SCRIPT_DIR/api-fanout.sh" markdown "$FANOUT_JSON" > "$FANOUT_MD"; then
+            cat "$FANOUT_MD"
+            MERGED_METRICS="$(mktemp)"
+            jq --slurpfile f "$FANOUT_JSON" '. + {api_fanout: $f[0]}' "$AUDIT_METRICS_FILE" > "$MERGED_METRICS" \
+                && mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
+        else
+            echo "WARNING: [$ENTRY_ID] API fan-out summary failed (request log: $REQUEST_LOG)" >&2
+            FANOUT_JSON="" FANOUT_MD=""
+        fi
+    fi
 
     # --- Struggles (failed tool calls + patterns) ---------------------------
     # From the transcript: failures by type and tool, likely-harmless ones
@@ -563,7 +598,7 @@ run_entry() {
     # eval-struggles annotation and klaren. cursor-cloud is not implemented
     # yet — the audit script warns and the annotation says so.
     echo "--- :face_with_spiral_eyes: [$ENTRY_ID] struggles"
-    local STRUGGLES_JSON STRUGGLES_MD MERGED_METRICS
+    local STRUGGLES_JSON STRUGGLES_MD
     STRUGGLES_JSON="$(mktemp)"; STRUGGLES_MD="$(mktemp)"
     if "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" struggles "$TRANSCRIPT" > "$STRUGGLES_JSON" \
             && "$SCRIPT_DIR/bk-tool-audit-v2.sh" struggles-markdown "$STRUGGLES_JSON" > "$STRUGGLES_MD"; then
@@ -574,6 +609,15 @@ run_entry() {
     else
         echo "WARNING: [$ENTRY_ID] struggles summary failed (transcript: $TRANSCRIPT)" >&2
         : > "$STRUGGLES_MD"
+    fi
+
+    # Buildkite API errors (from the fan-out): failed API requests by status
+    # then tool — the API-side view of the same struggles, repeated here so it
+    # sits next to them.
+    if [[ -n "$FANOUT_JSON" ]]; then
+        { echo; "$SCRIPT_DIR/api-fanout.sh" errors-markdown "$FANOUT_JSON"; } | tee -a "$STRUGGLES_MD"
+    else
+        printf '\n**Buildkite API errors:** _not available: %s._\n' "$NO_REQUEST_LOG" | tee -a "$STRUGGLES_MD"
     fi
 
     # Model API retries: the harness retrying its call to the model API (e.g.
@@ -669,7 +713,7 @@ run_entry() {
         local KLAREN_START; KLAREN_START=$(date +%s)
         if ! ENTRY_ID="$ENTRY_ID" AGENT="$AGENT" FINAL_BUILD_STATE="$FINAL_BUILD_STATE" \
             PROMPT_NAME="$PROMPT_NAME" SCENARIO_ID="$SCENARIO_ID" DIFF_STATUS="$KLAREN_DIFF_STATUS" \
-            "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX" "$STRUGGLES_MD"; then
+            "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX" "$STRUGGLES_MD" "$FANOUT_MD" "$REQUEST_LOG"; then
             echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
         fi
         KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
@@ -683,6 +727,12 @@ run_entry() {
     # klaren.sh writes the review, rubric verdicts and candidate references
     # directly into this bundle before its artifacts are uploaded.
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
+    if [[ -s "$FANOUT_MD" ]]; then
+        cp "$FANOUT_MD" "$PREFIX.api-fanout.md"
+    elif [[ -z "$REQUEST_LOG" ]]; then
+        echo "WARNING: [$ENTRY_ID] no API fan-out: $NO_REQUEST_LOG." >&2
+        printf '> ⚠️ **API fan-out not available** — %s.\n' "$NO_REQUEST_LOG" > "$PREFIX.api-fanout.md"
+    fi
     [[ -s "$STRUGGLES_MD"       ]] && cp "$STRUGGLES_MD"       "$PREFIX.struggles.md"
     if [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
         # The separate judge step reads sibling artifacts; no absolute container paths.
@@ -710,10 +760,20 @@ run_entry() {
             "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED}" "success"
         annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics" "$PREFIX.metrics.json"
         annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls" "$PREFIX.tools.txt"
+        if [[ -s "$PREFIX.api-fanout.md" && -n "$FANOUT_JSON" ]]; then
+            annotate_markdown "eval-fanout-$ENTRY_ID" ":satellite_antenna: [$ENTRY_ID] Eval — API fan-out" \
+                "$PREFIX.api-fanout.md" "$(jq -r '"\(.total_requests) API requests"' "$FANOUT_JSON")"
+        elif [[ -s "$PREFIX.api-fanout.md" ]]; then
+            annotate_markdown "eval-fanout-$ENTRY_ID" ":satellite_antenna: [$ENTRY_ID] Eval — API fan-out" \
+                "$PREFIX.api-fanout.md" "not available" "warning"
+        fi
         if [[ -s "$PREFIX.struggles.md" ]]; then
             local STRUGGLES_META STRUGGLES_STYLE="info"
             STRUGGLES_META="$(jq -r 'if .implemented then "\(.failed_calls) failed of \(.tool_calls) tool calls · longest streak \(.longest_failure_streak)" else "not implemented for this agent" end' "$STRUGGLES_JSON")"
             jq -e '.implemented | not' "$STRUGGLES_JSON" >/dev/null 2>&1 && STRUGGLES_STYLE="warning"
+            if [[ -n "$FANOUT_JSON" ]]; then
+                STRUGGLES_META+="$(jq -r 'if .errors > 0 then " · \(.errors) API error\(if .errors == 1 then "" else "s" end)" else "" end' "$FANOUT_JSON")"
+            fi
             if [[ -n "$RETRIES_JSON" ]] && jq -e '(.retries // 0) > 0' "$RETRIES_JSON" >/dev/null 2>&1; then
                 STRUGGLES_META+="$(jq -r '" · \(.retries) model API retries"' "$RETRIES_JSON")"
             fi
