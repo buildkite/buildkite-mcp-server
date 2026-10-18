@@ -60,6 +60,12 @@ if [[ -z "${MCP_EVAL_JEV_KEY:-}" && "$DRY_RUN" != "true" ]]; then
     echo "yilong: MCP_EVAL_JEV_KEY is unset; skipping (see .buildkite/pipeline.evals.yml)." >&2
     exit 0
 fi
+# Secrets pasted with a trailing newline are common, and Jev rejects any
+# whitespace in the bearer. Describe a malformed key without revealing it.
+MCP_EVAL_JEV_KEY="$(printf '%s' "${MCP_EVAL_JEV_KEY:-}" | tr -d '[:space:]')"
+if [[ "$DRY_RUN" != "true" && ! "$MCP_EVAL_JEV_KEY" =~ ^[[:graph:]]{32,512}$ ]]; then
+    echo "WARNING: yilong: MCP_EVAL_JEV_KEY is ${#MCP_EVAL_JEV_KEY} characters; Jev expects a 32-512 character bearer token, so it will reject it." >&2
+fi
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -131,6 +137,10 @@ jev_call() {
             jq -n '{error: "request failed"}'; return
         fi
         if [[ "$code" != 200 ]]; then
+            if [[ "$code" == 401 ]]; then
+                echo "WARNING: yilong: Jev rejected MCP_EVAL_JEV_KEY (401): it is not a current bearer for $JEV_URL (wrong or expired key, or a key for another service)." >&2
+                jq -n '{error: "HTTP 401: Jev rejected MCP_EVAL_JEV_KEY"}'; return
+            fi
             jq -n --arg c "$code" '{error: "HTTP \($c)"}'; return
         fi
         if ! jq -e '.result.structuredContent' "$resp" >/dev/null 2>&1; then
