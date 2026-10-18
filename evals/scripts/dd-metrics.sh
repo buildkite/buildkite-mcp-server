@@ -61,7 +61,7 @@
 #   <prefix>.tool_calls.bk_cli          shell tool calls that ran the bk CLI
 #   <prefix>.api_requests.total         Buildkite API requests (fan-out; from
 #   <prefix>.api_requests.mcp           the run's request log — omitted when
-#                                       no log was collected, e.g. cursor-cloud)
+#   <prefix>.api_requests.bk_cli        no log was collected, e.g. cursor-cloud)
 #   <prefix>.tool_errors.failed         failed tool calls, minus likely harmless
 #   <prefix>.tool_errors.likely_harmless  e.g. grep with no match
 #   <prefix>.tool_errors.longest_streak most failed calls in a row
@@ -184,6 +184,7 @@ PAYLOAD="$(jq -n \
         gauge("tool_calls.bk_cli"; ($m.tool_calls_bk_cli // null); $tags),
         gauge("api_requests.total"; ($m.api_fanout.total_requests? // null); $tags),
         gauge("api_requests.mcp"; ($m.api_fanout.mcp.requests? // null); $tags),
+        gauge("api_requests.bk_cli"; ($m.api_fanout.bk_cli.requests? // null); $tags),
         # Struggles; absent (not zero) when not implemented for the agent.
         (($m.struggles // {}) as $s | if ($s.implemented // false) then
           gauge("tool_errors.failed"; ($s.failed_calls - $s.likely_harmless); $tags),

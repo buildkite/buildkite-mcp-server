@@ -231,14 +231,18 @@ bk_cli_table() {
         end'
 }
 
-# fanout_table BASE_JSON CUR_JSON  -> Buildkite API requests per MCP tool
-# (metrics.json's api_fanout), base vs target. A run without api_fanout
-# (recorded before request logging, or cursor-cloud) was not measured, so
-# deltas against it are N/A; a tool missing from a measured run counts as 0.
+# fanout_table BASE_JSON CUR_JSON  -> Buildkite API requests per MCP tool and
+# per bk command (metrics.json's api_fanout), base vs target. Rows are keyed
+# "mcp <tool>" / "<bk command>" so a cli run and an mcp run line up side by
+# side (each side just shows "–" for the other's rows). A run without
+# api_fanout (recorded before request logging, or cursor-cloud) was not
+# measured, so deltas against it are N/A; a tool missing from a measured run
+# counts as 0.
 fanout_table() {
     jq -rn --slurpfile b "$1" --slurpfile c "$2" '
         def rows(f): ((f // {}) as $f
           | (($f.mcp.tools // []) | map({key: "mcp \(.tool)", value: {calls: .calls, requests: .requests}}))
+          + (($f.bk_cli.commands // []) | map({key: .command, value: {calls: .invocations, requests: .requests}}))
           | from_entries);
         def cell(x): if x == null then "–" else "\(x)" end;
         ($b[0].api_fanout | if .available == false then null else . end) as $BF |
@@ -247,7 +251,7 @@ fanout_table() {
         else
           rows($BF) as $B | rows($CF) as $C |
           (($B | keys) + ($C | keys) | unique) as $names |
-          (["| Tool | Base calls | Base API requests | Target calls | Target API requests | Δ requests |",
+          (["| Tool / bk command | Base calls | Base API requests | Target calls | Target API requests | Δ requests |",
             "|---|---:|---:|---:|---:|---:|"]
            + ($names | map(. as $n
                | ($B[$n].requests // 0) as $bv | ($C[$n].requests // 0) as $cv
@@ -413,7 +417,7 @@ main() {
             echo; echo "<details><summary>bk CLI command counts</summary>"; echo
             bk_cli_table "$BASE_METRICS" "$TGT_METRICS"
             echo; echo "</details>"
-            echo; echo "<details><summary>API fan-out (Buildkite API requests per tool)</summary>"; echo
+            echo; echo "<details><summary>API fan-out (Buildkite API requests per tool / bk command)</summary>"; echo
             fanout_table "$BASE_METRICS" "$TGT_METRICS"
             echo; echo "</details>"
         else
