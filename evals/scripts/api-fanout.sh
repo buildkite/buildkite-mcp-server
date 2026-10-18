@@ -56,6 +56,10 @@ FANOUT_JQ='
     | "bk" + ($words | map(" " + .) | join(""));
   def top_endpoints: group_by(endpoint) | map("\(length) \(.[0] | endpoint)") | sort_by(split(" ")[0] | tonumber) | reverse;
   def r2: (. * 100 | round) / 100;
+  # A failed request: HTTP >= 400, or no response. Requests cancelled because
+  # bk exited first (the shim logs them so the fan-out stays complete) did
+  # not fail at the API, so they are counted as requests but not as errors.
+  def failed: ((.error // null) != null and ((.error | tostring) | startswith("cancelled") | not)) or (.status // 0) >= 400;
 '
 
 cmd_json() {
@@ -89,15 +93,15 @@ cmd_json() {
       | {
           available: true,
           total_requests: ($mcp + $bkreq | length),
-          errors: ($mcp + $bkreq | map(select((.error // null) != null or (.status // 0) >= 400)) | length),
+          errors: ($mcp + $bkreq | map(select(failed)) | length),
           # Failed requests grouped by HTTP status ("network error" when no
           # response came back), then by the MCP tool / bk command that made
           # them: {"429": {"get_build": 2}, "504": {"bk build view": 1}}.
           errors_by_status: (
             ($mcp | map(. + {who: (if (.tool // "") == "" then "(no tool call)" else .tool end)}))
             + ($bkreq | map(. + {who: bk_command}))
-            | map(select((.error // null) != null or (.status // 0) >= 400)
-                  | . + {status_key: (if (.error // null) != null then "network error" else (.status | tostring) end)})
+            | map(select(failed)
+                  | . + {status_key: (if (.status // 0) >= 400 then (.status | tostring) else "network error" end)})
             | group_by(.status_key)
             | map({key: .[0].status_key,
                    value: (group_by(.who) | sort_by(-length, .[0].who) | map({key: .[0].who, value: length}) | from_entries)})

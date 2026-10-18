@@ -101,6 +101,8 @@ function startProxyAndRun() {
     graphql: new URL(process.env.BUILDKITE_GRAPHQL_ENDPOINT || "https://graphql.buildkite.com/v1"),
   };
   let requests = 0;
+  // Requests sent upstream whose response hasn't finished yet: their logOnce.
+  const pending = new Set();
   // Set once the proxy is listening (before bk starts, so before any request).
   let localRestBase = "";
   // `bk artifacts download` and `bk build download` fetch each file from the
@@ -157,20 +159,28 @@ function startProxyAndRun() {
           // Not JSON — log the request without an operation name.
         }
       }
+      // Each request is logged exactly once: when its response finishes or
+      // fails, or — if bk exits first, e.g. cancelling sibling downloads after
+      // an error — as cancelled when the invocation is written (see pending).
+      let status;
+      let bytes = 0;
+      let done = false;
+      const logOnce = (extra) => {
+        if (done) return;
+        done = true;
+        pending.delete(logOnce);
+        requests++;
+        writeLog({ ...record, status, duration_ms: Date.now() - started,
+                   bytes: status === undefined ? undefined : bytes, ...extra });
+      };
+      pending.add(logOnce);
       const headers = { ...req.headers, host: target.host };
       const rewrite = rewriteDownloadURLs && api === "rest";
       // Ask for a plain body, so a JSON response can be rewritten.
       if (rewrite) delete headers["accept-encoding"];
       const client = target.protocol === "http:" ? http : https;
       const upstreamReq = client.request(target, { method: req.method, headers }, (upstreamRes) => {
-        let bytes = 0;
-        let done = false;
-        const logOnce = (extra) => {
-          if (done) return;
-          done = true;
-          requests++;
-          writeLog({ ...record, status: upstreamRes.statusCode, duration_ms: Date.now() - started, bytes, ...extra });
-        };
+        status = upstreamRes.statusCode;
         // The connection can drop after the headers arrived: the body then
         // ends with "close" (and possibly "error") but no "end". Log the
         // request as failed and cut bk's connection too, so bk fails the
@@ -204,8 +214,7 @@ function startProxyAndRun() {
         });
       });
       upstreamReq.on("error", (err) => {
-        requests++;
-        writeLog({ ...record, error: err.message, duration_ms: Date.now() - started });
+        logOnce({ error: err.message });
         res.writeHead(502, { "content-type": "text/plain" });
         res.end(`bk shim: upstream request failed: ${err.message}\n`);
       });
@@ -223,6 +232,7 @@ function startProxyAndRun() {
       BUILDKITE_GRAPHQL_ENDPOINT: `${local}/__graphql${upstreams.graphql.pathname}`,
     };
     runBk(env, (exitCode, durationMs) => {
+      for (const finish of [...pending]) finish({ error: "cancelled: bk exited before the response finished" });
       writeLog({ type: "invocation", invocation, argv, exit_code: exitCode, duration_ms: durationMs, requests });
     });
   });
