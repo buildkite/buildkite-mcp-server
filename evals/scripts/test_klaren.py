@@ -21,7 +21,7 @@ class KlarenTest(unittest.TestCase):
         for name in ("klaren.sh", "bk-tool-audit-v2.sh", "dd-metrics.sh", "dd-publish.sh"):
             shutil.copy2(source / name, self.scripts / name)
         shutil.copytree(source.parent / "prompts", self.root / "prompts")
-        self.refs = self.root / "expected/case"
+        self.refs = self.root / "expected/diagnose/leaked-model"
         self.refs.mkdir(parents=True)
         (self.refs / "root_cause.md").write_text("Reviewed root cause: leaked test model.")
         (self.refs / "fix.md").write_text("Reviewed fix: isolate the test model.")
@@ -51,6 +51,7 @@ class KlarenTest(unittest.TestCase):
         (stub / "buildkite-agent").chmod(0o755)
         self.env = {**os.environ, "PATH": f"{stub}:{os.environ['PATH']}", "RUN_IN_CI": "false",
                     "LOCAL_BYPASS_PERMISSION": "false", "ENTRY_ID": "case", "AGENT": "claude",
+                    "PROMPT_NAME": "diagnose", "SCENARIO_ID": "leaked-model",
                     "STUB_STREAM": str(self.root / "stream.json"), "STUB_PROMPT": str(self.root / "prompt.md"),
                     "STUB_ROOT": str(self.root)}
 
@@ -113,6 +114,22 @@ class KlarenTest(unittest.TestCase):
         self.assertEqual([key for key in metrics if ".klaren." in key], ["mcp_eval.klaren.undetermined"])
         self.assertEqual(metrics["mcp_eval.klaren.undetermined"]["points"][0]["value"], 0)
 
+    def test_references_follow_prompt_and_scenario_not_run_identity(self):
+        data, _ = self.run_review()
+        self.assertEqual(data["reference_path"], "evals/expected/diagnose/leaked-model")
+        self.env.update(ENTRY_ID="another-model", AGENT="cursor")
+        data, _ = self.run_review()
+        self.assertEqual(data["questions"][0]["score"], 0.5)
+        shutil.copytree(self.refs, self.root / "expected/another-model")
+        # Neither a different scenario nor a different prompt may reuse this key.
+        for prompt, scenario in (("diagnose", "another-build"), ("repair", "leaked-model"), ("diagnose", "")):
+            with self.subTest(prompt=prompt, scenario=scenario):
+                self.env.update(PROMPT_NAME=prompt, SCENARIO_ID=scenario)
+                data, _ = self.run_review()
+                self.assertEqual({q["verdict"] for q in data["questions"]}, {"n/a"})
+                self.assertTrue((self.root / "run.klaren-candidate-root_cause.md").exists())
+        self.assertIn("No scenario.id configured", data["questions"][0]["reason"])
+
     def test_missing_results_and_invalid_output_do_not_publish_success(self):
         self.transcript.write_text(self.transcript.read_text().splitlines()[0] + "\n")
         data, _ = self.run_review()
@@ -135,7 +152,7 @@ class KlarenTest(unittest.TestCase):
         self.response["questions"]["conclusion"]["verdict"] = "yeah-baby"
         data, _ = self.run_review()
         self.assertEqual(data["questions"][1]["verdict"], "sherlock")
-        self.assertIn("/" + "a" * 40 + "/evals/expected/case/root_cause.md", (self.root / "urls").read_text())
+        self.assertIn("/" + "a" * 40 + "/evals/expected/diagnose/leaked-model/root_cause.md", (self.root / "urls").read_text())
         self.assertIn("Pinned reviewed reference", (self.root / "prompt.md").read_text())
         self.assertNotIn("Reviewed root cause", (self.root / "prompt.md").read_text())
 

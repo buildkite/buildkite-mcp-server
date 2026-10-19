@@ -71,7 +71,7 @@ Use `n/a` with an explicit reason for any question missing required evidence in 
 
 ### Candidate reference answers for yilong
 
-Independently establish the actual root cause and the best fix from concrete evidence in tool results and source files, not merely from the agent's report or your agreement with it. Produce self-contained Markdown candidates suitable for `evals/expected/<entry>/root_cause.md` and `fix.md`:
+Independently establish the actual root cause and the best fix from concrete evidence in tool results and source files, not merely from the agent's report or your agreement with it. Produce self-contained Markdown candidates suitable for `evals/expected/<prompt>/<scenario.id>/root_cause.md` and `fix.md`. The harness supplies `reference_path` for this prompt/scenario pair; if it is null, note in the review that a stable `scenario.id` is needed before a human can install the candidates. Agent/model variants share references, but different targets or expected outcomes need different scenario IDs:
 
 * Root cause: identify every material failure, causal mechanism, exact files/tests and decisive evidence; distinguish symptoms, unrelated failures, and hypotheses from verified causes.
 * Fix: explain the minimal cause-level correction, how to verify it, and why tempting workarounds (deleting tests, skipping checks, retries) are inadequate. Do not present an untested proposal as a verified repair.

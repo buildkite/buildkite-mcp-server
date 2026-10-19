@@ -54,10 +54,28 @@ actual tool results. Code caps Sherlock at Scooby-Doo unless conclusion is Yeah
 baby. Missing reviewed references or required evidence mean **n/a**, not zero;
 malformed reviewer output means **undetermined**, not a successful grade.
 
-Conclusion and investigation require `expected/<entry>/root_cause.md`; fix
-requires `expected/<entry>/fix.md`. Locally the reviewer uses the harness's
-files. CI fetches them from the exact `MCP_SRC_SHA` commit **after the evaluated
-agent returns**; they are never baked into the eval image. If the files cannot
+Reference answers are keyed by **prompt and scenario**, not the matrix entry ID,
+agent or model. Set a stable `scenario.id` in each matrix entry:
+
+```yaml
+prompt: red-to-green-comment-only
+scenario:
+  id: buildkite-204234
+  vars:
+    BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+```
+
+This uses `expected/red-to-green-comment-only/buildkite-204234/root_cause.md`
+for conclusion and investigation, and `fix.md` in the same directory for fix.
+Agent/model variants with the same prompt and scenario share those answers.
+Use a different scenario ID when the target or expected outcome changes; do not
+include generated branch names or run timestamps in it. No `scenario.id` means
+no reference lookup and n/a grades, but detailed review and candidate generation
+still run. There is no fallback to an entry-ID answer key.
+
+Locally the reviewer uses the harness's files. CI fetches them from the exact
+`MCP_SRC_SHA` commit **after the evaluated agent returns**; they are never
+baked into the eval image. If the files cannot
 be loaded, the affected categories remain n/a. The initial reference for
 `red-to-green-comment-only` comes from the diagnosis in eval build 395.
 
@@ -71,7 +89,7 @@ The run bundle adds:
   be used to grade the same run that generated them.
 
 To use a candidate with yilong, verify its evidence and scenario applicability,
-then copy the reviewed content into `evals/expected/<entry>/root_cause.md` or
+then copy the reviewed content into `evals/expected/<prompt>/<scenario.id>/root_cause.md` or
 `fix.md` and commit it. An unsupported candidate is omitted, not invented.
 
 CI publishes `mcp_eval.klaren.{conclusion,investigation,fix}` and

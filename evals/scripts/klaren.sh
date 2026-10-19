@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Run the detailed reviewer, export rubric verdicts and candidate answer keys.
-# Usage: ENTRY_ID=id AGENT=claude klaren.sh transcript goal final-report diff prefix
+# Usage: ENTRY_ID=id PROMPT_NAME=prompt SCENARIO_ID=scenario AGENT=claude
+#        klaren.sh transcript goal final-report diff prefix
 # CI loads checked-in references from MCP_SRC_SHA only AFTER the evaluated run;
 # expected/ remains excluded from the agent image. Local runs use expected/.
 set -euo pipefail
@@ -11,6 +12,16 @@ TRANSCRIPT="${1:?transcript required}" GOAL="${2:?goal required}"
 REPORT="${3:?final report required}" DIFF="${4:?diff file required}"
 PREFIX="${5:?output prefix required}"
 : "${ENTRY_ID:?entry id required}"
+: "${PROMPT_NAME:?prompt name required}"
+SCENARIO_ID="${SCENARIO_ID:-}"
+for key in "$PROMPT_NAME" "${SCENARIO_ID:-unconfigured}"; do
+    if [[ ! "$key" =~ ^[A-Za-z0-9._-]+$ || "$key" == . || "$key" == .. ]]; then
+        echo "klaren: prompt and scenario.id must be single path components (letters, digits, dot, underscore or hyphen)" >&2
+        exit 1
+    fi
+done
+REFERENCE_PATH=""
+[[ -z "$SCENARIO_ID" ]] || REFERENCE_PATH="expected/$PROMPT_NAME/$SCENARIO_ID"
 [[ -s "$TRANSCRIPT" && -s "$GOAL" ]] || { echo "klaren: session log and goal are required" >&2; exit 1; }
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
@@ -19,10 +30,11 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 # CI's image has no expected/; read the pinned harness commit, not latest main.
 for name in root_cause fix; do
     : > "$WORK_DIR/$name.md"
+    [[ -n "$REFERENCE_PATH" ]] || continue
     if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
         if [[ "${MCP_SRC_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
             code="$(curl -sS --max-time 30 -o "$WORK_DIR/$name.download" -w '%{http_code}' \
-                "https://raw.githubusercontent.com/buildkite/buildkite-mcp-server/$MCP_SRC_SHA/evals/expected/$ENTRY_ID/$name.md")" || code=000
+                "https://raw.githubusercontent.com/buildkite/buildkite-mcp-server/$MCP_SRC_SHA/evals/$REFERENCE_PATH/$name.md")" || code=000
             if [[ "$code" == 200 ]]; then
                 cp "$WORK_DIR/$name.download" "$WORK_DIR/$name.md"
             elif [[ "$code" != 404 ]]; then
@@ -31,8 +43,8 @@ for name in root_cause fix; do
         else
             echo "WARNING: klaren: MCP_SRC_SHA is missing or invalid; affected grades will be n/a" >&2
         fi
-    elif [[ -f "$ROOT_DIR/expected/$ENTRY_ID/$name.md" ]]; then
-        cp "$ROOT_DIR/expected/$ENTRY_ID/$name.md" "$WORK_DIR/$name.md"
+    elif [[ -f "$ROOT_DIR/$REFERENCE_PATH/$name.md" ]]; then
+        cp "$ROOT_DIR/$REFERENCE_PATH/$name.md" "$WORK_DIR/$name.md"
     fi
 done
 
@@ -47,8 +59,10 @@ fi
 
 jq -n --rawfile goal "$GOAL" --rawfile conclusion "$REPORT" --rawfile diff "$DIFF" \
     --rawfile root "$WORK_DIR/root_cause.md" --rawfile fix "$WORK_DIR/fix.md" \
+    --arg path "$REFERENCE_PATH" \
     --arg state "${FINAL_BUILD_STATE:-}" --argjson results "$HAS_RESULTS" \
     '{goal: $goal, conclusion: $conclusion, diff: $diff, outcome: $state,
+      reference_path: (if $path == "" then null else "evals/" + $path end),
       expected_root_cause: $root, expected_fix: $fix, captured_tool_results: $results}' > "$WORK_DIR/evidence.json"
 {
     cat "$ROOT_DIR/prompts/klaren.md"
@@ -109,16 +123,19 @@ if (( FAILED )); then
 fi
 
 jq -n --slurpfile raw "$WORK_DIR/result.json" --slurpfile rubric "$ROOT_DIR/prompts/rubric.json" \
-    --slurpfile evidence "$WORK_DIR/evidence.json" --arg entry "$ENTRY_ID" --arg run "${PREFIX##*/}" '
+    --slurpfile evidence "$WORK_DIR/evidence.json" --arg entry "$ENTRY_ID" --arg run "${PREFIX##*/}" \
+    --arg prompt "$PROMPT_NAME" --arg scenario "$SCENARIO_ID" '
     $evidence[0] as $e | $raw[0] as $r
     | {entry: $entry, run_key: $run, evaluator: "klaren",
+       prompt: $prompt, scenario: $scenario, reference_path: $e.reference_path,
        reference_answers_status: "candidate — human review required",
        reference_answers: $r.reference_answers,
        questions: [$rubric[0].questions[] | . as $q
-         | (if .key == "fix" then
-              if ($e.expected_fix | test("\\S") | not) then "No reference fix available: add evals/expected/\($entry)/fix.md"
+         | (if $e.reference_path == null then "No scenario.id configured: add a stable scenario.id and reviewed prompt/scenario reference answers"
+            elif .key == "fix" then
+              if ($e.expected_fix | test("\\S") | not) then "No reference fix available: add \($e.reference_path)/fix.md"
               elif (($e.diff + $e.conclusion) | test("\\S") | not) then "Missing evidence: fix" else null end
-            elif ($e.expected_root_cause | test("\\S") | not) then "No reference answer available: add evals/expected/\($entry)/root_cause.md"
+            elif ($e.expected_root_cause | test("\\S") | not) then "No reference answer available: add \($e.reference_path)/root_cause.md"
             elif ($e.conclusion | test("\\S") | not) then "Missing evidence: conclusion"
             elif .key == "investigation" and ($e.captured_tool_results | not) then "No captured tool results available in transcript.jsonl"
             else null end) as $missing

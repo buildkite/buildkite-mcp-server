@@ -371,7 +371,7 @@ run_cursor_cloud() {
 # failure in one entry logs and returns without aborting the rest of the matrix.
 run_entry() {
     local entry="$1"
-    local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE
+    local ENTRY_ID AGENT MODEL PROMPT_NAME SCENARIO_ID MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
     AGENT=$(jq -r '.agent // "claude"'        <<<"$entry")
     MODEL=$(jq -r '.model // ""'              <<<"$entry")
@@ -389,6 +389,7 @@ run_entry() {
         esac
     fi
     PROMPT_NAME=$(jq -r '.prompt'             <<<"$entry")
+    SCENARIO_ID=$(jq -r '.scenario.id // ""'  <<<"$entry")
     MCP_VERSION=$(jq -r '.mcp_version // "source"' <<<"$entry")
     SETUP=$(jq -r '.scenario.setup // ""'     <<<"$entry")
     COMPARE_BASE=$(jq -r '.compare_base // ""'   <<<"$entry")
@@ -612,6 +613,7 @@ run_entry() {
     echo "--- :female-detective: [$ENTRY_ID] klaren review"
     local KLAREN_START; KLAREN_START=$(date +%s)
     if ! ENTRY_ID="$ENTRY_ID" AGENT="$AGENT" FINAL_BUILD_STATE="$FINAL_BUILD_STATE" \
+        PROMPT_NAME="$PROMPT_NAME" SCENARIO_ID="$SCENARIO_ID" \
         "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX"; then
         echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
     fi

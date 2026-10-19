@@ -36,6 +36,13 @@
 #   prompt        Name of a template under prompts/<prompt>.md. Rendered with the
 #                 substitution vars below (Go-style {{.KEY}} placeholders).
 #   scenario:
+#     id          Stable name for the scenario's inputs and expected outcome,
+#                 shared across agent/model variants. References live under
+#                 expected/<prompt>/<scenario.id>/{root_cause,fix}.md. Use a new
+#                 id when changing the target build or expected failure/fix.
+#                 No id means no reference lookup and n/a rubric grades.
+#                 Letters, digits, dot, underscore and hyphen only; excludes
+#                 the path components '.' and '..'.
 #     setup       Optional bash run BEFORE the prompt to establish state (e.g.
 #                 create a branch, push it). It runs inside babystand.sh's clone
 #                 of the EVAL repo (EVAL_REPO_SLUG), under `set -euo pipefail`
@@ -90,6 +97,7 @@ matrix:
   #  model: claude-opus-4-8
   #  prompt: red-to-green-complete
   #  scenario:
+  #    id: test-broken-and-failed-jobs
   #    setup: |
   #      # Establish the red CI signal: branch from the deliberately-broken base
   #      # and push it (the branch push triggers its own Quality Checks build,
@@ -120,6 +128,7 @@ matrix:
   #  model: claude-opus-4-8-thinking-high
   #  prompt: red-to-green-complete
   #  scenario:
+  #    id: test-broken-and-failed-jobs
   #    setup: |
   #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
   #      git fetch
@@ -143,6 +152,7 @@ matrix:
   #  model: composer-2.5
   #  prompt: red-to-green-complete
   #  scenario:
+  #    id: test-broken-and-failed-jobs
   #    setup: |
   #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
   #      git fetch
@@ -166,6 +176,7 @@ matrix:
     model: claude-opus-4-8
     prompt: red-to-green-comment-only
     scenario:
+      id: buildkite-204234
       vars:
         BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
     # The build above lives in the `buildkite` org, not the default eval org.
@@ -182,6 +193,7 @@ matrix:
   #   model: claude-opus-4-8
   #   prompt: analyze-build
   #   scenario:
+  #     id: anothertest-677
   #     vars:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source
