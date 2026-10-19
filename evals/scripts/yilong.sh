@@ -6,23 +6,23 @@
 # For every run whose evaluator is yilong, babystand.sh leaves a
 # <run>.judge.json in the run bundle (goal, the scenario branch's diff and
 # final build state). This script combines that, the bundle's eval-final.md
-# and transcript.jsonl, and the entry's reference answer (expected/<id>/root_cause.md
+# and transcript.jsonl, and the prompt/scenario reference answer (expected/<prompt>/<scenario>/root_cause.md
 # and fix.md, read from this checkout — never part of the agent's container)
 # into evidence records, then asks Jev one Score question per rubric entry in
-# prompts/yilong.json, each against only the records that question names:
+# prompts/rubric.json, each against only the records that question names:
 #   conclusion     bollocks | sorta | yeah-baby
 #   investigation  homer-simpson | scooby-doo | sherlock
 #   fix            airshot | duct-tape | sweeet
 # The verdict is the level Jev gives the highest probability; its
 # probabilities, expected score and confidence are kept alongside. Verdicts
 # land in <run>.yilong.json (plus an annotation in CI). A question is "n/a"
-# when its evidence is missing (e.g. no expected/<id>/ answer) and
-# "undetermined" only when the API call fails.
+# when its required evidence is missing and "undetermined" when the API fails,
+# the complete patch is unavailable, or the request exceeds the input limits.
 #
 # Limits (https://docs.typesafe.ai/models): 64k tokens per request and 32k per
 # question, 32 MiB bodies, per-organization rate limits (429/529 are retried
-# with backoff). Each record is capped at RECORD_CHARS, keeping its head and
-# tail, so a request stays well inside 32k tokens.
+# with backoff). Evidence is never shortened to fit: oversized bodies are
+# withheld locally; the API enforces its token limits (HTTP 400 max_tokens_exceeded).
 #
 # SECURITY: MCP_EVAL_FRAMEWORK_JEV_TOKEN must never exist in the eval step,
 # where the agent under test has unrestricted Bash. In CI this runs as its own
@@ -45,12 +45,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-RUBRIC="$ROOT_DIR/prompts/yilong.json"
+RUBRIC="$ROOT_DIR/prompts/rubric.json"
 API_URL="${YILONG_API_URL:-https://api.typesafe.ai/v1/systemone}"
 MODEL="${YILONG_MODEL:-jev-1.14.0}"
 DRY_RUN="${YILONG_DRY_RUN:-false}"
-# Bound evidence size; longer records retain an explicit truncation marker.
-RECORD_CHARS=16000
 
 command -v jq >/dev/null   || { echo "yilong: jq is required" >&2; exit 1; }
 command -v curl >/dev/null || { echo "yilong: curl is required" >&2; exit 1; }
@@ -76,6 +74,7 @@ else
     fi
     buildkite-agent artifact download "runs/*/*.eval-final.md" "$WORK_DIR/" || true
     buildkite-agent artifact download "runs/*/*.transcript.jsonl" "$WORK_DIR/" || true
+    buildkite-agent artifact download "runs/*/*.diff.patch" "$WORK_DIR/" || true
     JUDGE_FILES=()
     while IFS= read -r f; do JUDGE_FILES+=("$f"); done < <(find "$WORK_DIR" -name '*.judge.json' | sort)
 fi
@@ -84,6 +83,10 @@ fi
 # jev_call <request_file> -> the API response on stdout, or {"error": ...}
 jev_call() {
     local req="$1" resp="$WORK_DIR/jev-resp.json" hdrs="$WORK_DIR/jev-headers.txt" code attempt wait
+    if (( $(wc -c < "$req") > 33554432 )); then
+        jq -n '{error: "Complete evidence exceeds the TypeSafe 32 MiB request-body limit; grade withheld, evidence not truncated"}'
+        return
+    fi
     for attempt in 1 2 3 4; do
         code="$(curl -sS --max-time 60 -o "$resp" -D "$hdrs" -w '%{http_code}' -X POST "$API_URL" \
             -H "Authorization: Bearer $JEV_TOKEN" \
@@ -107,6 +110,10 @@ jev_call() {
             401)
                 echo "WARNING: yilong: TypeSafe rejected MCP_EVAL_FRAMEWORK_JEV_TOKEN (401): it is not a valid API key for $API_URL." >&2
                 jq -n '{error: "HTTP 401: TypeSafe rejected MCP_EVAL_FRAMEWORK_JEV_TOKEN"}'; return ;;
+            400|413)
+                jq -n --arg code "$code" --arg body "$(head -c 500 "$resp")" \
+                    '{error: "HTTP \($code): complete evidence rejected; grade withheld, evidence not truncated. \($body)"}'
+                return ;;
         esac
         # Error bodies describe the request, never the key; keep a short excerpt.
         jq -n --arg c "$code" --arg b "$(head -c 300 "$resp" 2>/dev/null | tr '\n' ' ')" '{error: "HTTP \($c): \($b)"}'
@@ -115,12 +122,12 @@ jev_call() {
 }
 
 # --- Evidence ------------------------------------------------------------------
-# Records yilong can offer Jev; prompts/yilong.json picks per question.
+# Records yilong can offer Jev; prompts/rubric.json picks per question.
 #   goal                 the rendered eval prompt
-#   expected_root_cause  expected/<id>/root_cause.md
-#   expected             expected/<id>/ root cause + fix (needs fix.md)
+#   expected_root_cause  expected/<prompt>/<scenario>/root_cause.md
+#   expected             reviewed root cause + fix (needs fix.md)
 #   conclusion           the agent's final report
-#   trace                tool calls paired with result excerpts, in call order
+#   trace                tool calls paired with full captured results, in call order
 #   fix                  the pushed diff, else the report's proposed fix
 #   outcome              the scenario branch's final build state
 # Redaction is defense in depth: bundles should hold no secrets, but agent
@@ -130,21 +137,16 @@ def redact:
   gsub("(?<p>bkua_|bkct_|bkagent_|ghp_|gho_|ghs_|ghu_|github_pat_|sk-ant-|xox[abpr]-)[A-Za-z0-9_-]{8,}"; "\(.p)[REDACTED]")
   | gsub("AKIA[0-9A-Z]{16}"; "[REDACTED]")
   | gsub("(?<p>[Bb]earer +)[A-Za-z0-9._~+/=-]{16,}"; "\(.p)[REDACTED]");
-# Keep the head and tail: reports end with their bottom line, traces with the
-# final checks.
-def cut($n):
-  if length <= $n then .
-  else (($n / 2) | floor) as $h | .[:$h] + "\n[…truncated…]\n" + .[length - ($n - $h):] end;
 '
 
-# trace <transcript.jsonl> <agent> -> calls with result excerpts (empty if none)
+# trace <transcript.jsonl> <agent> -> calls with full captured results (empty if none)
 trace() {
     [[ -s "$1" ]] || return 0
     local calls
-    calls="$("$SCRIPT_DIR/bk-tool-audit-v2.sh" --all --results --result-chars 4000 --agent "$2" "$1")" || return 1
+    calls="$("$SCRIPT_DIR/bk-tool-audit-v2.sh" --all --results --full-results --agent "$2" "$1")" || return 1
     jq -rs '
         if any(.[]; (.result // "") | IN("", "{}", "(no result)", "(no result captured)") | not)
-        then "Tool calls with result excerpts, in call order (not completion order). Missing or truncated evidence is not proof of a claim:\n"
+        then "Tool calls with full captured results, in call order (not completion order). Missing evidence is not proof of a claim:\n"
              + (map(tojson) | join("\n"))
         else empty end
     ' <<<"$(printf '%s\n' "$calls" | grep '^{' || true)"
@@ -162,15 +164,38 @@ judge() {
         echo "WARNING: yilong: could not read tool results from $prefix.transcript.jsonl; investigation will be n/a" >&2
         : > "$trace_file"
     fi
-    local expected_dir; expected_dir="$ROOT_DIR/expected/$(jq -r '.entry' "$judge_file")"
+    local prompt scenario reference_path=""
+    prompt="$(jq -r '.prompt // ""' "$judge_file")"
+    scenario="$(jq -r '.scenario // ""' "$judge_file")"
+    for component in "$prompt" "$scenario"; do
+        [[ -z "$component" ]] && continue
+        if [[ ! "$component" =~ ^[A-Za-z0-9._-]+$ || "$component" == . || "$component" == .. ]]; then
+            echo "yilong: prompt and scenario must be single path components" >&2; return 1
+        fi
+    done
+    [[ -z "$prompt" || -z "$scenario" ]] || reference_path="expected/$prompt/$scenario"
+    local expected_dir="$ROOT_DIR/$reference_path"
     local root_cause_file="$WORK_DIR/root_cause.md" fix_file="$WORK_DIR/fix.md"
     : > "$root_cause_file"; : > "$fix_file"
-    [[ -f "$expected_dir/root_cause.md" ]] && cp "$expected_dir/root_cause.md" "$root_cause_file"
-    [[ -f "$expected_dir/fix.md" ]] && cp "$expected_dir/fix.md" "$fix_file"
+    if [[ -n "$reference_path" ]]; then
+        [[ ! -f "$expected_dir/root_cause.md" ]] || cp "$expected_dir/root_cause.md" "$root_cause_file"
+        [[ ! -f "$expected_dir/fix.md" ]] || cp "$expected_dir/fix.md" "$fix_file"
+    fi
+    local diff_status diff_file="$WORK_DIR/diff.patch"
+    diff_status="$(jq -r '.diff_status // "unavailable"' "$judge_file")"
+    : > "$diff_file"
+    case "$diff_status" in
+        available)
+            if [[ -f "$prefix.diff.patch" && -r "$prefix.diff.patch" ]]; then
+                cp "$prefix.diff.patch" "$diff_file"
+            else diff_status="unavailable"; fi ;;
+        not_applicable|unavailable) ;;
+        *) diff_status="unavailable" ;;
+    esac
 
     # All evidence records, keyed by id; absent when there is nothing to say.
     local records="$WORK_DIR/records.json"
-    jq -n --argjson max "$RECORD_CHARS" "$JQ_LIB"' ($judge[0]) as $j
+    jq -n --arg diff_status "$diff_status" "$JQ_LIB"' ($judge[0]) as $j
         | (if $conclusion == "" then null else $conclusion end) as $c
         | {root_cause: $root_cause, fix: $fix} as $e
         | {
@@ -181,15 +206,15 @@ judge() {
                          + "Correct fix: \($e.fix)" else null end),
             conclusion: $c,
             trace: $trace,
-            fix: (if ($j.diff // "") != "" then "Change the agent pushed to the scenario branch (git diff):\n\($j.diff)"
-                  elif $c then "No code was pushed. The fix as proposed in the agent'"'"'s report:\n\($c)"
+            fix: (if $diff_status == "available" then "Complete pushed change (git diff; an empty patch means no changes):\n\($diff)"
+                  elif $diff_status == "not_applicable" and $c then "Diagnosis-only task. The fix as proposed in the agent'"'"'s report:\n\($c)"
                   else null end),
             outcome: (if ($j.final_build_state // "") != "" then
                         "Latest build of the scenario branch after the agent finished: \($j.final_build_state)" else null end)
           }
-        | with_entries(select((.value // "") | tostring | test("\\S")) | .value |= (redact | cut($max)))
+        | with_entries(select((.value // "") | tostring | test("\\S")) | .value |= redact)
     ' --slurpfile judge "$judge_file" --rawfile conclusion "$conclusion_file" --rawfile trace "$trace_file" \
-      --rawfile root_cause "$root_cause_file" --rawfile fix "$fix_file" > "$records" || return 1
+      --rawfile root_cause "$root_cause_file" --rawfile fix "$fix_file" --rawfile diff "$diff_file" > "$records" || return 1
 
     local questions=() q
     while IFS= read -r q; do questions+=("$q"); done < <(jq -c '.questions[]' "$RUBRIC")
@@ -198,9 +223,17 @@ judge() {
         local key missing req="$WORK_DIR/request.json" jev
         key="$(jq -r '.key' <<<"$q")"
         missing="$(jq -r --slurpfile r "$records" '[.requires[] | select($r[0][.] == null)] | join(", ")' <<<"$q")"
+        if [[ -z "$reference_path" ]]; then
+            jq -c '{key, title, verdict: "n/a", reason: "Missing prompt or scenario.id: configure both and add reviewed prompt/scenario references"}' <<<"$q" >> "$results"
+            continue
+        fi
+        if [[ "$key" == fix && "$diff_status" == unavailable && "$missing" == fix ]]; then
+            jq -c '{key, title, verdict: "undetermined", reason: "Complete pushed diff unavailable; fix grade withheld, not inferred from the agent report"}' <<<"$q" >> "$results"
+            continue
+        fi
         if [[ -n "$missing" ]]; then
             local reason
-            reason="$(jq -r --slurpfile r "$records" --arg dir "evals/expected/$(jq -r '.entry' "$judge_file")" '
+            reason="$(jq -r --slurpfile r "$records" --arg dir "evals/$reference_path" '
               [.requires[] | select($r[0][.] == null) |
                 if . == "expected_root_cause" then "No reference answer available: add " + $dir + "/root_cause.md"
                 elif . == "expected" then "No reference fix available: add " + $dir + "/fix.md"
@@ -249,12 +282,7 @@ judge() {
     done
 
     jq -s --slurpfile judge "$judge_file" '
-        (map(select(.key == "conclusion"))[0].verdict) as $conclusion
-        | map(if .key == "investigation" and .verdict == "sherlock" and $conclusion != "yeah-baby"
-              then .verdict = "scooby-doo" | .label = "Scooby-Doo" | .score = 0.5
-                   | .reason = "Sherlock requires a correct conclusion (Yeah baby); capped at Scooby-Doo. Probabilities are the original Jev assessment."
-              else . end)
-        | {entry: $judge[0].entry, run_key: $judge[0].run_key, evaluator: "yilong", questions: .}' "$results" > "$out"
+        {entry: $judge[0].entry, run_key: $judge[0].run_key, evaluator: "yilong", questions: .}' "$results" > "$out"
 
     # Summary markdown (annotation in CI, stdout locally).
     jq -r '
@@ -268,11 +296,15 @@ judge() {
         (.questions[] |
           "| \(.title) | \(if .label then "**\(.label)**" else "_\(.verdict)_" end) | "
           + (if .probabilities then ([.probabilities | to_entries[] | "\(.key) \(.value | pct)"] | join(" · ")) else "–" end)
-          + " | \(.confidence | pct) | \(.reason // "") |"),
+          + " | \(.confidence | pct) | \((.reason // "") | gsub("[\\r\\n|]"; " ")) |"),
         "",
-        "Verdict = the level Jev finds most probable, except Sherlock requires a Yeah baby conclusion. Probabilities and confidence reflect the original Jev assessment. Undetermined means the API call failed; n/a means required references or evidence are missing (see Note).",
+        "Verdict = the level Jev finds most probable, without cross-category adjustments. Undetermined means evaluation failed or the complete patch could not be supplied, including input-limit failures; n/a means required references or evidence are missing (see Note).",
         "</details>"
     ' "$out"
+    if [[ "$diff_status" == available ]]; then
+        printf '\n[Complete pushed diff](artifact://runs/%s/%s.diff.patch)\n' \
+            "$(jq -r '.entry' "$judge_file")" "${prefix##*/}"
+    fi
 }
 
 FAILED=0

@@ -7,9 +7,8 @@ There is a [pipeline](https://buildkite.com/buildkite/buildkite-mcp-server-evals
 A set of artifacts, and annotations in the Buildkite build showing:
 * LLM agent metrics
   * Tool calls, input/output tokens, input/output cache tokens, etc.
-* Evaluation of each run, by the entry's `evaluator` (see "Evaluators")
-  * yilong (default): three verdicts — correctness of conclusion, quality of investigation, correctness of fix
-  * klaren (on demand): list of things ordered by criticality that the LLM agent could have done better, due to harness loop, tool call choices, etc.
+* Quantitative evaluation report
+  * List of things order by criticality that the LLM agent could have done better, due to harness loop, tool call choices, etc.
 * Comparison reports
   * LLM agent metrics
   * High-level steps taken by LLM agent to complete scenarios
@@ -39,29 +38,148 @@ A set of artifacts, and annotations in the Buildkite build showing:
 
 The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
 
-## Evaluators
+## Evaluator selection
 
-Each `evals.yaml` entry picks how its run is judged with `evaluator:`. Set `EVALUATOR=klaren` (or `yilong`) in the environment when creating a build to override every entry.
+Each `evals.yaml` entry selects `evaluator: yilong | klaren` (default `yilong`).
+Set `EVALUATOR=klaren` when creating a build to override all entries.
 
-* `yilong` (default) — cheap and fast. `scripts/yilong.sh` asks Jev, [TypeSafe](https://docs.typesafe.ai)'s System One model, three scored questions per run (rubric: `prompts/yilong.json`):
+* **Yilong** calls Jev, TypeSafe's System One model, directly at
+  `https://api.typesafe.ai/v1/systemone` (`YILONG_MODEL`, default `jev-1.14.0`).
+  It uses the same `prompts/rubric.json` and prompt/scenario reference paths as
+  Klaren. There is no second rubric file or automatic grade adjustment.
+* **Klaren** produces the detailed review, rubric grades and candidate references
+  described below. Use it on demand; comparison annotations compare its reports
+  only when both runs have one.
 
-  | Question | Verdicts (score 0 → 0.5 → 1) |
-  | --- | --- |
-  | Correctness of conclusion | bollocks → sorta → yeah-baby |
-  | Quality of investigation | homer-simpson → scooby-doo → sherlock |
-  | Correctness of fix | airshot → duct-tape → sweeet |
+Yilong sends one request per category, with these input fields:
 
-  * yilong calls the System One API directly (`POST https://api.typesafe.ai/v1/systemone`, model `YILONG_MODEL`, default `jev-1.14.0`), one Score request per question. Each request's state holds only that question's evidence: the goal, the agent's final report, tool calls paired with captured result excerpts from the transcript, the pushed diff or proposed fix, the final build state, and the reference answer. Tool results retain up to 4,000 characters each; each evidence record retains up to 16,000 characters (head and tail kept). Truncated or missing evidence must not be treated as verification.
-  * Conclusion and investigation require `expected/<id>/root_cause.md`; fix requires `expected/<id>/fix.md`. Missing or blank references make the affected categories `n/a`: no Jev call and no Datadog score (not zero). Logs and the annotation name the file to add. Investigation also requires the goal, final report, and captured tool results; it is `n/a` without them. The answers are kept out of `evals.yaml` because the image (and so the agent under test) gets `evals.yaml` — never copy `expected/` into it. (They are still public in this repo, and in any fork the eval clones.)
-  * Sherlock requires both a correct diagnosis and a rigorous, evidence-backed investigation: correctly interpreted tool results, checks of competing explanations, and support for every material conclusion. A lucky correct answer is not enough. If Jev returns Sherlock but conclusion is not Yeah baby, yilong caps investigation at Scooby-Doo and explains why; the original probabilities remain available for inspection.
-  * The verdict is the level Jev finds most probable. Its per-level probabilities, expected score, confidence and token usage are kept in `<run>.yilong.json`; low confidence means Jev was split between levels. A question is `undetermined` only when the API call fails (rate limits and 5xx are retried with backoff first).
-  * Runs in its own `yilong` pipeline step, outside the agent container, because `MCP_EVAL_FRAMEWORK_JEV_TOKEN` must never be visible to the agent under test (same reasoning as Datadog below). babystand.sh leaves `<run>.judge.json` in the run bundle; the step downloads it with `eval-final.md` and `transcript.jsonl`, uploads `<run>.yilong.json` and annotates the build (`yilong-<id>`).
-  * Locally: `MCP_EVAL_FRAMEWORK_JEV_TOKEN=... ./evals/scripts/yilong.sh evals/runs/<id>/<run>.judge.json` (`YILONG_DRY_RUN=true` prints the Jev requests without a key).
-* `klaren` — the full session review (`prompts/klaren.md`), run inside the eval step after the agent. Detailed and useful, but slow and token-hungry, so use it on demand. The comparison annotation only compares klaren reports when both the base and target runs have one.
+| Category | Input sent to Jev |
+| --- | --- |
+| Conclusion | Reviewed root-cause reference; agent's final report |
+| Investigation | Rendered task; reviewed root-cause reference; tool calls paired with full captured tool outputs; final report |
+| Fix | Reviewed root cause (when available) and fix reference; complete pushed patch, or final report for diagnosis-only tasks; final build state when available |
+
+A **tool output** is the response to one tool call (for example, returned build
+logs). The **trace** combines calls and their captured outputs; it is not the
+whole conversation or private reasoning. An **input field** is one named piece
+of evidence in the request. Jev's **result** contains the grading probabilities,
+confidence and expected score, saved in `<run>.yilong.json`. The annotation and
+Datadog score use the most probable grade without changing it, even when grades
+contradict one another. Known token patterns are redacted before sending.
+
+Yilong does not shorten tool outputs, input fields or patches. TypeSafe documents
+a 32 MiB body limit and default contexts of 64k tokens per request and 32k per
+question ([limits](https://docs.typesafe.ai/models),
+[errors](https://docs.typesafe.ai/api)). Bodies over 32 MiB are withheld locally;
+the API enforces token limits. Rejections, including `max_tokens_exceeded`, are
+reported as **undetermined**, with the reason in the annotation and no numeric
+category score. No truncated retry or automatic long-context mode is used.
+429s and transient failures are retried with backoff. Missing references or
+required evidence mean **n/a**; an unavailable patch for an implemented fix is
+**undetermined**, never replaced by the agent's claims. An empty captured patch
+is sent as evidence that no changes were pushed.
+
+CI runs Yilong in a separate step with `MCP_EVAL_FRAMEWORK_JEV_TOKEN`, never in
+the evaluated agent's container. It downloads `<run>.judge.json`, final reports,
+transcripts and complete `.diff.patch` artifacts, then uploads verdicts and
+annotates the build. Datadog publishing follows it and handles either evaluator.
+Locally, run `./evals/scripts/yilong.sh evals/runs/<id>/<run>.judge.json` with the
+token in your environment; `YILONG_DRY_RUN=true` prints requests without calling
+the API or requiring a key. Old bundles lacking prompt/scenario metadata must
+be regenerated rather than falling back to entry-ID references.
+
+## Klaren rubric and reference answers
+
+Klaren keeps its detailed session review and also grades three outcomes using
+`prompts/rubric.json`, the canonical grading instructions and level definitions
+for evaluators. The review prompt does not duplicate those definitions:
+
+| Category | Score 0 | Score 0.5 | Score 1 |
+| --- | --- | --- | --- |
+| Correctness of conclusion | Bollocks | Sorta | Yeah baby |
+| Quality of investigation | Homer Simpson | Scooby-Doo | Sherlock |
+| Correctness of fix | Airshot | Duct tape | Sweeet |
+
+Sherlock requires a correct diagnosis **and** a rigorous investigation backed by
+actual tool results. A completely incorrect conclusion, or a correct conclusion
+reached through guessing, fabrication or fundamental misinterpretation, is Homer
+Simpson. Meaningful investigation with a partly correct conclusion or material
+verification gaps is Scooby-Doo. Hiding a failure by skipping a valid test or
+weakening assertions is Airshot; a genuine but partial or fragile fix is Duct
+tape. A minimal, robust fix across the relevant conditions is Sweeet.
+
+Reviewer grades and reasons are retained without automatic cross-category
+adjustments, including contradictory grades. Missing reviewed references or
+required evidence mean **n/a**, not zero;
+malformed reviewer output means **undetermined**, not a successful grade.
+
+Reference answers are keyed by **prompt and scenario**, not the matrix entry ID,
+agent or model. Set a stable `scenario.id` in each matrix entry:
+
+```yaml
+prompt: red-to-green-comment-only
+scenario:
+  id: buildkite-204234
+  vars:
+    BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+```
+
+This uses `expected/red-to-green-comment-only/buildkite-204234/root_cause.md`
+for conclusion and investigation, and `fix.md` in the same directory for fix.
+Agent/model variants with the same prompt and scenario share those answers.
+Use a different scenario ID when the target or expected outcome changes; do not
+include generated branch names or run timestamps in it. No `scenario.id` means
+no reference lookup and n/a grades, but detailed review and candidate generation
+still run. There is no fallback to an entry-ID answer key.
+
+Locally the reviewer uses the harness's files. CI fetches them from the exact
+`MCP_SRC_SHA` commit **after the evaluated agent returns**; they are never
+baked into the eval image. If the files cannot
+be loaded, the affected categories remain n/a. The initial reference for
+`red-to-green-comment-only` comes from the diagnosis in eval build 395.
+
+The run bundle adds:
+
+* `<run>.diff.patch` — complete pushed diff for code-changing scenarios, linked
+  from the verdict annotation. Klaren reads the file rather than a truncated
+  inline excerpt. If capture fails or klaren does not confirm full review, fix
+  is undetermined and publishes no numeric score. Diagnosis-only runs continue
+  to grade the proposed fix from the report without requiring a diff.
+* `<run>.klaren.json` — validated verdicts and derived numeric scores.
+* `<run>.klaren-verdicts.md` — summary annotation with reasons and candidate links.
+* `<run>.klaren-candidate-root_cause.md` and `<run>.klaren-candidate-fix.md` —
+  evidence-backed **candidate** reference answers, when the reviewer has enough
+  evidence. These never replace the reviewed references automatically and cannot
+  be used to grade the same run that generated them.
+
+To use a candidate as a reference answer, verify its evidence and scenario applicability,
+then copy the reviewed content into `evals/expected/<prompt>/<scenario.id>/root_cause.md` or
+`fix.md` and commit it. An unsupported candidate is omitted, not invented.
+When candidates exist, the verdict annotation and log include download links,
+the destination paths, and instructions to review, correct or discard candidates,
+submit the approved answers in a PR, and rerun using the commit containing them.
+If `scenario.id` is missing, the instructions explain how to configure it first.
+
+CI publishes `mcp_eval.klaren.{conclusion,investigation,fix}` and
+`mcp_eval.klaren.undetermined`, tagged `evaluator:klaren`, alongside normal run
+metrics. n/a and undetermined categories publish no score. Both
+[MCP Evals](https://app.datadoghq.com/dashboard/vsr-kw9-upf/) and
+[MCP Evals by Build](https://app.datadoghq.com/dashboard/rx7-bme-f27/) show the
+three categories with the level markers above. Yilong publishes matching
+`mcp_eval.yilong.*` metrics separately; selecting Klaren retains its full workflow.
+
+Run the focused checks with
+`python3 -B -m unittest discover -s evals/scripts -p 'test_*.py' -v`.
 
 ## Permission posture
 
 In CI the LLM agent runs with `--permission-mode bypassPermissions` (claude) / `--force --approve-mcps` (cursor) and NO tool allowlist. (cursor-cloud has no posture to pick — the agent runs unrestricted inside Cursor's own VM sandbox, never on our host; see "Supported agents".) This is deliberate: real users rarely restrict tools, so tool CHOICE is part of what the eval measures — an agent that reaches for `curl` against the Buildkite API instead of the MCP tools is signal that the tools aren't compelling. Check the `eval-tools` annotation on each build to see what was actually called.
+
+Scenario prompts prohibit reading reference answers, evaluator reviews and
+candidate-answer artifacts, whether local or remote. This is an instruction to
+the evaluated agent, not filesystem or network isolation: Cursor Cloud's source
+checkout still contains the public references. The restriction is deliberately
+not in the shared system prompt, since the reviewer needs those references.
 
 Containment does not come from permissions; it comes from layers the agent cannot talk its way around:
 * The docker container sandbox (throwaway, non-root)
@@ -93,16 +211,13 @@ All new code are mostly in `evals/` folder
 * In 'evals/prompts/' folder:
   * klaren.md
     * Review LLM agent session log and complain loudly about what could've been better
-  * yilong.json
-    * The yilong rubric: each question's task, evidence records and verdict levels
   * Other `<name>.md` files are prompt templates referenced by evals.yaml entries,
     rendered per entry with `{{.KEY}}` substitution (globals + scenario vars +
     setup vars)
 * In 'evals/scripts/' folder:
   * babystand.sh
     * Drives the evals.yaml matrix: per entry it runs the scenario setup, renders
-      the prompt, runs the LLM agent, audits the session, runs the klaren review
-      (evaluator: klaren) or writes yilong's judge.json (evaluator: yilong),
+      the prompt, runs the LLM agent, audits the session, runs the klaren review,
       writes a run bundle to `evals/runs/<id>/<id>-<datetime>.<ext>` (eval-final,
       metrics, tools, klaren, transcript; gitignored; also uploaded as build
       artifacts in CI), publishes per-entry annotations (`eval-final-<id>`,
@@ -141,16 +256,15 @@ All new code are mostly in `evals/` folder
       `tool_time_seconds` are null there (their result event still reports
       total duration)
   * yilong.sh
-    * The default evaluator — see "Evaluators" above. CI's `yilong` step runs
-      it with no arguments; locally, pass `<run>.judge.json` paths
+    * Jev evaluator — see "Evaluator selection" above. CI runs it with no
+      arguments; locally, pass the `<run>.judge.json` paths to evaluate.
   * dd-metrics.sh
     * Publish one entry's run metrics to Datadog (metrics v2 series API) as
       `mcp_eval.*` gauges — run count, goal_achieved (1/0), duration /
       tool-time / wait seconds, tool call counts (total + `mcp__`-prefixed),
-      token usage (input / output / cache read / cache write), and yilong
-      verdict scores (`yilong.conclusion` / `.investigation` / `.fix`, plus
-      `yilong.undetermined`) — tagged `entry:`, `prompt:`, `agent:`,
-      `model:`, `goal:`, `evaluator:`, `buildkite_build:`
+      and token usage (input / output / cache read / cache write), plus separate
+      klaren/yilong rubric scores — tagged `entry:`, `prompt:`, `agent:`, `model:`, `goal:`,
+      `buildkite_build:`, `evaluator:`
     * Best-effort by design: skips loudly when `DD_API_KEY` is unset (local
       runs, forks), and a publish failure never fails the entry. `DD_SITE`
       picks the Datadog site, `DD_METRIC_PREFIX` the namespace (default
@@ -171,7 +285,7 @@ All new code are mostly in `evals/` folder
     * The single Datadog publish entry point, and the only process that may
       hold `DD_API_KEY` — the `dd-publish` pipeline step. Downloads each
       entry's `runs/<id>/<run-key>.dd.json` (identity + outcome, written by
-      babystand.sh) plus `.metrics.json` run-bundle artifacts, then drives
+      babystand.sh) plus `.metrics.json` and `.klaren.json` run-bundle artifacts, then drives
       dd-metrics.sh once per entry; the key is scoped to that step via
       `secrets`
     * Datadog publishing is CI-only. Local runs are for debugging prompts
@@ -209,4 +323,3 @@ All new code are mostly in `evals/` folder
       * Github to access scenarios (read/write) in external repo, e.g., where scnearios are, so we can access/create branches and push, etc.
       * Buildkite for bk org to retrieve the last successful build (read) to compare
       * Buildkite for orgs where the scenario pipelines (read) are (to monitor scenarios from red-to-green)
-      * TypeSafe Jev (`MCP_EVAL_FRAMEWORK_JEV_TOKEN`), mapped only into the `yilong` step

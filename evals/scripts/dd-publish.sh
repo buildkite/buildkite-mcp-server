@@ -44,7 +44,8 @@ if ! buildkite-agent artifact download "runs/*/*.dd.json" "$WORK_DIR/"; then
 fi
 buildkite-agent artifact download "runs/*/*.metrics.json" "$WORK_DIR/" \
     || echo "dd-publish: no metrics artifacts; publishing identity/duration series only." >&2
-# yilong verdicts exist only for entries judged by the yilong step.
+buildkite-agent artifact download "runs/*/*.klaren.json" "$WORK_DIR/" \
+    || echo "dd-publish: no klaren verdict artifacts." >&2
 buildkite-agent artifact download "runs/*/*.yilong.json" "$WORK_DIR/" \
     || echo "dd-publish: no yilong verdict artifacts." >&2
 
@@ -68,6 +69,7 @@ while IFS= read -r META; do
         DD_TIMESTAMP="$(jq -r '.end_ts // ""' "$META")" \
         EVALUATOR="$(jq -r '.evaluator // ""' "$META")" \
         METRICS_FILE="${META%.dd.json}.metrics.json" \
+        KLAREN_FILE="${META%.dd.json}.klaren.json" \
         YILONG_FILE="${META%.dd.json}.yilong.json" \
         "$SCRIPT_DIR/dd-metrics.sh"; then
         PUBLISHED=$(( PUBLISHED + 1 ))

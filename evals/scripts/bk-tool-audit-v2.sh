@@ -19,8 +19,8 @@
 #   --all        Include all tools, not just mcp__buildkite-mcp-server__*
 #   --names      Print only "<count> <tool>" summary instead of full params
 #   --results    Also show each call's tool_result (matched by tool_use_id)
-#   --result-chars N  Keep head/tail result excerpts of N characters instead of
-#                     the default first 300 characters on one line
+#   --full-results Keep complete captured results instead of the default first
+#                  300 characters on one line (requires --results)
 #   --project P  Use project dir for path P instead of the current directory
 #   --agent A    Transcript dialect: 'claude' (default; Claude Code session
 #                jsonl / stream-json — tool calls are tool_use content blocks),
@@ -50,8 +50,7 @@ BK_PRICE_CACHE_READ="${BK_PRICE_CACHE_READ:-0.5}"
 TOOL_FILTER=''
 NAMES_ONLY=0
 WITH_RESULTS=0
-RESULT_CHARS=300
-RESULT_HEAD_TAIL=false
+FULL_RESULTS=false
 PROJECT_PATH="$PWD"
 AGENT="claude"
 
@@ -61,14 +60,13 @@ while [[ "${1:-}" == -* ]]; do
     --all)     TOOL_FILTER='true'; shift ;;
     --names)   NAMES_ONLY=1; shift ;;
     --results) WITH_RESULTS=1; shift ;;
-    --result-chars) RESULT_CHARS="${2:?--result-chars needs a positive integer}"; RESULT_HEAD_TAIL=true; shift 2 ;;
+    --full-results) FULL_RESULTS=true; shift ;;
     --project) PROJECT_PATH="${2:?--project needs a path}"; shift 2 ;;
     --agent)   AGENT="${2:?--agent needs claude, cursor or cursor-cloud}"; shift 2 ;;
     -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
-[[ "$RESULT_CHARS" =~ ^[1-9][0-9]*$ ]] || { echo "--result-chars needs a positive integer" >&2; exit 2; }
 case "$AGENT" in claude|cursor|cursor-cloud) ;; *) echo "unsupported --agent: $AGENT" >&2; exit 2 ;; esac
 
 # Default tool filter (without --all): claude MCP tool names carry the
@@ -252,11 +250,8 @@ print_session() {
                )} ]
         | add // {}' "$f")"
     fi
-    map="$(jq -c --argjson n "$RESULT_CHARS" --argjson head_tail "$RESULT_HEAD_TAIL" '
-      with_entries(.value |= (if $head_tail then
-        if length <= $n then . else
-          (($n / 2) | floor) as $h | .[:$h] + "\n[…truncated…]\n" + .[length - ($n - $h):] end
-        else gsub("\n"; " ") | .[:$n] end))
+    map="$(jq -c --argjson full "$FULL_RESULTS" '
+      with_entries(.value |= (if $full then . else gsub("\n"; " ") | .[:300] end))
     ' <<<"$map")"
     extract "$f" | jq -c --slurpfile map <(printf '%s\n' "$map") \
       '. + {result: ($map[0][.id] // "(no result captured)")} | del(.id)'
