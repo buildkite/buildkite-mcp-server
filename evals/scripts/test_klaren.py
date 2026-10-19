@@ -109,10 +109,19 @@ class KlarenTest(unittest.TestCase):
         self.assertTrue((self.root / "run.klaren-candidate-root_cause.md").exists())
         self.assertIn("No reference answer available", result.stdout)
         self.assertIn("No reference fix available", result.stdout)
+        self.assertIn("destination: `evals/expected/diagnose/leaked-model/root_cause.md`", result.stdout)
+        self.assertIn("destination: `evals/expected/diagnose/leaked-model/fix.md`", result.stdout)
+        self.assertIn("Review each candidate against the target build", result.stdout)
+        self.assertIn("submit a PR for review", result.stdout)
+        self.assertIn("Run the eval again using the commit containing the approved references", result.stdout)
         self.assertFalse(self.refs.exists())
         metrics = self.metrics()
         self.assertEqual([key for key in metrics if ".klaren." in key], ["mcp_eval.klaren.undetermined"])
         self.assertEqual(metrics["mcp_eval.klaren.undetermined"]["points"][0]["value"], 0)
+        self.response["reference_answers"]["root_cause"] = None
+        _, result = self.run_review()
+        self.assertNotIn("Download candidate root_cause", result.stdout)
+        self.assertIn("Download candidate fix", result.stdout)
 
     def test_references_follow_prompt_and_scenario_not_run_identity(self):
         data, _ = self.run_review()
@@ -129,6 +138,10 @@ class KlarenTest(unittest.TestCase):
                 self.assertEqual({q["verdict"] for q in data["questions"]}, {"n/a"})
                 self.assertTrue((self.root / "run.klaren-candidate-root_cause.md").exists())
         self.assertIn("No scenario.id configured", data["questions"][0]["reason"])
+        summary = (self.root / "run.klaren-verdicts.md").read_text()
+        self.assertIn("Set a stable `scenario.id`", summary)
+        self.assertIn("evals/expected/diagnose/<scenario.id>/root_cause.md", summary)
+        self.assertNotIn("→ destination:", summary)
 
     def test_missing_results_and_invalid_output_do_not_publish_success(self):
         self.transcript.write_text(self.transcript.read_text().splitlines()[0] + "\n")
@@ -140,6 +153,7 @@ class KlarenTest(unittest.TestCase):
         self.assertEqual(self.metrics()["mcp_eval.klaren.undetermined"]["points"][0]["value"], 3)
         self.assertEqual((self.root / "run.klaren.md").read_text().strip(), "Prose but no valid scoring block.")
         self.assertFalse((self.root / "run.klaren-candidate-root_cause.md").exists())
+        self.assertNotIn("Candidate reference answers — next steps", (self.root / "run.klaren-verdicts.md").read_text())
 
     def test_ci_uses_pinned_harness_references(self):
         # The production wrapper still runs; only the external CLI/network edges are fixtures.

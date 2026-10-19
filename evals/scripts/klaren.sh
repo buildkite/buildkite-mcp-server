@@ -163,11 +163,28 @@ jq -r '
     (.questions[] | "| \(.title) | \(.label // .verdict) | \(.reason | gsub("[\\r\\n|]"; " ")) |"),
     "\nMissing references or evidence mean n/a, not zero. Candidate references require human review and do not count as an answer key for this run."
 ' "$PREFIX.klaren.json" > "$PREFIX.klaren-verdicts.md"
-for name in root_cause fix; do
-    if [[ -s "$PREFIX.klaren-candidate-$name.md" ]]; then
-        printf '\n[Candidate %s reference — review before use](artifact://runs/%s/%s.klaren-candidate-%s.md)\n' \
-            "$name" "$ENTRY_ID" "${PREFIX##*/}" "$name" >> "$PREFIX.klaren-verdicts.md"
-    fi
-done
+if [[ -s "$PREFIX.klaren-candidate-root_cause.md" || -s "$PREFIX.klaren-candidate-fix.md" ]]; then
+    {
+        printf '\n### Candidate reference answers — next steps\n\n'
+        for name in root_cause fix; do
+            if [[ -s "$PREFIX.klaren-candidate-$name.md" ]]; then
+                printf '* [Download candidate %s](artifact://runs/%s/%s.klaren-candidate-%s.md)' \
+                    "$name" "$ENTRY_ID" "${PREFIX##*/}" "$name"
+                if [[ -n "$REFERENCE_PATH" ]]; then
+                    printf ' → destination: `evals/%s/%s.md`' "$REFERENCE_PATH" "$name"
+                fi
+                printf '\n'
+            fi
+        done
+        printf '\n1. Review each candidate against the target build, actual tool results and relevant source. Verify every material cause and the proposed fix; correct unsupported claims or discard the candidate.\n'
+        if [[ -n "$REFERENCE_PATH" ]]; then
+            printf '2. After review, copy the approved answer content into the destination above in the buildkite-mcp-server repository. If a reference already exists, compare it first and replace it only deliberately.\n'
+        else
+            printf '2. Set a stable `scenario.id` for this entry in `evals/evals.yaml`, then save the approved answers under `evals/expected/%s/<scenario.id>/root_cause.md` and/or `fix.md`. Do not use the matrix entry ID as the reference key.\n' "$PROMPT_NAME"
+        fi
+        printf '3. Commit the reviewed answers (and any scenario configuration change) and submit a PR for review. Nothing is installed automatically.\n'
+        printf '4. Run the eval again using the commit containing the approved references. Missing-reference grades from this run remain n/a; these candidates cannot grade their own run.\n'
+    } >> "$PREFIX.klaren-verdicts.md"
+fi
 cat "$PREFIX.klaren-verdicts.md"
 exit "$FAILED"

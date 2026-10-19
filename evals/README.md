@@ -91,6 +91,10 @@ The run bundle adds:
 To use a candidate with yilong, verify its evidence and scenario applicability,
 then copy the reviewed content into `evals/expected/<prompt>/<scenario.id>/root_cause.md` or
 `fix.md` and commit it. An unsupported candidate is omitted, not invented.
+When candidates exist, the verdict annotation and log include download links,
+the destination paths, and instructions to review, correct or discard candidates,
+submit the approved answers in a PR, and rerun using the commit containing them.
+If `scenario.id` is missing, the instructions explain how to configure it first.
 
 CI publishes `mcp_eval.klaren.{conclusion,investigation,fix}` and
 `mcp_eval.klaren.undetermined`, tagged `evaluator:klaren`, alongside normal run
