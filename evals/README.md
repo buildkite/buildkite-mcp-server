@@ -81,6 +81,11 @@ be loaded, the affected categories remain n/a. The initial reference for
 
 The run bundle adds:
 
+* `<run>.diff.patch` — complete pushed diff for code-changing scenarios, linked
+  from the verdict annotation. Klaren reads the file rather than a truncated
+  inline excerpt. If capture fails or klaren does not confirm full review, fix
+  is undetermined and publishes no numeric score. Diagnosis-only runs continue
+  to grade the proposed fix from the report without requiring a diff.
 * `<run>.klaren.json` — validated verdicts and derived numeric scores.
 * `<run>.klaren-verdicts.md` — summary annotation with reasons and candidate links.
 * `<run>.klaren-candidate-root_cause.md` and `<run>.klaren-candidate-fix.md` —

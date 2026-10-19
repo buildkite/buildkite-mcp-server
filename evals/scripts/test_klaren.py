@@ -18,7 +18,7 @@ class KlarenTest(unittest.TestCase):
         source = Path(__file__).resolve().parent
         self.scripts = self.root / "scripts"
         self.scripts.mkdir()
-        for name in ("klaren.sh", "bk-tool-audit-v2.sh", "dd-metrics.sh", "dd-publish.sh"):
+        for name in ("babystand.sh", "klaren.sh", "bk-tool-audit-v2.sh", "dd-metrics.sh", "dd-publish.sh"):
             shutil.copy2(source / name, self.scripts / name)
         shutil.copytree(source.parent / "prompts", self.root / "prompts")
         self.refs = self.root / "expected/diagnose/leaked-model"
@@ -35,6 +35,7 @@ class KlarenTest(unittest.TestCase):
         (self.root / "final.md").write_text("The model leaked. Isolate it.")
         (self.root / "diff").write_text("")
         self.response = {
+            "diff_review_complete": False,
             "questions": {
                 "conclusion": {"verdict": "sorta", "reason": "Missed a material cause.", "score": 999},
                 "investigation": {"verdict": "sherlock", "reason": "Read the logs."},
@@ -154,6 +155,104 @@ class KlarenTest(unittest.TestCase):
         self.assertEqual((self.root / "run.klaren.md").read_text().strip(), "Prose but no valid scoring block.")
         self.assertFalse((self.root / "run.klaren-candidate-root_cause.md").exists())
         self.assertNotIn("Candidate reference answers — next steps", (self.root / "run.klaren-verdicts.md").read_text())
+
+    def test_implemented_fix_requires_complete_diff_review(self):
+        self.env["DIFF_STATUS"] = "available"
+        (self.root / "diff").write_text("A complete pushed patch.\n")
+        self.response["questions"]["fix"]["verdict"] = "sweeet"
+        for confirmation in (False, None, True):
+            with self.subTest(confirmation=confirmation):
+                self.response["diff_review_complete"] = confirmation
+                data, _ = self.run_review()
+                fix = data["questions"][2]
+                self.assertEqual(fix["score"], 1 if confirmation else None)
+                self.assertEqual(data["questions"][0]["score"], 0.5)
+                if not confirmation:
+                    self.assertEqual(fix["verdict"], "undetermined")
+                    self.assertNotIn("mcp_eval.klaren.fix", self.metrics())
+        # A claimed completed review cannot rescue a missing patch.
+        (self.root / "diff").unlink()
+        data, _ = self.run_review()
+        self.assertEqual(data["diff_status"], "unavailable")
+        self.assertEqual(data["questions"][2]["verdict"], "undetermined")
+
+    def test_harness_preserves_large_pushed_diff_as_artifact(self):
+        self.response["diff_review_complete"] = True
+        self.response["questions"]["fix"]["verdict"] = "duct-tape"
+        self.run_review()  # Prepare the CLI's final review fixture.
+        seed = self.root / "seed"
+        seed.mkdir()
+        def git(*args, cwd=seed):
+            return subprocess.check_output(["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                                            "-C", str(cwd), *args], stderr=subprocess.DEVNULL)
+        git("init", "-q", "-b", "main")
+        (seed / "a-file.txt").write_text("before\n")
+        (seed / "z-test.py").write_text("def test_bug(): pass\n")
+        git("add", ".")
+        git("commit", "-qm", "baseline")
+        baseline = git("rev-parse", "HEAD").decode().strip()
+        remote = self.root / "remote.git"
+        git("clone", "--bare", str(seed), str(remote))
+        (self.root / "large-change").write_text(("large change " + "x" * 80 + "\n") * 750)
+        (self.root / "skipped-test").write_text('@pytest.mark.skip(reason="hide regression")\ndef test_bug(): pass\n')
+        def executable(path, body):
+            path.write_text("#!/bin/bash\nset -euo pipefail\n" + body)
+            path.chmod(0o755)
+        real_git = shutil.which("git")
+        executable(self.root / "bin/git", 'if [[ "$1" == clone ]]; then exec "$REAL_GIT" clone "$FIXTURE_REPO" "$3"; fi\nexec "$REAL_GIT" "$@"\n')
+        executable(self.root / "bin/gh", "exit 0\n")
+        executable(self.root / "bin/yq", 'cat "$STUB_ROOT/matrix.json"\n')
+        executable(self.root / "bin/curl", '''
+for arg; do url="$arg"; done
+if [[ "$url" == https://api.buildkite.com/* ]]; then printf '[{"state":"passed"}]'; exit 0; fi
+while [[ "$1" != -o ]]; do shift; done
+printf 'Pinned reviewed reference' > "$2"
+printf 200
+''')
+        executable(self.scripts / "claude.sh", '''
+if [[ "$ANNOTATION_CONTEXT_PREFIX" == eval-* ]]; then
+    cp "$STUB_ROOT/large-change" a-file.txt
+    cp "$STUB_ROOT/skipped-test" z-test.py
+    git add .
+    git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm 'Change and skip test'
+    git push origin HEAD
+    printf 'CLAUDE_TRANSCRIPT=%s/transcript.jsonl\nCLAUDE_RESULT_FILE=%s/final.md\n' "$STUB_ROOT" "$STUB_ROOT"
+else
+    cp "$1" "$STUB_PROMPT"
+    printf 'CLAUDE_RESULT_FILE=%s/review.md\n' "$STUB_ROOT"
+fi
+''')
+        executable(self.scripts / "bk-eval-compare.sh", "exit 0\n")
+        executable(self.root / "bin/buildkite-agent", '''
+if [[ "$1" == annotate ]]; then cat > /dev/null
+elif [[ "$1" == artifact && "$2" == upload ]]; then
+    mkdir -p "$STUB_ROOT/upload"
+    for file in $3; do cp "$file" "$STUB_ROOT/upload/"; done
+else exit 1; fi
+''')
+        (self.root / "matrix.json").write_text(json.dumps([{
+            "id": "case", "prompt": "fixture", "scenario": {"id": "leaked-model", "setup":
+                'git switch -c scenario\ngit push origin HEAD\nprintf "SCENARIO_BRANCH=scenario\\n" >> "$SCENARIO_VARS_FILE"'},
+        }]))
+        (self.root / "evals.yaml").write_text("matrix fixture\n")
+        (self.root / "prompts/fixture.md").write_text("Fix case.\n")
+        home = self.root / "home"
+        home.mkdir()
+        result = subprocess.run([str(self.scripts / "babystand.sh")], cwd=self.root, capture_output=True, text=True,
+                                env={**self.env, "RUN_IN_CI": "true", "LOCAL_CI": "false", "DEBUG_PERMISSIONS": "false",
+                                     "HOME": str(home), "REAL_GIT": real_git, "FIXTURE_REPO": str(remote),
+                                     "MCP_SRC_SHA": "a" * 40, "DD_API_KEY": ""}, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        patch = next((self.root / "upload").glob("*.diff.patch"))
+        expected = git("diff", baseline, "scenario", cwd=remote)
+        self.assertGreater(len(expected), 32768)
+        self.assertEqual(patch.read_bytes(), expected)
+        self.assertIn(b"@pytest.mark.skip", patch.read_bytes())
+        prompt = (self.root / "prompt.md").read_text()
+        original_patch = next((self.root / "runs/case").glob("*.diff.patch"))
+        self.assertIn(str(original_patch), prompt)
+        summary = next((self.root / "upload").glob("*.klaren-verdicts.md")).read_text()
+        self.assertIn(f"artifact://runs/case/{patch.name}", summary)
 
     def test_ci_uses_pinned_harness_references(self):
         # The production wrapper still runs; only the external CLI/network edges are fixtures.

@@ -61,6 +61,8 @@ A correct diagnosis is necessary but not sufficient for Sherlock. Check whether 
 
 Compare the implemented or proposed fix with the reviewed reference fix. Use the subsequent build result when available, but a green build alone does not establish a sound fix.
 
+For an implemented fix, `diff_status: available` supplies `diff_path`, a local file containing the complete pushed diff. Read that file in full, including later files and hunks, before assigning any fix grade. Do not rely on an excerpt, a diff summary, a green build, or the agent's report. Set `diff_review_complete` to true only after reviewing the entire diff; if any part is unreadable or unreviewed, set it to false and the fix verdict to `undetermined`. `diff_status: unavailable` also requires `undetermined`. For diagnosis-only runs (`diff_status: not_applicable`), judge the proposed fix from the report and leave `diff_review_complete` false.
+
 | Verdict | Score | Criteria |
 | --- | ---: | --- |
 | Airshot | 0 | Misses: does not address the root cause, would not make the build pass, or breaks something else. |
@@ -85,6 +87,7 @@ End your final report with exactly one block in the following form. Use verdict 
 <!-- klaren-result -->
 ```json
 {
+  "diff_review_complete": false,
   "questions": {
     "conclusion": {"verdict": "n/a", "reason": "No reviewed root-cause reference available."},
     "investigation": {"verdict": "n/a", "reason": "No reviewed root-cause reference available."},

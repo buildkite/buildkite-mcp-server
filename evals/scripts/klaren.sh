@@ -25,6 +25,12 @@ REFERENCE_PATH=""
 [[ -s "$TRANSCRIPT" && -s "$GOAL" ]] || { echo "klaren: session log and goal are required" >&2; exit 1; }
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
+DIFF_STATUS="${DIFF_STATUS:-not_applicable}"
+case "$DIFF_STATUS" in
+    available) [[ -f "$DIFF" && -r "$DIFF" ]] || DIFF_STATUS="unavailable" ;;
+    unavailable|not_applicable) ;;
+    *) echo "klaren: invalid DIFF_STATUS '$DIFF_STATUS'" >&2; exit 1 ;;
+esac
 
 # Never use the scenario checkout's answer key or newly generated candidates.
 # CI's image has no expected/; read the pinned harness commit, not latest main.
@@ -57,11 +63,12 @@ if "$SCRIPT_DIR/bk-tool-audit-v2.sh" --all --results --agent "${AGENT:-claude}" 
     HAS_RESULTS=true
 fi
 
-jq -n --rawfile goal "$GOAL" --rawfile conclusion "$REPORT" --rawfile diff "$DIFF" \
+jq -n --rawfile goal "$GOAL" --rawfile conclusion "$REPORT" \
     --rawfile root "$WORK_DIR/root_cause.md" --rawfile fix "$WORK_DIR/fix.md" \
-    --arg path "$REFERENCE_PATH" \
+    --arg path "$REFERENCE_PATH" --arg diff_path "$DIFF" --arg diff_status "$DIFF_STATUS" \
     --arg state "${FINAL_BUILD_STATE:-}" --argjson results "$HAS_RESULTS" \
-    '{goal: $goal, conclusion: $conclusion, diff: $diff, outcome: $state,
+    '{goal: $goal, conclusion: $conclusion, outcome: $state, diff_status: $diff_status,
+      diff_path: (if $diff_status == "available" then $diff_path else null end),
       reference_path: (if $path == "" then null else "evals/" + $path end),
       expected_root_cause: $root, expected_fix: $fix, captured_tool_results: $results}' > "$WORK_DIR/evidence.json"
 {
@@ -128,24 +135,32 @@ jq -n --slurpfile raw "$WORK_DIR/result.json" --slurpfile rubric "$ROOT_DIR/prom
     $evidence[0] as $e | $raw[0] as $r
     | {entry: $entry, run_key: $run, evaluator: "klaren",
        prompt: $prompt, scenario: $scenario, reference_path: $e.reference_path,
+       diff_status: $e.diff_status, diff_review_complete: ($r.diff_review_complete == true),
        reference_answers_status: "candidate — human review required",
        reference_answers: $r.reference_answers,
        questions: [$rubric[0].questions[] | . as $q
          | (if $e.reference_path == null then "No scenario.id configured: add a stable scenario.id and reviewed prompt/scenario reference answers"
             elif .key == "fix" then
               if ($e.expected_fix | test("\\S") | not) then "No reference fix available: add \($e.reference_path)/fix.md"
-              elif (($e.diff + $e.conclusion) | test("\\S") | not) then "Missing evidence: fix" else null end
+              elif $e.diff_status == "not_applicable" and ($e.conclusion | test("\\S") | not) then "Missing evidence: fix" else null end
             elif ($e.expected_root_cause | test("\\S") | not) then "No reference answer available: add \($e.reference_path)/root_cause.md"
             elif ($e.conclusion | test("\\S") | not) then "Missing evidence: conclusion"
             elif .key == "investigation" and ($e.captured_tool_results | not) then "No captured tool results available in transcript.jsonl"
             else null end) as $missing
          | ($r.questions[.key] // {verdict:"undetermined", reason:"Reviewer failed or returned invalid rubric JSON"}) as $a
+         | (if .key == "fix" and $e.diff_status != "not_applicable" then
+              if $e.diff_status != "available" then "Complete pushed diff unavailable; fix grade withheld"
+              elif $r.diff_review_complete != true then "Reviewer did not confirm reviewing the complete pushed diff; fix grade withheld"
+              else null end
+            else null end) as $unreviewed
          | (if $missing then "n/a"
+            elif $unreviewed then "undetermined"
             elif .key == "investigation" and $a.verdict == "sherlock" and $r.questions.conclusion.verdict != "yeah-baby" then "scooby-doo"
             else $a.verdict end) as $v
          | ([.levels[] | select(.id == $v)][0] // {}) as $level
          | {key, title, verdict: $v, label: ($level.label // null), score: ($level.score // null),
             reason: (if $missing then $missing
+                     elif $unreviewed then $unreviewed
                      elif $v != $a.verdict then "Sherlock requires a correct conclusion (Yeah baby); capped at Scooby-Doo. " + $a.reason
                      else $a.reason end)}]}
 ' > "$PREFIX.klaren.json"
@@ -163,6 +178,10 @@ jq -r '
     (.questions[] | "| \(.title) | \(.label // .verdict) | \(.reason | gsub("[\\r\\n|]"; " ")) |"),
     "\nMissing references or evidence mean n/a, not zero. Candidate references require human review and do not count as an answer key for this run."
 ' "$PREFIX.klaren.json" > "$PREFIX.klaren-verdicts.md"
+if [[ "$DIFF_STATUS" == "available" ]]; then
+    printf '\n[Complete pushed diff](artifact://runs/%s/%s.diff.patch) — review complete: %s\n' \
+        "$ENTRY_ID" "${PREFIX##*/}" "$(jq -r '.diff_review_complete' "$PREFIX.klaren.json")" >> "$PREFIX.klaren-verdicts.md"
+fi
 if [[ -s "$PREFIX.klaren-candidate-root_cause.md" || -s "$PREFIX.klaren-candidate-fix.md" ]]; then
     {
         printf '\n### Candidate reference answers — next steps\n\n'

@@ -567,12 +567,15 @@ run_entry() {
     fi
 
     # Show klaren the pushed change, not just the agent's description of it.
-    local KLAREN_DIFF; KLAREN_DIFF="$(mktemp)"
-    if [[ -n "$SCENARIO_BRANCH_VAL" && -n "$SETUP_SHA" ]]; then
-        if git fetch --quiet origin "$SCENARIO_BRANCH_VAL"; then
-            git diff "$SETUP_SHA" FETCH_HEAD | head -c 32768 > "$KLAREN_DIFF" || true
+    local KLAREN_DIFF="$PREFIX.diff.patch" KLAREN_DIFF_STATUS="not_applicable"
+    if [[ -n "$SCENARIO_BRANCH_VAL" ]]; then
+        KLAREN_DIFF_STATUS="unavailable"
+        if [[ -n "$SETUP_SHA" ]] && git fetch --quiet origin "$SCENARIO_BRANCH_VAL" \
+            && git diff "$SETUP_SHA" FETCH_HEAD > "$KLAREN_DIFF"; then
+            KLAREN_DIFF_STATUS="available"
         else
-            echo "WARNING: [$ENTRY_ID] could not fetch '$SCENARIO_BRANCH_VAL'; klaren will judge the proposed fix from the report" >&2
+            rm -f "$KLAREN_DIFF"
+            echo "WARNING: [$ENTRY_ID] could not capture the complete pushed diff; klaren will withhold the fix score" >&2
         fi
     fi
 
@@ -613,11 +616,10 @@ run_entry() {
     echo "--- :female-detective: [$ENTRY_ID] klaren review"
     local KLAREN_START; KLAREN_START=$(date +%s)
     if ! ENTRY_ID="$ENTRY_ID" AGENT="$AGENT" FINAL_BUILD_STATE="$FINAL_BUILD_STATE" \
-        PROMPT_NAME="$PROMPT_NAME" SCENARIO_ID="$SCENARIO_ID" \
+        PROMPT_NAME="$PROMPT_NAME" SCENARIO_ID="$SCENARIO_ID" DIFF_STATUS="$KLAREN_DIFF_STATUS" \
         "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX"; then
         echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
     fi
-    rm -f "$KLAREN_DIFF"
     local KLAREN_ELAPSED; KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
     echo "*** [$ENTRY_ID] KLAREN ELAPSED: $KLAREN_ELAPSED"
 
