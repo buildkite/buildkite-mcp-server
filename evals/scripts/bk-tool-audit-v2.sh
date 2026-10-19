@@ -219,7 +219,11 @@ print_session() {
   fi
 
   if [[ "$WITH_RESULTS" == 1 ]]; then
-    # Map call id -> truncated result text (claude: tool_use_id on tool_result
+    # Capture full outputs first so yilong's --full-results can judge the actual
+    # evidence. Applying the 300-character display cutoff here would discard
+    # evidence before that option takes effect; the default excerpt is applied
+    # below, after all transcript dialects have been normalized.
+    # Map call id -> result text (claude: tool_use_id on tool_result
     # blocks; cursor: call_id on tool_call completed events, result under the
     # tool key's .result — .success on success, the whole object otherwise;
     # cursor-cloud: data.callId on completed tool_call events, result at
