@@ -108,6 +108,12 @@ Run the focused checks with
 
 In CI the LLM agent runs with `--permission-mode bypassPermissions` (claude) / `--force --approve-mcps` (cursor) and NO tool allowlist. (cursor-cloud has no posture to pick — the agent runs unrestricted inside Cursor's own VM sandbox, never on our host; see "Supported agents".) This is deliberate: real users rarely restrict tools, so tool CHOICE is part of what the eval measures — an agent that reaches for `curl` against the Buildkite API instead of the MCP tools is signal that the tools aren't compelling. Check the `eval-tools` annotation on each build to see what was actually called.
 
+Scenario prompts prohibit reading reference answers, evaluator reviews and
+candidate-answer artifacts, whether local or remote. This is an instruction to
+the evaluated agent, not filesystem or network isolation: Cursor Cloud's source
+checkout still contains the public references. The restriction is deliberately
+not in the shared system prompt, since the reviewer needs those references.
+
 Containment does not come from permissions; it comes from layers the agent cannot talk its way around:
 * The docker container sandbox (throwaway, non-root)
 * The MCP server's `--read-only` mode (write tools are never registered, see `mcp_in_ci.json`/`mcp.json`)
