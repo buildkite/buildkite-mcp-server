@@ -6,7 +6,7 @@
 # For every run whose evaluator is yilong, babystand.sh leaves a
 # <run>.judge.json in the run bundle (goal, the scenario branch's diff and
 # final build state). This script combines that, the bundle's eval-final.md
-# and tools.txt, and the entry's reference answer (expected/<id>/root_cause.md
+# and transcript.jsonl, and the entry's reference answer (expected/<id>/root_cause.md
 # and fix.md, read from this checkout — never part of the agent's container)
 # into evidence records, then asks Jev one Score question per rubric entry in
 # prompts/yilong.json, each against only the records that question names:
@@ -49,7 +49,7 @@ RUBRIC="$ROOT_DIR/prompts/yilong.json"
 API_URL="${YILONG_API_URL:-https://api.typesafe.ai/v1/systemone}"
 MODEL="${YILONG_MODEL:-jev-1.14.0}"
 DRY_RUN="${YILONG_DRY_RUN:-false}"
-# ~4 chars per token: three capped records stay far below 32k tokens.
+# Bound evidence size; longer records retain an explicit truncation marker.
 RECORD_CHARS=16000
 
 command -v jq >/dev/null   || { echo "yilong: jq is required" >&2; exit 1; }
@@ -75,7 +75,7 @@ else
         exit 0
     fi
     buildkite-agent artifact download "runs/*/*.eval-final.md" "$WORK_DIR/" || true
-    buildkite-agent artifact download "runs/*/*.tools.txt" "$WORK_DIR/" || true
+    buildkite-agent artifact download "runs/*/*.transcript.jsonl" "$WORK_DIR/" || true
     JUDGE_FILES=()
     while IFS= read -r f; do JUDGE_FILES+=("$f"); done < <(find "$WORK_DIR" -name '*.judge.json' | sort)
 fi
@@ -120,7 +120,7 @@ jev_call() {
 #   expected_root_cause  expected/<id>/root_cause.md
 #   expected             expected/<id>/ root cause + fix (needs fix.md)
 #   conclusion           the agent's final report
-#   trace                the agent's tool calls, in order, condensed
+#   trace                tool calls paired with result excerpts, in call order
 #   fix                  the pushed diff, else the report's proposed fix
 #   outcome              the scenario branch's final build state
 # Redaction is defense in depth: bundles should hold no secrets, but agent
@@ -137,23 +137,17 @@ def cut($n):
   else (($n / 2) | floor) as $h | .[:$h] + "\n[…truncated…]\n" + .[length - ($n - $h):] end;
 '
 
-# trace <tools.txt> -> condensed tool-call list on stdout (empty if no audit)
+# trace <transcript.jsonl> <agent> -> calls with result excerpts (empty if none)
 trace() {
     [[ -s "$1" ]] || return 0
-    local calls; calls="$(grep '^{' "$1" || true)"
-    if [[ -z "$calls" ]]; then echo "The agent made no tool calls."; return; fi
-    jq -rs "$JQ_LIB"'
-        def short: tostring | gsub("\\s+"; " ") | if length > 80 then .[:77] + "..." else . end;
-        map((.tool // "?" | sub("^mcp__.*?__"; "")) + " "
-            + ((.input // {}) | if type == "object" then
-                  del(.org_slug, .pipeline_slug, .telemetry, .description)
-                  | to_entries | map("\(.key)=\(.value | short)") | join(" ")
-                else short end)
-            | .[:200])
-        | reduce .[] as $l ([]; if (.[-1].l // null) == $l then .[-1].n += 1 else . + [{l: $l, n: 1}] end)
-        | "Tool calls in order (\(map(.n) | add) total):\n"
-          + (map(.l + (if .n > 1 then " (×\(.n))" else "" end)) | join("\n"))
-    ' <<<"$calls"
+    local calls
+    calls="$("$SCRIPT_DIR/bk-tool-audit-v2.sh" --all --results --result-chars 4000 --agent "$2" "$1")" || return 1
+    jq -rs '
+        if any(.[]; (.result // "") | IN("", "{}", "(no result)", "(no result captured)") | not)
+        then "Tool calls with result excerpts, in call order (not completion order). Missing or truncated evidence is not proof of a claim:\n"
+             + (map(tojson) | join("\n"))
+        else empty end
+    ' <<<"$(printf '%s\n' "$calls" | grep '^{' || true)"
 }
 
 # --- Judge one run -------------------------------------------------------------
@@ -164,7 +158,10 @@ judge() {
     local conclusion_file="$WORK_DIR/conclusion.txt" trace_file="$WORK_DIR/trace.txt"
     : > "$conclusion_file"
     [[ -s "$report" ]] && cp "$report" "$conclusion_file"
-    trace "$prefix.tools.txt" > "$trace_file"
+    if ! trace "$prefix.transcript.jsonl" "$(jq -r '.agent // "claude"' "$judge_file")" > "$trace_file"; then
+        echo "WARNING: yilong: could not read tool results from $prefix.transcript.jsonl; investigation will be n/a" >&2
+        : > "$trace_file"
+    fi
     local expected_dir; expected_dir="$ROOT_DIR/expected/$(jq -r '.entry' "$judge_file")"
     local root_cause_file="$WORK_DIR/root_cause.md" fix_file="$WORK_DIR/fix.md"
     : > "$root_cause_file"; : > "$fix_file"
@@ -202,11 +199,19 @@ judge() {
         key="$(jq -r '.key' <<<"$q")"
         missing="$(jq -r --slurpfile r "$records" '[.requires[] | select($r[0][.] == null)] | join(", ")' <<<"$q")"
         if [[ -n "$missing" ]]; then
-            jq -c --arg m "$missing" '{key, title, verdict: "n/a", reason: "missing evidence: \($m)"}' <<<"$q" >> "$results"
+            local reason
+            reason="$(jq -r --slurpfile r "$records" --arg dir "evals/expected/$(jq -r '.entry' "$judge_file")" '
+              [.requires[] | select($r[0][.] == null) |
+                if . == "expected_root_cause" then "No reference answer available: add " + $dir + "/root_cause.md"
+                elif . == "expected" then "No reference fix available: add " + $dir + "/fix.md"
+                elif . == "trace" then "No captured tool results available in transcript.jsonl"
+                else "Missing evidence: " + . end] | join("; ")
+            ' <<<"$q")"
+            echo "yilong: [$key] n/a — $reason; skipping Jev" >&2
+            jq -c --arg reason "$reason" '{key, title, verdict: "n/a", reason: $reason}' <<<"$q" >> "$results"
             continue
         fi
-        # One request per question, so each sees only its own records (the
-        # investigation question never sees the reference answer). Levels go
+        # One request per question, so each sees only its own records. Levels go
         # in order as a Score rubric: index 0 is the worst verdict.
         jq --slurpfile r "$records" --arg model "$MODEL" '
             {model: $model,
@@ -244,12 +249,20 @@ judge() {
     done
 
     jq -s --slurpfile judge "$judge_file" '
-        {entry: $judge[0].entry, run_key: $judge[0].run_key, evaluator: "yilong", questions: .}' "$results" > "$out"
+        (map(select(.key == "conclusion"))[0].verdict) as $conclusion
+        | map(if .key == "investigation" and .verdict == "sherlock" and $conclusion != "yeah-baby"
+              then .verdict = "scooby-doo" | .label = "Scooby-Doo" | .score = 0.5
+                   | .reason = "Sherlock requires a correct conclusion (Yeah baby); capped at Scooby-Doo. Probabilities are the original Jev assessment."
+              else . end)
+        | {entry: $judge[0].entry, run_key: $judge[0].run_key, evaluator: "yilong", questions: .}' "$results" > "$out"
 
     # Summary markdown (annotation in CI, stdout locally).
     jq -r '
         def pct: if . == null then "–" else (. * 100 | round | tostring) + "%" end;
         "<details open><summary>🧑🏻‍⚖️ [\(.entry)] yilong — verdicts</summary>\n",
+        (if any(.questions[]; .verdict == "n/a") then
+           "**Some categories were not evaluated (n/a).** See the Note column for missing references or evidence. No score is published for those categories.\n"
+         else empty end),
         "| Question | Verdict | Jev probabilities | Confidence | Note |",
         "| --- | --- | --- | --- | --- |",
         (.questions[] |
@@ -257,7 +270,7 @@ judge() {
           + (if .probabilities then ([.probabilities | to_entries[] | "\(.key) \(.value | pct)"] | join(" · ")) else "–" end)
           + " | \(.confidence | pct) | \(.reason // "") |"),
         "",
-        "Verdict = the level Jev finds most probable; low confidence means it was split between levels. Undetermined means the API call failed; n/a means the entry lacks the evidence (add its reference answer under `evals/expected/\(.entry)/`).",
+        "Verdict = the level Jev finds most probable, except Sherlock requires a Yeah baby conclusion. Probabilities and confidence reflect the original Jev assessment. Undetermined means the API call failed; n/a means required references or evidence are missing (see Note).",
         "</details>"
     ' "$out"
 }

@@ -689,7 +689,7 @@ run_entry() {
     # yilong's input. The judging itself happens in the pipeline's yilong step
     # (scripts/yilong.sh), outside this container: MCP_EVAL_FRAMEWORK_JEV_TOKEN must
     # never be visible to the agent under test. yilong reads this file plus the
-    # bundle's eval-final.md and tools.txt.
+    # bundle's eval-final.md and transcript.jsonl.
     if [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
         if ! jq -n \
             --arg entry     "$ENTRY_ID" \
