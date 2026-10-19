@@ -41,7 +41,8 @@ The klaren reviewer always runs on claude regardless of the entry's agent — it
 ## Klaren rubric and reference answers
 
 Klaren keeps its detailed session review and also grades three outcomes using
-`prompts/rubric.json` (the same levels as yilong):
+`prompts/rubric.json`, the canonical grading instructions and level definitions
+for evaluators. The review prompt does not duplicate those definitions:
 
 | Category | Score 0 | Score 0.5 | Score 1 |
 | --- | --- | --- | --- |
@@ -50,8 +51,16 @@ Klaren keeps its detailed session review and also grades three outcomes using
 | Correctness of fix | Airshot | Duct tape | Sweeet |
 
 Sherlock requires a correct diagnosis **and** a rigorous investigation backed by
-actual tool results. Code caps Sherlock at Scooby-Doo unless conclusion is Yeah
-baby. Missing reviewed references or required evidence mean **n/a**, not zero;
+actual tool results. A completely incorrect conclusion, or a correct conclusion
+reached through guessing, fabrication or fundamental misinterpretation, is Homer
+Simpson. Meaningful investigation with a partly correct conclusion or material
+verification gaps is Scooby-Doo. Hiding a failure by skipping a valid test or
+weakening assertions is Airshot; a genuine but partial or fragile fix is Duct
+tape. A minimal, robust fix across the relevant conditions is Sweeet.
+
+Reviewer grades and reasons are retained without automatic cross-category
+adjustments, including contradictory grades. Missing reviewed references or
+required evidence mean **n/a**, not zero;
 malformed reviewer output means **undetermined**, not a successful grade.
 
 Reference answers are keyed by **prompt and scenario**, not the matrix entry ID,
@@ -93,7 +102,7 @@ The run bundle adds:
   evidence. These never replace the reviewed references automatically and cannot
   be used to grade the same run that generated them.
 
-To use a candidate with yilong, verify its evidence and scenario applicability,
+To use a candidate as a reference answer, verify its evidence and scenario applicability,
 then copy the reviewed content into `evals/expected/<prompt>/<scenario.id>/root_cause.md` or
 `fix.md` and commit it. An unsupported candidate is omitted, not invented.
 When candidates exist, the verdict annotation and log include download links,
@@ -106,9 +115,8 @@ CI publishes `mcp_eval.klaren.{conclusion,investigation,fix}` and
 metrics. n/a and undetermined categories publish no score. Both
 [MCP Evals](https://app.datadoghq.com/dashboard/vsr-kw9-upf/) and
 [MCP Evals by Build](https://app.datadoghq.com/dashboard/rx7-bme-f27/) show the
-three categories with the same level markers as yilong, keeping the evaluators
-separate. This change does not introduce or select the yilong runner: klaren
-still runs after each eval as before.
+three categories with the level markers above. Klaren still runs after each eval
+as before.
 
 Run the focused checks with
 `python3 -B -m unittest discover -s evals/scripts -p test_klaren.py -v`.

@@ -155,13 +155,11 @@ jq -n --slurpfile raw "$WORK_DIR/result.json" --slurpfile rubric "$ROOT_DIR/prom
             else null end) as $unreviewed
          | (if $missing then "n/a"
             elif $unreviewed then "undetermined"
-            elif .key == "investigation" and $a.verdict == "sherlock" and $r.questions.conclusion.verdict != "yeah-baby" then "scooby-doo"
             else $a.verdict end) as $v
          | ([.levels[] | select(.id == $v)][0] // {}) as $level
          | {key, title, verdict: $v, label: ($level.label // null), score: ($level.score // null),
             reason: (if $missing then $missing
                      elif $unreviewed then $unreviewed
-                     elif $v != $a.verdict then "Sherlock requires a correct conclusion (Yeah baby); capped at Scooby-Doo. " + $a.reason
                      else $a.reason end)}]}
 ' > "$PREFIX.klaren.json"
 
@@ -169,7 +167,7 @@ for name in root_cause fix; do
     candidate="$PREFIX.klaren-candidate-$name.md"
     rm -f "$candidate"
     if jq -e --arg name "$name" '.reference_answers[$name] // "" | test("\\S")' "$PREFIX.klaren.json" >/dev/null; then
-        { printf '<!-- Candidate reference from klaren: human review required before use in yilong. -->\n\n'
+        { printf '<!-- Candidate reference from klaren: human review required before use in evaluation. -->\n\n'
           jq -r --arg name "$name" '.reference_answers[$name]' "$PREFIX.klaren.json"; } > "$candidate"
     fi
 done

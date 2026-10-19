@@ -86,9 +86,11 @@ class KlarenTest(unittest.TestCase):
 
     def test_grades_candidates_and_datadog_share_the_rubric(self):
         data, result = self.run_review()
-        self.assertEqual([q["score"] for q in data["questions"]], [0.5, 0.5, 0])
-        self.assertEqual(data["questions"][1]["verdict"], "scooby-doo")
-        self.assertIn("Sherlock requires", result.stdout)
+        # Even contradictory reviewer grades are preserved, not silently corrected.
+        self.assertEqual([q["score"] for q in data["questions"]], [0.5, 1, 0])
+        self.assertEqual(data["questions"][1]["verdict"], "sherlock")
+        self.assertEqual(data["questions"][1]["reason"], "Read the logs.")
+        self.assertIn("| Quality of investigation | Sherlock | Read the logs. |", result.stdout)
         self.assertIn("Detailed review preserved", (self.root / "run.klaren.md").read_text())
         self.assertIn("human review required", (self.root / "run.klaren-candidate-root_cause.md").read_text())
         self.assertIn("Isolate model", (self.root / "run.klaren-candidate-fix.md").read_text())
@@ -97,11 +99,11 @@ class KlarenTest(unittest.TestCase):
         self.assertIn("Reviewed root cause", prompt)
         self.assertIn("Diagnose and propose", prompt)
         metrics = self.metrics()
-        for key, value in (("conclusion", 0.5), ("investigation", 0.5), ("fix", 0)):
+        for key, value in (("conclusion", 0.5), ("investigation", 1), ("fix", 0)):
             series = metrics[f"mcp_eval.klaren.{key}"]
             self.assertEqual(series["points"][0]["value"], value)
             self.assertIn("evaluator:klaren", series["tags"])
-        self.assertFalse(any(".yilong." in key for key in metrics))
+        self.assertEqual({key for key in metrics if key.endswith(".investigation")}, {"mcp_eval.klaren.investigation"})
 
     def test_generated_candidates_do_not_replace_missing_references(self):
         shutil.rmtree(self.refs)
