@@ -38,6 +38,54 @@ A set of artifacts, and annotations in the Buildkite build showing:
 
 The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
 
+## Klaren rubric and reference answers
+
+Klaren keeps its detailed session review and also grades three outcomes using
+`prompts/rubric.json` (the same levels as yilong):
+
+| Category | Score 0 | Score 0.5 | Score 1 |
+| --- | --- | --- | --- |
+| Correctness of conclusion | Bollocks | Sorta | Yeah baby |
+| Quality of investigation | Homer Simpson | Scooby-Doo | Sherlock |
+| Correctness of fix | Airshot | Duct tape | Sweeet |
+
+Sherlock requires a correct diagnosis **and** a rigorous investigation backed by
+actual tool results. Code caps Sherlock at Scooby-Doo unless conclusion is Yeah
+baby. Missing reviewed references or required evidence mean **n/a**, not zero;
+malformed reviewer output means **undetermined**, not a successful grade.
+
+Conclusion and investigation require `expected/<entry>/root_cause.md`; fix
+requires `expected/<entry>/fix.md`. Locally the reviewer uses the harness's
+files. CI fetches them from the exact `MCP_SRC_SHA` commit **after the evaluated
+agent returns**; they are never baked into the eval image. If the files cannot
+be loaded, the affected categories remain n/a. The initial reference for
+`red-to-green-comment-only` comes from the diagnosis in eval build 395.
+
+The run bundle adds:
+
+* `<run>.klaren.json` — validated verdicts and derived numeric scores.
+* `<run>.klaren-verdicts.md` — summary annotation with reasons and candidate links.
+* `<run>.klaren-candidate-root_cause.md` and `<run>.klaren-candidate-fix.md` —
+  evidence-backed **candidate** reference answers, when the reviewer has enough
+  evidence. These never replace the reviewed references automatically and cannot
+  be used to grade the same run that generated them.
+
+To use a candidate with yilong, verify its evidence and scenario applicability,
+then copy the reviewed content into `evals/expected/<entry>/root_cause.md` or
+`fix.md` and commit it. An unsupported candidate is omitted, not invented.
+
+CI publishes `mcp_eval.klaren.{conclusion,investigation,fix}` and
+`mcp_eval.klaren.undetermined`, tagged `evaluator:klaren`, alongside normal run
+metrics. n/a and undetermined categories publish no score. Both
+[MCP Evals](https://app.datadoghq.com/dashboard/vsr-kw9-upf/) and
+[MCP Evals by Build](https://app.datadoghq.com/dashboard/rx7-bme-f27/) show the
+three categories with the same level markers as yilong, keeping the evaluators
+separate. This change does not introduce or select the yilong runner: klaren
+still runs after each eval as before.
+
+Run the focused checks with
+`python3 -B -m unittest discover -s evals/scripts -p test_klaren.py -v`.
+
 ## Permission posture
 
 In CI the LLM agent runs with `--permission-mode bypassPermissions` (claude) / `--force --approve-mcps` (cursor) and NO tool allowlist. (cursor-cloud has no posture to pick — the agent runs unrestricted inside Cursor's own VM sandbox, never on our host; see "Supported agents".) This is deliberate: real users rarely restrict tools, so tool CHOICE is part of what the eval measures — an agent that reaches for `curl` against the Buildkite API instead of the MCP tools is signal that the tools aren't compelling. Check the `eval-tools` annotation on each build to see what was actually called.
@@ -120,8 +168,9 @@ All new code are mostly in `evals/` folder
     * Publish one entry's run metrics to Datadog (metrics v2 series API) as
       `mcp_eval.*` gauges — run count, goal_achieved (1/0), duration /
       tool-time / wait seconds, tool call counts (total + `mcp__`-prefixed),
-      and token usage (input / output / cache read / cache write) — tagged
-      `entry:`, `prompt:`, `agent:`, `model:`, `goal:`, `buildkite_build:`
+      and token usage (input / output / cache read / cache write), plus klaren
+      rubric scores — tagged `entry:`, `prompt:`, `agent:`, `model:`, `goal:`,
+      `buildkite_build:`, `evaluator:`
     * Best-effort by design: skips loudly when `DD_API_KEY` is unset (local
       runs, forks), and a publish failure never fails the entry. `DD_SITE`
       picks the Datadog site, `DD_METRIC_PREFIX` the namespace (default
@@ -142,7 +191,7 @@ All new code are mostly in `evals/` folder
     * The single Datadog publish entry point, and the only process that may
       hold `DD_API_KEY` — the `dd-publish` pipeline step. Downloads each
       entry's `runs/<id>/<run-key>.dd.json` (identity + outcome, written by
-      babystand.sh) plus `.metrics.json` run-bundle artifacts, then drives
+      babystand.sh) plus `.metrics.json` and `.klaren.json` run-bundle artifacts, then drives
       dd-metrics.sh once per entry; the key is scoped to that step via
       `secrets`
     * Datadog publishing is CI-only. Local runs are for debugging prompts

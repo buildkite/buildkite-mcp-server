@@ -44,6 +44,8 @@ if ! buildkite-agent artifact download "runs/*/*.dd.json" "$WORK_DIR/"; then
 fi
 buildkite-agent artifact download "runs/*/*.metrics.json" "$WORK_DIR/" \
     || echo "dd-publish: no metrics artifacts; publishing identity/duration series only." >&2
+buildkite-agent artifact download "runs/*/*.klaren.json" "$WORK_DIR/" \
+    || echo "dd-publish: no klaren verdict artifacts." >&2
 
 PUBLISHED=0 FAILED=0
 while IFS= read -r META; do
@@ -63,7 +65,9 @@ while IFS= read -r META; do
         GOAL_ACHIEVED="$(jq -r '.goal // "unknown"' "$META")" \
         EVAL_DURATION_SECONDS="$(jq -r '.duration_seconds // ""' "$META")" \
         DD_TIMESTAMP="$(jq -r '.end_ts // ""' "$META")" \
+        EVALUATOR="$(jq -r '.evaluator // ""' "$META")" \
         METRICS_FILE="${META%.dd.json}.metrics.json" \
+        KLAREN_FILE="${META%.dd.json}.klaren.json" \
         "$SCRIPT_DIR/dd-metrics.sh"; then
         PUBLISHED=$(( PUBLISHED + 1 ))
     else

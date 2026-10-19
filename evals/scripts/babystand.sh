@@ -485,6 +485,9 @@ run_entry() {
         fi
     fi
 
+    # Capture the scenario baseline before the evaluated agent changes it.
+    local SETUP_SHA; SETUP_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+
     # --- Assemble substitution vars: globals + scenario.vars + setup vars ---
     local VARS_FILE; VARS_FILE="$(mktemp)"
     {
@@ -562,6 +565,16 @@ run_entry() {
         echo "*** [$ENTRY_ID] scenario branch '$SCENARIO_BRANCH_VAL' latest build state: $FINAL_BUILD_STATE (goal_achieved: $GOAL_ACHIEVED)"
     fi
 
+    # Show klaren the pushed change, not just the agent's description of it.
+    local KLAREN_DIFF; KLAREN_DIFF="$(mktemp)"
+    if [[ -n "$SCENARIO_BRANCH_VAL" && -n "$SETUP_SHA" ]]; then
+        if git fetch --quiet origin "$SCENARIO_BRANCH_VAL"; then
+            git diff "$SETUP_SHA" FETCH_HEAD | head -c 32768 > "$KLAREN_DIFF" || true
+        else
+            echo "WARNING: [$ENTRY_ID] could not fetch '$SCENARIO_BRANCH_VAL'; klaren will judge the proposed fix from the report" >&2
+        fi
+    fi
+
     # --- Datadog run metadata ------------------------------------------------
     # SECURITY: DD_API_KEY must never exist in this process or any of its
     # children while the evaluated agent runs (see the header note). This
@@ -585,7 +598,7 @@ run_entry() {
         --arg duration "$EVAL_ELAPSED_SECS" \
         --argjson end_ts "$(date +%s)" \
         '{entry: $entry, prompt: $prompt, agent: $agent, model: $model,
-          goal: $goal, duration_seconds: $duration, end_ts: $end_ts}' \
+          goal: $goal, duration_seconds: $duration, evaluator: "klaren", end_ts: $end_ts}' \
         > "$PREFIX.dd.json"; then
         echo "WARNING: [$ENTRY_ID] failed to write $PREFIX.dd.json; Datadog publish will skip this entry" >&2
     fi
@@ -594,46 +607,15 @@ run_entry() {
     # --- Klaren review (best-effort) ---------------------------------------
     # Klaren always runs on claude regardless of the entry's agent: it is the
     # judge, not the subject under test, and holding the reviewer fixed keeps
-    # reviews comparable across agents. It only reads the transcript file, so
-    # cursor's stream-json capture works as input too.
-    # Use the harness copy of the prompt, not the checked-out subject-under-test
-    # copy.
+    # reviews comparable across agents. Use the harness prompt and rubric,
+    # not copies from the checked-out subject under test.
     echo "--- :female-detective: [$ENTRY_ID] klaren review"
-    local KLAREN_LOG="/tmp/klaren-$RUN_KEY.log"
-    local KLAREN_PROMPT_FILE KLAREN_RESULT_FILE=""
-    KLAREN_PROMPT_FILE="$(mktemp)"
-    {
-        cat "$ROOT_DIR/prompts/klaren.md"
-        echo
-        echo "The LLM session log file to analyze is: $TRANSCRIPT"
-    } > "$KLAREN_PROMPT_FILE"
-    # klaren reads the transcript and inspects the repo; it needs read/search
-    # tools. Same permission posture as the eval run above: CI bypasses via
-    # claude.sh; local bypasses only when LOCAL_BYPASS_PERMISSION=true, else an
-    # allowlist (no MCP entry — klaren analyzes the transcript file, not
-    # Buildkite).
-    local KLAREN_ARGS=( --output-format stream-json --verbose )
-    if [[ "${RUN_IN_CI:-false}" != "true" ]]; then
-        if [[ "$LOCAL_BYPASS_PERMISSION" == "true" ]]; then
-            KLAREN_ARGS+=(--permission-mode bypassPermissions)
-        else
-            KLAREN_ARGS+=(--allowedTools "Read" "Grep" "Glob" "Bash")
-        fi
-    fi
     local KLAREN_START; KLAREN_START=$(date +%s)
-    if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
-        if ! ANNOTATION_CONTEXT_PREFIX="klaren-$ENTRY_ID" \
-            "$SCRIPT_DIR/claude.sh" "$KLAREN_PROMPT_FILE" "${KLAREN_ARGS[@]}" | tee "$KLAREN_LOG"; then
-            echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
-        fi
-        KLAREN_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$KLAREN_LOG" | tail -n1)
-    else
-        if ! claude -p "$(cat "$KLAREN_PROMPT_FILE")" --mcp-config "$ROOT_DIR/mcp.json" "${KLAREN_ARGS[@]}" | tee "$KLAREN_LOG"; then
-            echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
-        fi
-        KLAREN_RESULT_FILE="$(mktemp)"
-        jq -r 'select(.type == "result") | .result // empty' "$KLAREN_LOG" > "$KLAREN_RESULT_FILE" 2>/dev/null || true
+    if ! ENTRY_ID="$ENTRY_ID" AGENT="$AGENT" FINAL_BUILD_STATE="$FINAL_BUILD_STATE" \
+        "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX"; then
+        echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
     fi
+    rm -f "$KLAREN_DIFF"
     local KLAREN_ELAPSED; KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
     echo "*** [$ENTRY_ID] KLAREN ELAPSED: $KLAREN_ELAPSED"
 
@@ -641,7 +623,8 @@ run_entry() {
     [[ -s "$EVAL_RESULT_FILE"   ]] && cp "$EVAL_RESULT_FILE"   "$PREFIX.eval-final.md"     || : > "$PREFIX.eval-final.md"
     [[ -s "$AUDIT_METRICS_FILE" ]] && cp "$AUDIT_METRICS_FILE" "$PREFIX.metrics.json"      || : > "$PREFIX.metrics.json"
     [[ -s "$AUDIT_TOOLS_FILE"   ]] && cp "$AUDIT_TOOLS_FILE"   "$PREFIX.tools.txt"         || : > "$PREFIX.tools.txt"
-    [[ -s "$KLAREN_RESULT_FILE" ]] && cp "$KLAREN_RESULT_FILE" "$PREFIX.klaren.md"         || : > "$PREFIX.klaren.md"
+    # klaren.sh writes the review, rubric verdicts and candidate references
+    # directly into this bundle before its artifacts are uploaded.
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
     echo "*** [$ENTRY_ID] run bundle: $PREFIX.*"
 
@@ -659,6 +642,8 @@ run_entry() {
         annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls" "$PREFIX.tools.txt"
         annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
             "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
+        annotate_markdown "klaren-verdicts-$ENTRY_ID" ":female-detective: [$ENTRY_ID] Klaren — verdicts and candidate references" \
+            "$PREFIX.klaren-verdicts.md" ""
     fi
 
     # --- Compare against the baseline (best-effort) -------------------------
