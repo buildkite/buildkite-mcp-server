@@ -21,8 +21,8 @@ mise run setup
 ```
 
 `mise install` installs the development toolchain pinned in `mise.toml`. This
-project uses Go 1.26.6 for development and CI builds. The older Go version in
-`go.mod` is intentionally retained as the minimum compatible toolchain version.
+project uses Go 1.27.3 for development and CI builds, matching the minimum
+toolchain version required by `go.mod`.
 
 Verify the checkout and build the server:
 

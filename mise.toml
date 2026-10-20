@@ -6,7 +6,7 @@ github.github_attestations = false
 github.slsa = false
 
 [tools]
-go = "1.27.2"
+go = "1.27.3"
 golangci-lint = "2.14.0"
 goreleaser = "2.18.3"
 ko = "0.19.1"
