@@ -640,6 +640,12 @@ run_entry() {
             return 0
         fi
     fi
+    # An empty env token lets bk fall back to host config/keyring credentials.
+    # Require an explicit token before CLI setup or scenario side effects.
+    if [[ "$MODE" == "cli" && -z "$ENTRY_TOKEN" ]]; then
+        echo "WARNING: entry '$ENTRY_ID' uses mode 'cli' but BUILDKITE_API_TOKEN is unset or empty; skipping." >&2
+        return 0
+    fi
 
     local RUN_KEY="${ENTRY_ID}-${DATETIME}"
     local RUN_DIR="$RUNS_ROOT/$ENTRY_ID"
