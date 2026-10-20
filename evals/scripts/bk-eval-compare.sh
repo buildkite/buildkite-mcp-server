@@ -192,7 +192,8 @@ fanout_table() {
           | (($f.mcp.tools // []) | map({key: "mcp \(.tool)", value: {calls: .calls, requests: .requests}}))
           | from_entries);
         def cell(x): if x == null then "–" else "\(x)" end;
-        ($b[0].api_fanout // null) as $BF | ($c[0].api_fanout // null) as $CF |
+        ($b[0].api_fanout | if .available == false then null else . end) as $BF |
+        ($c[0].api_fanout | if .available == false then null else . end) as $CF |
         if $BF == null and $CF == null then "_No API fan-out recorded in either run._"
         else
           rows($BF) as $B | rows($CF) as $C |

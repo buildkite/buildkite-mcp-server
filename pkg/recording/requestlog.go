@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,10 +42,16 @@ type RequestLogTransport struct {
 // NewRequestLogTransport creates a RequestLogTransport appending to path. The
 // file is opened (and created if missing) immediately to validate the path;
 // it is appended to, not truncated, so a restarted server keeps earlier lines.
+// A started record distinguishes an active logger with no requests from a
+// placeholder file left by a harness running an older server.
 func NewRequestLogTransport(wrapped http.RoundTripper, path string) (*RequestLogTransport, error) {
 	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // path is a user-supplied output file
 	if err != nil {
 		return nil, fmt.Errorf("request log: cannot open %s: %w", path, err)
+	}
+	if _, err := f.WriteString("{\"source\":\"mcp\",\"type\":\"started\"}\n"); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("request log: cannot write startup record: %w", err)
 	}
 	return &RequestLogTransport{wrapped: wrapped, file: f}, nil
 }
@@ -54,15 +61,23 @@ func (t *RequestLogTransport) RoundTrip(req *http.Request) (*http.Response, erro
 	start := time.Now()
 	resp, err := t.wrapped.RoundTrip(req)
 
+	// Redirects may target signed storage URLs. Keep only endpoint identity,
+	// without modifying the request that carries the download credentials.
+	loggedURL := *req.URL
+	loggedURL.User = nil
+	loggedURL.RawQuery = ""
+	loggedURL.ForceQuery = false
+	loggedURL.Fragment = ""
+	loggedURL.RawFragment = ""
 	entry := RequestLogEntry{
 		Source:     "mcp",
 		Time:       start.UTC().Format(time.RFC3339Nano),
 		DurationMS: float64(time.Since(start).Microseconds()) / 1000,
 		Method:     req.Method,
-		URL:        req.URL.String(),
+		URL:        loggedURL.String(),
 	}
 	if err != nil {
-		entry.Error = err.Error()
+		entry.Error = strings.ReplaceAll(err.Error(), req.URL.String(), loggedURL.String())
 	} else {
 		entry.Status = resp.StatusCode
 		if resp.ContentLength > 0 {

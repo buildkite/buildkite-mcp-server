@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,9 +17,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type errTransport struct{}
+type errTransport struct{ err error }
 
-func (errTransport) RoundTrip(*http.Request) (*http.Response, error) {
+func (t errTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	if t.err != nil {
+		return nil, t.err
+	}
 	return nil, fmt.Errorf("boom")
 }
 
@@ -32,7 +37,9 @@ func readRequestLog(t *testing.T, path string) []recording.RequestLogEntry {
 	for scanner.Scan() {
 		var e recording.RequestLogEntry
 		require.NoError(t, json.Unmarshal(scanner.Bytes(), &e))
-		entries = append(entries, e)
+		if e.Method != "" { // Startup records are not HTTP requests.
+			entries = append(entries, e)
+		}
 	}
 	require.NoError(t, scanner.Err())
 	return entries
@@ -119,4 +126,66 @@ func TestRequestLogTransportAppends(t *testing.T) {
 func TestNewRequestLogTransportBadPath(t *testing.T) {
 	_, err := recording.NewRequestLogTransport(http.DefaultTransport, filepath.Join(t.TempDir(), "missing-dir", "requests.jsonl"))
 	require.Error(t, err)
+}
+
+func TestRequestLogTransportSignedRedirect(t *testing.T) {
+	const query = "X-Amz-Signature=test-signature&X-Amz-Security-Token=test-security-token"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/download" {
+			http.Redirect(w, req, "/artifact?"+query, http.StatusFound)
+			return
+		}
+		// Logging must not remove credentials from the actual download.
+		if req.URL.RawQuery != query {
+			http.Error(w, "missing download credentials", http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte("artifact contents"))
+	}))
+	defer server.Close()
+	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	transport, err := recording.NewRequestLogTransport(http.DefaultTransport, logPath)
+	require.NoError(t, err)
+	client := &http.Client{Transport: transport}
+	resp, err := client.Get(server.URL + "/download")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, "artifact contents", string(body))
+	entries := readRequestLog(t, logPath)
+	require.Len(t, entries, 2)
+	require.Equal(t, server.URL+"/artifact", entries[1].URL)
+	raw, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	require.NotContains(t, string(raw), "test-signature")
+	require.NotContains(t, string(raw), "test-security-token")
+}
+
+func TestRequestLogTransportStartsWithoutRequests(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	_, err := recording.NewRequestLogTransport(http.DefaultTransport, logPath)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	var started map[string]any
+	require.NoError(t, json.Unmarshal(raw, &started))
+	require.Equal(t, "mcp", started["source"])
+	require.Equal(t, "started", started["type"])
+}
+
+func TestRequestLogTransportRedactsErrorURL(t *testing.T) {
+	const rawURL = "https://user:password@storage.example/artifact?signature=secret#fragment"
+	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
+	transport, err := recording.NewRequestLogTransport(errTransport{err: fmt.Errorf("download %s failed", rawURL)}, logPath)
+	require.NoError(t, err)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	require.NoError(t, err)
+	_, err = transport.RoundTrip(req)
+	require.Error(t, err)
+	entries := readRequestLog(t, logPath)
+	require.Len(t, entries, 1)
+	require.Equal(t, "https://storage.example/artifact", entries[0].URL)
+	require.Equal(t, "download https://storage.example/artifact failed", entries[0].Error)
+	require.Equal(t, rawURL, req.URL.String())
 }

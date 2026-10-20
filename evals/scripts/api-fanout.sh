@@ -65,13 +65,17 @@ cmd_json() {
     # 128 KiB, which a long run's log can exceed.
     jq --argjson m "$metrics_json" "$FANOUT_JQ"'
       . as $all
-      | ($all | map(select(.source == "mcp"))) as $mcp
+      | ($all | map(select(.source == "mcp" and .method != null))) as $mcp
+      | if ($mcp | length) == 0 and ($all | any(.source == "mcp" and .type == "started") | not) then
+          {available: false, reason: "MCP request logging did not start (no startup record or requests)"}
+        else
       # Calls per MCP tool from the transcript: "N mcp__<server>__<tool>".
-      | (($m.tool_calls_by_name // [])
+        (($m.tool_calls_by_name // [])
           | map(capture("^(?<n>[0-9]+) mcp__[^_]+(?:_[^_]+)*?__(?<tool>.+)$")?)
           | group_by(.tool) | map({key: .[0].tool, value: (map(.n | tonumber) | add)}) | from_entries) as $calls
       | ($mcp | map(select((.tool // "") != ""))) as $attributed
       | {
+          available: true,
           total_requests: ($mcp | length),
           errors: ($mcp | map(select((.error // null) != null or (.status // 0) >= 400)) | length),
           # Failed requests grouped by HTTP status ("network error" when no
@@ -100,7 +104,7 @@ cmd_json() {
                      endpoints: ($reqs | top_endpoints)})
               | sort_by(-.requests, .tool))
           }
-        }' <<<"$lines"
+        } end' <<<"$lines"
 }
 
 cmd_markdown() {
@@ -108,6 +112,9 @@ cmd_markdown() {
     jq -r '
       def cell: if . == null then "–" else tostring end;
       def eps: (.endpoints // [])[0:3] | map("`\(.)`") | join("<br>");
+      if .available == false then
+        "**API fan-out not available:** \(.reason)."
+      else
       "**Buildkite API requests: \(.total_requests)** (MCP server: \(.mcp.requests); 4xx/5xx or failed: \(.errors))",
       "",
       (if ((.errors_by_status // {}) | length) > 0 then
@@ -126,6 +133,7 @@ cmd_markdown() {
         ""
        else empty end),
       (if (.mcp.tools | length) == 0 then "_No MCP tool calls recorded._" else empty end)
+      end
     ' "$fanout"
 }
 
@@ -134,6 +142,9 @@ cmd_markdown() {
 cmd_errors_markdown() {
     local fanout="$1"
     jq -r '
+      if .available == false then
+        "**Buildkite API errors:** _not available: \(.reason)._"
+      else
       "**Buildkite API errors** (failed API requests from the MCP server, by status → tool):",
       "",
       (if ((.errors_by_status // {}) | length) > 0 then
@@ -142,6 +153,7 @@ cmd_errors_markdown() {
         "```"
        else "_None — every API request got a successful response._" end),
       ""
+      end
     ' "$fanout"
 }
 

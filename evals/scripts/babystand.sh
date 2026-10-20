@@ -760,7 +760,8 @@ run_entry() {
             "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED}" "success"
         annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics" "$PREFIX.metrics.json"
         annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls" "$PREFIX.tools.txt"
-        if [[ -s "$PREFIX.api-fanout.md" && -n "$FANOUT_JSON" ]]; then
+        if [[ -s "$PREFIX.api-fanout.md" && -n "$FANOUT_JSON" ]] \
+                && jq -e '.available != false' "$FANOUT_JSON" >/dev/null; then
             annotate_markdown "eval-fanout-$ENTRY_ID" ":satellite_antenna: [$ENTRY_ID] Eval — API fan-out" \
                 "$PREFIX.api-fanout.md" "$(jq -r '"\(.total_requests) API requests"' "$FANOUT_JSON")"
         elif [[ -s "$PREFIX.api-fanout.md" ]]; then
