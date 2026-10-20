@@ -99,7 +99,7 @@ jev_call() {
             -H "Authorization: Bearer $JEV_TOKEN" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
-            "${context_headers[@]}" \
+            ${context_headers[@]+"${context_headers[@]}"} \
             --data @"$req")" || code="000"
         case "$code" in
             200)
