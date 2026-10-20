@@ -93,6 +93,11 @@ steps:
             # Per-message parser annotations are on by default; set to "false"
             # (in the top-level env: block) to rely only on the curated summaries.
             - ANNOTATE_MESSAGES
+            # Build-wide evaluator override: set EVALUATOR=klaren when
+            # creating a build to run the (slow, token-hungry) klaren review
+            # for every entry. Unset = each entry's `evaluator` (default
+            # yilong, judged in the yilong step below).
+            - EVALUATOR
     # Secrets are scoped to this step only: the lint/test jobs execute code
     # from the pushed branch and must not see credentials.
     # NOTE: secret-mapped env var names must not start with BUILDKITE/BK
@@ -109,6 +114,25 @@ steps:
       # the CURSOR_API_KEY env line above.
       CURSOR_API_KEY: MCP_EVAL_FRAMEWORK_CURSOR_API_KEY
 
+  # Judge every yilong entry with Jev (TypeSafe's System One API), OUTSIDE
+  # the agent container. SECURITY: same reasoning as dd-publish below — the
+  # evaluated agent has unrestricted Bash, so MCP_EVAL_FRAMEWORK_JEV_TOKEN
+  # must never be mapped into the eval step. babystand.sh leaves runs/<id>/<run-key>.judge.json in the run
+  # bundle; this step downloads those and uploads <run-key>.yilong.json.
+  - label: "🧑🏻‍⚖️ yilong"
+    key: yilong
+    command: ./evals/scripts/yilong.sh
+    depends_on:
+      - step: agent
+        allow_failure: true
+    # Best-effort like the klaren review it replaces: the TypeSafe API being
+    # unavailable must never fail the build.
+    soft_fail: true
+    agents:
+      queue: hosted
+    secrets:
+      MCP_EVAL_FRAMEWORK_JEV_TOKEN: MCP_EVAL_FRAMEWORK_JEV_TOKEN
+
   # Publish per-entry run metrics to Datadog, OUTSIDE the agent container.
   # SECURITY: the eval step above runs the evaluated agent with unrestricted
   # Bash, so DD_API_KEY must never exist anywhere in that step — not even
@@ -123,8 +147,11 @@ steps:
     command: ./evals/scripts/dd-publish.sh
     # Publish whatever bundles were uploaded even when the eval step fails —
     # partial results are exactly what a failure investigation needs.
+    # After yilong, so its verdicts publish as mcp_eval.yilong.* series.
     depends_on:
       - step: agent
+        allow_failure: true
+      - step: yilong
         allow_failure: true
     # Best-effort, like the in-step publish it replaces: a Datadog outage
     # must never fail the build.

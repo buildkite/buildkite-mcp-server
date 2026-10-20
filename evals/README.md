@@ -38,6 +38,61 @@ A set of artifacts, and annotations in the Buildkite build showing:
 
 The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
 
+## Evaluator selection
+
+Each `evals.yaml` entry selects `evaluator: yilong | klaren` (default `yilong`).
+Set `EVALUATOR=klaren` when creating a build to override all entries.
+
+* **Yilong** calls Jev, TypeSafe's System One model, directly at
+  `https://api.typesafe.ai/v1/systemone` (`YILONG_MODEL`, default `jev-1.14.0`).
+  It uses the same `prompts/rubric.json` and prompt/scenario reference paths as
+  Klaren. There is no second rubric file or automatic grade adjustment.
+* **Klaren** produces the detailed review, rubric grades and candidate references
+  described below. Use it on demand; comparison annotations compare its reports
+  only when both runs have one.
+
+Yilong sends one request per category, with these input fields:
+
+| Category | Input sent to Jev |
+| --- | --- |
+| Conclusion | Reviewed root-cause reference; agent's final report |
+| Investigation | Rendered task; reviewed root-cause reference; tool calls paired with full captured tool outputs; final report |
+| Fix | Reviewed root cause (when available) and fix reference; complete pushed patch, or final report for diagnosis-only tasks; final build state when available |
+
+A **tool output** is the response to one tool call (for example, returned build
+logs). The **trace** combines calls and their captured outputs; it is not the
+whole conversation or private reasoning. An **input field** is one named piece
+of evidence in the request. Jev's **result** contains the grading probabilities,
+confidence and expected score, saved in `<run>.yilong.json`. The annotation and
+Datadog score use the most probable grade without changing it, even when grades
+contradict one another. Known token patterns are redacted before sending.
+
+Ties select the lower tied grade. Responses must contain exactly one numeric
+probability per rubric level, each in [0,1], summing to 1 within 0.000001.
+Invalid distributions are reported as **undetermined**, with an explanation in
+the annotation and no numeric category score or Datadog category metric.
+
+Yilong does not shorten tool outputs, input fields or patches. TypeSafe documents
+a 32 MiB body limit and default contexts of 64k tokens per request and 32k per
+question ([limits](https://docs.typesafe.ai/models),
+[errors](https://docs.typesafe.ai/api)). Bodies over 32 MiB are withheld locally;
+the API enforces token limits. Rejections, including `max_tokens_exceeded`, are
+reported as **undetermined**, with the reason in the annotation and no numeric
+category score. No truncated retry or automatic long-context mode is used.
+429s and transient failures are retried with backoff. Missing references or
+required evidence mean **n/a**; an unavailable patch for an implemented fix is
+**undetermined**, never replaced by the agent's claims. An empty captured patch
+is sent as evidence that no changes were pushed.
+
+CI runs Yilong in a separate step with `MCP_EVAL_FRAMEWORK_JEV_TOKEN`, never in
+the evaluated agent's container. It downloads `<run>.judge.json`, final reports,
+transcripts and complete `.diff.patch` artifacts, then uploads verdicts and
+annotates the build. Datadog publishing follows it and handles either evaluator.
+Locally, run `./evals/scripts/yilong.sh evals/runs/<id>/<run>.judge.json` with the
+token in your environment; `YILONG_DRY_RUN=true` prints requests without calling
+the API or requiring a key. Old bundles lacking prompt/scenario metadata must
+be regenerated rather than falling back to entry-ID references.
+
 ## Klaren rubric and reference answers
 
 Klaren keeps its detailed session review and also grades three outcomes using
@@ -115,11 +170,11 @@ CI publishes `mcp_eval.klaren.{conclusion,investigation,fix}` and
 metrics. n/a and undetermined categories publish no score. Both
 [MCP Evals](https://app.datadoghq.com/dashboard/vsr-kw9-upf/) and
 [MCP Evals by Build](https://app.datadoghq.com/dashboard/rx7-bme-f27/) show the
-three categories with the level markers above. Klaren still runs after each eval
-as before.
+three categories with the level markers above. Yilong publishes matching
+`mcp_eval.yilong.*` metrics separately; selecting Klaren retains its full workflow.
 
 Run the focused checks with
-`python3 -B -m unittest discover -s evals/scripts -p test_klaren.py -v`.
+`python3 -B -m unittest discover -s evals/scripts -p 'test_*.py' -v`.
 
 ## Permission posture
 
@@ -205,12 +260,15 @@ All new code are mostly in `evals/` folder
       cursor-cloud streams carry no per-event timestamps, so `wait` /
       `tool_time_seconds` are null there (their result event still reports
       total duration)
+  * yilong.sh
+    * Jev evaluator — see "Evaluator selection" above. CI runs it with no
+      arguments; locally, pass the `<run>.judge.json` paths to evaluate.
   * dd-metrics.sh
     * Publish one entry's run metrics to Datadog (metrics v2 series API) as
       `mcp_eval.*` gauges — run count, goal_achieved (1/0), duration /
       tool-time / wait seconds, tool call counts (total + `mcp__`-prefixed),
-      and token usage (input / output / cache read / cache write), plus klaren
-      rubric scores — tagged `entry:`, `prompt:`, `agent:`, `model:`, `goal:`,
+      and token usage (input / output / cache read / cache write), plus separate
+      klaren/yilong rubric scores — tagged `entry:`, `prompt:`, `agent:`, `model:`, `goal:`,
       `buildkite_build:`, `evaluator:`
     * Best-effort by design: skips loudly when `DD_API_KEY` is unset (local
       runs, forks), and a publish failure never fails the entry. `DD_SITE`

@@ -238,23 +238,38 @@ else exit 1; fi
         }]))
         (self.root / "evals.yaml").write_text("matrix fixture\n")
         (self.root / "prompts/fixture.md").write_text("Fix case.\n")
-        home = self.root / "home"
-        home.mkdir()
-        result = subprocess.run([str(self.scripts / "babystand.sh")], cwd=self.root, capture_output=True, text=True,
-                                env={**self.env, "RUN_IN_CI": "true", "LOCAL_CI": "false", "DEBUG_PERMISSIONS": "false",
-                                     "HOME": str(home), "REAL_GIT": real_git, "FIXTURE_REPO": str(remote),
-                                     "MCP_SRC_SHA": "a" * 40, "DD_API_KEY": ""}, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        patch = next((self.root / "upload").glob("*.diff.patch"))
-        expected = git("diff", baseline, "scenario", cwd=remote)
-        self.assertGreater(len(expected), 32768)
-        self.assertEqual(patch.read_bytes(), expected)
-        self.assertIn(b"@pytest.mark.skip", patch.read_bytes())
-        prompt = (self.root / "prompt.md").read_text()
-        original_patch = next((self.root / "runs/case").glob("*.diff.patch"))
-        self.assertIn(str(original_patch), prompt)
-        summary = next((self.root / "upload").glob("*.klaren-verdicts.md")).read_text()
-        self.assertIn(f"artifact://runs/case/{patch.name}", summary)
+        for evaluator in ("klaren", "yilong"):
+            with self.subTest(evaluator=evaluator):
+                home = self.root / evaluator
+                home.mkdir()
+                for directory in ("runs", "upload"):
+                    shutil.rmtree(self.root / directory, ignore_errors=True)
+                # Reset the remote branch between independent runs.
+                git("update-ref", "refs/heads/scenario", baseline, cwd=remote)
+                result = subprocess.run([str(self.scripts / "babystand.sh")], cwd=self.root, capture_output=True, text=True,
+                                        env={**self.env, "RUN_IN_CI": "true", "LOCAL_CI": "false", "DEBUG_PERMISSIONS": "false",
+                                             "EVALUATOR": "klaren" if evaluator == "klaren" else "",
+                                             "HOME": str(home), "REAL_GIT": real_git, "FIXTURE_REPO": str(remote),
+                                             "MCP_SRC_SHA": "a" * 40, "DD_API_KEY": ""}, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                patch = next((self.root / "upload").glob("*.diff.patch"))
+                expected = git("diff", baseline, "scenario", cwd=remote)
+                self.assertGreater(len(expected), 32768)
+                self.assertEqual(patch.read_bytes(), expected)
+                self.assertIn(b"@pytest.mark.skip", patch.read_bytes())
+                meta = json.loads(next((self.root / "upload").glob("*.dd.json")).read_text())
+                self.assertEqual(meta["evaluator"], evaluator)
+                if evaluator == "klaren":
+                    prompt = (self.root / "prompt.md").read_text()
+                    original_patch = next((self.root / "runs/case").glob("*.diff.patch"))
+                    self.assertIn(str(original_patch), prompt)
+                    summary = next((self.root / "upload").glob("*.klaren-verdicts.md")).read_text()
+                    self.assertIn(f"artifact://runs/case/{patch.name}", summary)
+                else:
+                    judge = json.loads(next((self.root / "upload").glob("*.judge.json")).read_text())
+                    self.assertEqual((judge["prompt"], judge["scenario"], judge["diff_status"]),
+                                     ("fixture", "leaked-model", "available"))
+                    self.assertFalse(list((self.root / "upload").glob("*.klaren*")))
 
     def test_ci_uses_pinned_harness_references(self):
         # The production wrapper still runs; only the external CLI/network edges are fixtures.

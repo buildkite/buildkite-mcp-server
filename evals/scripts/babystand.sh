@@ -371,8 +371,13 @@ run_cursor_cloud() {
 # failure in one entry logs and returns without aborting the rest of the matrix.
 run_entry() {
     local entry="$1"
-    local ENTRY_ID AGENT MODEL PROMPT_NAME SCENARIO_ID MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE
+    local ENTRY_ID AGENT MODEL PROMPT_NAME SCENARIO_ID MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE ENTRY_EVALUATOR
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
+    ENTRY_EVALUATOR="${EVALUATOR:-$(jq -r '.evaluator // "yilong"' <<<"$entry")}"
+    case "$ENTRY_EVALUATOR" in
+        yilong|klaren) ;;
+        *) echo "ERROR: [$ENTRY_ID] unknown evaluator '$ENTRY_EVALUATOR' (use yilong or klaren)" >&2; return 1 ;;
+    esac
     AGENT=$(jq -r '.agent // "claude"'        <<<"$entry")
     MODEL=$(jq -r '.model // ""'              <<<"$entry")
     # Model ids are per-agent namespaces (cursor rejects claude-* ids; see
@@ -566,7 +571,7 @@ run_entry() {
         echo "*** [$ENTRY_ID] scenario branch '$SCENARIO_BRANCH_VAL' latest build state: $FINAL_BUILD_STATE (goal_achieved: $GOAL_ACHIEVED)"
     fi
 
-    # Show klaren the pushed change, not just the agent's description of it.
+    # Both evaluators receive the complete pushed patch, never an excerpt.
     local KLAREN_DIFF="$PREFIX.diff.patch" KLAREN_DIFF_STATUS="not_applicable"
     if [[ -n "$SCENARIO_BRANCH_VAL" ]]; then
         KLAREN_DIFF_STATUS="unavailable"
@@ -575,7 +580,7 @@ run_entry() {
             KLAREN_DIFF_STATUS="available"
         else
             rm -f "$KLAREN_DIFF"
-            echo "WARNING: [$ENTRY_ID] could not capture the complete pushed diff; klaren will withhold the fix score" >&2
+            echo "WARNING: [$ENTRY_ID] could not capture the complete pushed diff; fix score will be withheld" >&2
         fi
     fi
 
@@ -600,9 +605,10 @@ run_entry() {
         --arg model    "${MODEL:-default}" \
         --arg goal     "$GOAL_ACHIEVED" \
         --arg duration "$EVAL_ELAPSED_SECS" \
+        --arg evaluator "$ENTRY_EVALUATOR" \
         --argjson end_ts "$(date +%s)" \
         '{entry: $entry, prompt: $prompt, agent: $agent, model: $model,
-          goal: $goal, duration_seconds: $duration, evaluator: "klaren", end_ts: $end_ts}' \
+          goal: $goal, duration_seconds: $duration, evaluator: $evaluator, end_ts: $end_ts}' \
         > "$PREFIX.dd.json"; then
         echo "WARNING: [$ENTRY_ID] failed to write $PREFIX.dd.json; Datadog publish will skip this entry" >&2
     fi
@@ -613,15 +619,18 @@ run_entry() {
     # judge, not the subject under test, and holding the reviewer fixed keeps
     # reviews comparable across agents. Use the harness prompt and rubric,
     # not copies from the checked-out subject under test.
-    echo "--- :female-detective: [$ENTRY_ID] klaren review"
-    local KLAREN_START; KLAREN_START=$(date +%s)
-    if ! ENTRY_ID="$ENTRY_ID" AGENT="$AGENT" FINAL_BUILD_STATE="$FINAL_BUILD_STATE" \
-        PROMPT_NAME="$PROMPT_NAME" SCENARIO_ID="$SCENARIO_ID" DIFF_STATUS="$KLAREN_DIFF_STATUS" \
-        "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX"; then
-        echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
+    local KLAREN_ELAPSED=""
+    if [[ "$ENTRY_EVALUATOR" == "klaren" ]]; then
+        echo "--- :female-detective: [$ENTRY_ID] klaren review"
+        local KLAREN_START; KLAREN_START=$(date +%s)
+        if ! ENTRY_ID="$ENTRY_ID" AGENT="$AGENT" FINAL_BUILD_STATE="$FINAL_BUILD_STATE" \
+            PROMPT_NAME="$PROMPT_NAME" SCENARIO_ID="$SCENARIO_ID" DIFF_STATUS="$KLAREN_DIFF_STATUS" \
+            "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX"; then
+            echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
+        fi
+        KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
+        echo "*** [$ENTRY_ID] KLAREN ELAPSED: $KLAREN_ELAPSED"
     fi
-    local KLAREN_ELAPSED; KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
-    echo "*** [$ENTRY_ID] KLAREN ELAPSED: $KLAREN_ELAPSED"
 
     # --- Write the run bundle to <harness>/runs/<id>/<id>-<datetime>.<ext> ---
     [[ -s "$EVAL_RESULT_FILE"   ]] && cp "$EVAL_RESULT_FILE"   "$PREFIX.eval-final.md"     || : > "$PREFIX.eval-final.md"
@@ -630,6 +639,18 @@ run_entry() {
     # klaren.sh writes the review, rubric verdicts and candidate references
     # directly into this bundle before its artifacts are uploaded.
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
+    if [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
+        # The separate judge step reads sibling artifacts; no absolute container paths.
+        if ! jq -n --arg entry "$ENTRY_ID" --arg run_key "$RUN_KEY" \
+            --arg prompt "$PROMPT_NAME" --arg scenario "$SCENARIO_ID" --arg agent "$AGENT" \
+            --rawfile goal "$RENDERED" --arg state "$FINAL_BUILD_STATE" \
+            --arg diff_status "$KLAREN_DIFF_STATUS" \
+            '{entry: $entry, run_key: $run_key, prompt: $prompt, scenario: $scenario,
+              agent: $agent, goal: $goal, final_build_state: $state, diff_status: $diff_status}' \
+            > "$PREFIX.judge.json"; then
+            echo "WARNING: [$ENTRY_ID] failed to write judge metadata" >&2
+        fi
+    fi
     echo "*** [$ENTRY_ID] run bundle: $PREFIX.*"
 
     # --- CI: upload the bundle as build artifacts (dual store) + annotate ---
@@ -644,10 +665,14 @@ run_entry() {
             "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED}" "success"
         annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics" "$PREFIX.metrics.json"
         annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls" "$PREFIX.tools.txt"
-        annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
-            "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
-        annotate_markdown "klaren-verdicts-$ENTRY_ID" ":female-detective: [$ENTRY_ID] Klaren — verdicts and candidate references" \
-            "$PREFIX.klaren-verdicts.md" ""
+        if [[ "$ENTRY_EVALUATOR" == "klaren" ]]; then
+            annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
+                "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
+            annotate_markdown "klaren-verdicts-$ENTRY_ID" ":female-detective: [$ENTRY_ID] Klaren — verdicts and candidate references" \
+                "$PREFIX.klaren-verdicts.md" ""
+        fi
+    elif [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
+        echo "*** [$ENTRY_ID] to judge locally: $SCRIPT_DIR/yilong.sh $PREFIX.judge.json"
     fi
 
     # --- Compare against the baseline (best-effort) -------------------------

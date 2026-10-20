@@ -39,6 +39,8 @@
 #   EVALUATOR               optional                       -> tag evaluator:
 #   KLAREN_FILE             optional path to the run's klaren.sh verdicts.
 #                           Missing/empty = no klaren rubric series.
+#   YILONG_FILE             optional path to the run's yilong.sh verdicts.
+#                           Missing/empty = no yilong rubric series.
 #
 # Submitted series (all gauges; the point timestamp is DD_TIMESTAMP — the
 # run's end — falling back to submission time; that carries the "datetime"
@@ -55,6 +57,8 @@
 #   <prefix>.klaren.<question>          rubric score (0 / 0.5 / 1), omitted
 #                                       when n/a or undetermined
 #   <prefix>.klaren.undetermined        questions the reviewer could not grade
+#   <prefix>.yilong.<question>          Jev grade (0 / 0.5 / 1), omitted when n/a or undetermined
+#   <prefix>.yilong.undetermined        questions Jev could not evaluate
 #
 set -euo pipefail
 
@@ -89,6 +93,14 @@ if [[ -n "${KLAREN_FILE:-}" && -s "${KLAREN_FILE:-}" ]]; then
         echo "dd-metrics: $KLAREN_FILE is not valid JSON; skipping klaren series." >&2
     fi
 fi
+YILONG_JSON="{}"
+if [[ -n "${YILONG_FILE:-}" && -s "${YILONG_FILE:-}" ]]; then
+    if jq -e . "$YILONG_FILE" >/dev/null 2>&1; then
+        YILONG_JSON="$(cat "$YILONG_FILE")"
+    else
+        echo "dd-metrics: $YILONG_FILE is not valid JSON; skipping yilong series." >&2
+    fi
+fi
 
 # Point timestamp: prefer the recorded run end (CI publishes after the whole
 # matrix finishes). Clamp into Datadog's accepted window — points older than
@@ -115,6 +127,7 @@ PAYLOAD="$(jq -n \
     --arg evaluator "${EVALUATOR:-}" \
     --argjson now  "$TS" \
     --argjson m    "$METRICS_JSON" \
+    --argjson y    "$YILONG_JSON" \
     --argjson k    "$KLAREN_JSON" '
     # type 3 = gauge in the v2 series API. A null value emits nothing: absent
     # in Datadog must mean "not measured" (cursor tokens), never zero.
@@ -147,7 +160,10 @@ PAYLOAD="$(jq -n \
         gauge("tokens.cache_write"; (if ($m.tokens // null) == null then null else $cw end); $tags),
         ($k.questions // [] | .[] | gauge("klaren.\(.key)"; .score; $tags)),
         (if ($k.questions // null) == null then empty
-         else gauge("klaren.undetermined"; ([$k.questions[] | select(.verdict == "undetermined")] | length); $tags) end)
+         else gauge("klaren.undetermined"; ([$k.questions[] | select(.verdict == "undetermined")] | length); $tags) end),
+        ($y.questions // [] | .[] | gauge("yilong.\(.key)"; .score; $tags)),
+        (if ($y.questions // null) == null then empty
+         else gauge("yilong.undetermined"; ([$y.questions[] | select(.verdict == "undetermined")] | length); $tags) end)
       ]}
 ')"
 

@@ -19,6 +19,8 @@
 #   --all        Include all tools, not just mcp__buildkite-mcp-server__*
 #   --names      Print only "<count> <tool>" summary instead of full params
 #   --results    Also show each call's tool_result (matched by tool_use_id)
+#   --full-results Keep complete captured results instead of the default first
+#                  300 characters on one line (requires --results)
 #   --project P  Use project dir for path P instead of the current directory
 #   --agent A    Transcript dialect: 'claude' (default; Claude Code session
 #                jsonl / stream-json — tool calls are tool_use content blocks),
@@ -48,6 +50,7 @@ BK_PRICE_CACHE_READ="${BK_PRICE_CACHE_READ:-0.5}"
 TOOL_FILTER=''
 NAMES_ONLY=0
 WITH_RESULTS=0
+FULL_RESULTS=false
 PROJECT_PATH="$PWD"
 AGENT="claude"
 
@@ -57,6 +60,7 @@ while [[ "${1:-}" == -* ]]; do
     --all)     TOOL_FILTER='true'; shift ;;
     --names)   NAMES_ONLY=1; shift ;;
     --results) WITH_RESULTS=1; shift ;;
+    --full-results) FULL_RESULTS=true; shift ;;
     --project) PROJECT_PATH="${2:?--project needs a path}"; shift 2 ;;
     --agent)   AGENT="${2:?--agent needs claude, cursor or cursor-cloud}"; shift 2 ;;
     -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
@@ -215,7 +219,11 @@ print_session() {
   fi
 
   if [[ "$WITH_RESULTS" == 1 ]]; then
-    # Map call id -> truncated result text (claude: tool_use_id on tool_result
+    # Capture full outputs first so yilong's --full-results can judge the actual
+    # evidence. Applying the 300-character display cutoff here would discard
+    # evidence before that option takes effect; the default excerpt is applied
+    # below, after all transcript dialects have been normalized.
+    # Map call id -> result text (claude: tool_use_id on tool_result
     # blocks; cursor: call_id on tool_call completed events, result under the
     # tool key's .result — .success on success, the whole object otherwise;
     # cursor-cloud: data.callId on completed tool_call events, result at
@@ -228,14 +236,14 @@ print_session() {
           | .data
           | select((.status // "") == "completed" and ((.callId // "") | tostring) != "")
           | {((.callId | tostring)): ((.result.success // .result // "(no result)")
-               | tostring | gsub("\n";" ") | .[0:300])} ]
+               | tostring)} ]
         | add // {}' "$f")"
     elif [[ "$AGENT" == "cursor" ]]; then
       map="$(jq -cn '
         [ inputs
           | select(.type=="tool_call" and .subtype=="completed" and .call_id and (.tool_call|type=="object"))
           | (.tool_call | to_entries[0].value.result // {}) as $r
-          | {(.call_id): (($r.success // $r) | tostring | gsub("\n";" ") | .[0:300])} ]
+          | {(.call_id): (($r.success // $r) | tostring)} ]
         | add // {}' "$f")"
     else
       map="$(jq -cn '
@@ -243,11 +251,14 @@ print_session() {
           | select(.type=="tool_result")
           | {(.tool_use_id): ((.content // "")
                | if type=="array" then (map(.text // "") | join("")) else tostring end
-               | gsub("\n";" ") | .[0:300])} ]
+               )} ]
         | add // {}' "$f")"
     fi
-    extract "$f" | jq -c --argjson map "$map" \
-      '. + {result: ($map[.id] // "(no result captured)")} | del(.id)'
+    map="$(jq -c --argjson full "$FULL_RESULTS" '
+      with_entries(.value |= (if $full then . else gsub("\n"; " ") | .[:300] end))
+    ' <<<"$map")"
+    extract "$f" | jq -c --slurpfile map <(printf '%s\n' "$map") \
+      '. + {result: ($map[0][.id] // "(no result captured)")} | del(.id)'
   else
     extract "$f" | jq -c 'del(.id)'
   fi
