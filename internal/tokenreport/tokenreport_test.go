@@ -29,16 +29,34 @@ func TestBuild(t *testing.T) {
 	require.LessOrEqual(t, r.Totals.ReadOnly.Total, r.Totals.All.Total)
 	require.Positive(t, r.Instructions.Tokens)
 
-	sum := 0
 	for _, ts := range r.Toolsets {
-		sum += ts.Tokens
+		builtin, ok := registry.Get(ts.Name)
+		require.True(t, ok)
+		require.Equal(t, len(builtin.Tools), ts.Tools)
+		tokens := 0
+		for _, def := range builtin.Tools {
+			encoded, err := json.Marshal(def.Tool)
+			require.NoError(t, err)
+			tokens += Estimate(encoded)
+		}
+		require.Equal(t, tokens, ts.Tokens, ts.Name)
 	}
-	require.Equal(t, r.Totals.All.ToolTokens, sum)
 
+	seen := make(map[string]bool)
+	sum, readOnlySum := 0, 0
 	for _, tool := range r.Tools {
+		require.False(t, seen[tool.Name], "duplicate tool %s", tool.Name)
+		seen[tool.Name] = true
 		require.Positive(t, tool.Tokens, tool.Name)
 		require.NotEmpty(t, tool.Toolset)
+		sum += tool.Tokens
+		if tool.ReadOnly {
+			readOnlySum += tool.Tokens
+		}
 	}
+	require.Equal(t, r.Totals.All.ToolTokens, sum)
+	require.Equal(t, r.Totals.ReadOnly.ToolTokens, readOnlySum)
+	require.Equal(t, len(registry.GetEnabledTools([]string{"all"}, true)), r.Totals.ReadOnly.Tools)
 	require.Empty(t, r.Violations)
 }
 

@@ -82,7 +82,7 @@ func TestRetryFailedJobs(t *testing.T) {
 		tool, _, scopes := RetryFailedJobs()
 		assert.Equal(t, "retry_failed_jobs", tool.Name)
 		assert.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
-		assert.Equal(t, []string{"read_builds", "write_builds"}, scopes)
+		assert.Equal(t, []string{"read_builds", "retry_builds"}, scopes)
 	})
 
 	t.Run("RetriesOnlySafeJobs", func(t *testing.T) {
@@ -202,6 +202,35 @@ func TestRetryFailedJobs(t *testing.T) {
 		require.ErrorIs(t, err, ErrUnauthorized)
 		assert.Nil(t, result)
 		assert.Equal(t, []string{"lost"}, retriedIDs)
+	})
+
+	t.Run("RetryScopesForbiddenWithFeatureEnabledIsReported", func(t *testing.T) {
+		const message = "Your access token needs one of these scopes: write_builds, retry_builds"
+		const body = `{"message":"Your access token needs one of these scopes: write_builds, retry_builds"}`
+		request, err := http.NewRequest(http.MethodPut, "https://api.buildkite.com/v2/organizations/test-org/pipelines/test-pipeline/builds/123/jobs/lost/retry", nil)
+		require.NoError(t, err)
+		mockJobs := &MockJobsClient{
+			ListByBuildFunc: listJobs(t),
+			RetryJobFunc: func(context.Context, string, string, string, string) (buildkite.Job, *buildkite.Response, error) {
+				return buildkite.Job{}, nil, &buildkite.ErrorResponse{
+					Response: &http.Response{StatusCode: http.StatusForbidden, Request: request},
+					Message:  message,
+					RawBody:  []byte(body),
+				}
+			},
+		}
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := RetryFailedJobs()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), args)
+		require.NoError(t, err)
+		decoded := decode(t, result)
+		assert.Empty(t, decoded.Retried)
+		assert.Equal(t, []string{"lost:agent_lost", "stopped:agent_stop"}, ids(decoded.Errors))
+		for _, item := range decoded.Errors {
+			assert.Contains(t, item.Error, message)
+			assert.Empty(t, item.RetryJobID)
+		}
 	})
 
 	t.Run("ListError", func(t *testing.T) {

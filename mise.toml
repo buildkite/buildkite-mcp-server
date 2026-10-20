@@ -15,10 +15,7 @@ node = "24.21.0"
 
 [tasks.setup]
 description = "Install repository dependencies and Git hooks"
-run = [
-  "go mod download",
-  "lefthook install",
-]
+run = ["go mod download", "lefthook install"]
 
 [tasks.check]
 description = "Run all local validation checks"

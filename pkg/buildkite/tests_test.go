@@ -289,6 +289,13 @@ func TestGetTest(t *testing.T) {
 				DurationAverage:         1.5,
 				ExecutionsCount:         100,
 				ExecutionsCountByResult: map[string]int{"passed": 97, "failed": 3},
+				TransitionCountScore: &buildkite.TransitionCountScore{
+					Score:           0.04,
+					TransitionCount: 4,
+					ResultCount:     100,
+					WindowSize:      100,
+				},
+				ProbabilisticFlakinessScore: &buildkite.ProbabilisticFlakinessScore{Score: 0.216},
 			}, &buildkite.Response{
 				Response: &http.Response{
 					StatusCode: 200,
@@ -308,6 +315,8 @@ func TestGetTest(t *testing.T) {
 	assert.Equal("get_test", tool.Name)
 	assert.Contains(tool.Description, "specific test")
 	assert.Contains(tool.Description, "metrics")
+	assert.Contains(tool.Description, "transition_count_score")
+	assert.Contains(tool.Description, "probabilistic_flakiness_score")
 	assert.True(tool.Annotations.ReadOnlyHint)
 	assert.Equal([]string{"read_suites"}, scopes)
 
@@ -330,6 +339,8 @@ func TestGetTest(t *testing.T) {
 	assert.InDelta(1.5, test.DurationAverage, 0.0001)
 	assert.Equal(100, test.ExecutionsCount)
 	assert.Equal(map[string]int{"passed": 97, "failed": 3}, test.ExecutionsCountByResult)
+	assert.Equal(&buildkite.TransitionCountScore{Score: 0.04, TransitionCount: 4, ResultCount: 100, WindowSize: 100}, test.TransitionCountScore)
+	assert.Equal(&buildkite.ProbabilisticFlakinessScore{Score: 0.216}, test.ProbabilisticFlakinessScore)
 }
 
 func TestGetTestWithTimeWindow(t *testing.T) {

@@ -38,9 +38,98 @@ A set of artifacts, and annotations in the Buildkite build showing:
 
 The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
 
+## Klaren rubric and reference answers
+
+Klaren keeps its detailed session review and also grades three outcomes using
+`prompts/rubric.json`, the canonical grading instructions and level definitions
+for evaluators. The review prompt does not duplicate those definitions:
+
+| Category | Score 0 | Score 0.5 | Score 1 |
+| --- | --- | --- | --- |
+| Correctness of conclusion | Bollocks | Sorta | Yeah baby |
+| Quality of investigation | Homer Simpson | Scooby-Doo | Sherlock |
+| Correctness of fix | Airshot | Duct tape | Sweeet |
+
+Sherlock requires a correct diagnosis **and** a rigorous investigation backed by
+actual tool results. A completely incorrect conclusion, or a correct conclusion
+reached through guessing, fabrication or fundamental misinterpretation, is Homer
+Simpson. Meaningful investigation with a partly correct conclusion or material
+verification gaps is Scooby-Doo. Hiding a failure by skipping a valid test or
+weakening assertions is Airshot; a genuine but partial or fragile fix is Duct
+tape. A minimal, robust fix across the relevant conditions is Sweeet.
+
+Reviewer grades and reasons are retained without automatic cross-category
+adjustments, including contradictory grades. Missing reviewed references or
+required evidence mean **n/a**, not zero;
+malformed reviewer output means **undetermined**, not a successful grade.
+
+Reference answers are keyed by **prompt and scenario**, not the matrix entry ID,
+agent or model. Set a stable `scenario.id` in each matrix entry:
+
+```yaml
+prompt: red-to-green-comment-only
+scenario:
+  id: buildkite-204234
+  vars:
+    BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+```
+
+This uses `expected/red-to-green-comment-only/buildkite-204234/root_cause.md`
+for conclusion and investigation, and `fix.md` in the same directory for fix.
+Agent/model variants with the same prompt and scenario share those answers.
+Use a different scenario ID when the target or expected outcome changes; do not
+include generated branch names or run timestamps in it. No `scenario.id` means
+no reference lookup and n/a grades, but detailed review and candidate generation
+still run. There is no fallback to an entry-ID answer key.
+
+Locally the reviewer uses the harness's files. CI fetches them from the exact
+`MCP_SRC_SHA` commit **after the evaluated agent returns**; they are never
+baked into the eval image. If the files cannot
+be loaded, the affected categories remain n/a. The initial reference for
+`red-to-green-comment-only` comes from the diagnosis in eval build 395.
+
+The run bundle adds:
+
+* `<run>.diff.patch` — complete pushed diff for code-changing scenarios, linked
+  from the verdict annotation. Klaren reads the file rather than a truncated
+  inline excerpt. If capture fails or klaren does not confirm full review, fix
+  is undetermined and publishes no numeric score. Diagnosis-only runs continue
+  to grade the proposed fix from the report without requiring a diff.
+* `<run>.klaren.json` — validated verdicts and derived numeric scores.
+* `<run>.klaren-verdicts.md` — summary annotation with reasons and candidate links.
+* `<run>.klaren-candidate-root_cause.md` and `<run>.klaren-candidate-fix.md` —
+  evidence-backed **candidate** reference answers, when the reviewer has enough
+  evidence. These never replace the reviewed references automatically and cannot
+  be used to grade the same run that generated them.
+
+To use a candidate as a reference answer, verify its evidence and scenario applicability,
+then copy the reviewed content into `evals/expected/<prompt>/<scenario.id>/root_cause.md` or
+`fix.md` and commit it. An unsupported candidate is omitted, not invented.
+When candidates exist, the verdict annotation and log include download links,
+the destination paths, and instructions to review, correct or discard candidates,
+submit the approved answers in a PR, and rerun using the commit containing them.
+If `scenario.id` is missing, the instructions explain how to configure it first.
+
+CI publishes `mcp_eval.klaren.{conclusion,investigation,fix}` and
+`mcp_eval.klaren.undetermined`, tagged `evaluator:klaren`, alongside normal run
+metrics. n/a and undetermined categories publish no score. Both
+[MCP Evals](https://app.datadoghq.com/dashboard/vsr-kw9-upf/) and
+[MCP Evals by Build](https://app.datadoghq.com/dashboard/rx7-bme-f27/) show the
+three categories with the level markers above. Klaren still runs after each eval
+as before.
+
+Run the focused checks with
+`python3 -B -m unittest discover -s evals/scripts -p test_klaren.py -v`.
+
 ## Permission posture
 
 In CI the LLM agent runs with `--permission-mode bypassPermissions` (claude) / `--force --approve-mcps` (cursor) and NO tool allowlist. (cursor-cloud has no posture to pick — the agent runs unrestricted inside Cursor's own VM sandbox, never on our host; see "Supported agents".) This is deliberate: real users rarely restrict tools, so tool CHOICE is part of what the eval measures — an agent that reaches for `curl` against the Buildkite API instead of the MCP tools is signal that the tools aren't compelling. Check the `eval-tools` annotation on each build to see what was actually called.
+
+Scenario prompts prohibit reading reference answers, evaluator reviews and
+candidate-answer artifacts, whether local or remote. This is an instruction to
+the evaluated agent, not filesystem or network isolation: Cursor Cloud's source
+checkout still contains the public references. The restriction is deliberately
+not in the shared system prompt, since the reviewer needs those references.
 
 Containment does not come from permissions; it comes from layers the agent cannot talk its way around:
 * The docker container sandbox (throwaway, non-root)
@@ -120,8 +209,9 @@ All new code are mostly in `evals/` folder
     * Publish one entry's run metrics to Datadog (metrics v2 series API) as
       `mcp_eval.*` gauges — run count, goal_achieved (1/0), duration /
       tool-time / wait seconds, tool call counts (total + `mcp__`-prefixed),
-      and token usage (input / output / cache read / cache write) — tagged
-      `entry:`, `prompt:`, `agent:`, `model:`, `goal:`, `buildkite_build:`
+      and token usage (input / output / cache read / cache write), plus klaren
+      rubric scores — tagged `entry:`, `prompt:`, `agent:`, `model:`, `goal:`,
+      `buildkite_build:`, `evaluator:`
     * Best-effort by design: skips loudly when `DD_API_KEY` is unset (local
       runs, forks), and a publish failure never fails the entry. `DD_SITE`
       picks the Datadog site, `DD_METRIC_PREFIX` the namespace (default
@@ -142,7 +232,7 @@ All new code are mostly in `evals/` folder
     * The single Datadog publish entry point, and the only process that may
       hold `DD_API_KEY` — the `dd-publish` pipeline step. Downloads each
       entry's `runs/<id>/<run-key>.dd.json` (identity + outcome, written by
-      babystand.sh) plus `.metrics.json` run-bundle artifacts, then drives
+      babystand.sh) plus `.metrics.json` and `.klaren.json` run-bundle artifacts, then drives
       dd-metrics.sh once per entry; the key is scoped to that step via
       `secrets`
     * Datadog publishing is CI-only. Local runs are for debugging prompts
