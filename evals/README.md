@@ -90,7 +90,8 @@ rubric and final build state stay unchanged. Chunk summaries are reduced again
 if needed (at most six passes, requiring size reduction each time). Instructions
 preserve decisive evidence, contradictions, failed attempts, verification gaps,
 and weakened/deleted tests, but summaries are still **lossy**. The annotation
-prominently flags summary-based grades. Each question in `<run>.yilong.json`
+marks each summary-based verdict with an asterisk (for example, **Sherlock**\*)
+and an explanatory footnote. Each question in `<run>.yilong.json`
 records `evidence_mode: full | summarized`, `context_mode: default | long`, and
 Haiku model/call/token usage when summarization succeeds. Redaction is reapplied
 to generated summaries.

@@ -354,10 +354,14 @@ judge() {
         "| Question | Verdict | Jev probabilities | Confidence | Note |",
         "| --- | --- | --- | --- | --- |",
         (.questions[] |
-          "| \(.title) | \(if .label then "**\(.label)**" else "_\(.verdict)_" end) | "
+          "| \(.title) | \(if .label then "**\(.label)**" else "_\(.verdict)_" end)"
+          + (if .evidence_mode == "summarized" then "\\*" else "" end) + " | "
           + (if .probabilities then ([.probabilities | to_entries[] | "\(.key) \(.value | pct)"] | join(" · ")) else "–" end)
           + " | \(.confidence | pct) | \((.reason // "") | gsub("[\\r\\n|]"; " ")) |"),
         "",
+        (if any(.questions[]; .evidence_mode == "summarized") then
+           "\\* Jev evaluated Haiku-summarized evidence (lossy), not the complete evidence.\n"
+         else empty end),
         (.questions[] | select((.evidence_artifact // "") != "") |
           "\(.title): [Complete redacted request](artifact://\($artifacts)\(.evidence_artifact))"
           + (if (.summary_artifact // "") != "" then " · [Summarized request](artifact://\($artifacts)\(.summary_artifact))" else "" end)),

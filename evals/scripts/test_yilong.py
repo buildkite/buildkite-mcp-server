@@ -215,10 +215,11 @@ class YilongTest(unittest.TestCase):
 
     def test_token_limit_retries_identical_full_request_with_long_context(self):
         self.reject_default = True
-        questions, _ = self.run_judge()
+        questions, result = self.run_judge()
         self.assertEqual(questions["investigation"]["verdict"], "sherlock")
         self.assertEqual(questions["investigation"]["evidence_mode"], "full")
         self.assertEqual(questions["investigation"]["context_mode"], "long")
+        self.assertNotIn("\\*", result.stdout)
         self.assertEqual(self.requests[1], self.requests[2])
         self.assertNotIn("TypeSafe-Danger-Zone-Long-Context", self.headers[1])
         self.assertEqual(self.headers[2]["TypeSafe-Danger-Zone-Long-Context"], "true")
@@ -242,6 +243,10 @@ class YilongTest(unittest.TestCase):
         self.assertEqual(grade["evidence_mode"], "summarized")
         self.assertIn("Based on summarized evidence", grade["reason"])
         self.assertIn("**Some verdicts are based on summarized evidence", result.stdout)
+        self.assertIn("| Quality of investigation | **Sherlock**\\* |", result.stdout)
+        self.assertIn("| Correctness of conclusion | **Bollocks** |", result.stdout)
+        self.assertIn("| Correctness of fix | **Sweeet** |", result.stdout)
+        self.assertIn("\\* Jev evaluated Haiku-summarized evidence (lossy)", result.stdout)
         original = json.loads((self.root / grade["evidence_artifact"]).read_text())
         summary = json.loads((self.root / grade["summary_artifact"]).read_text())
         self.assertEqual(original, self.requests[1])
