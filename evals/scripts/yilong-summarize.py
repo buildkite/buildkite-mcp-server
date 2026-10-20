@@ -6,6 +6,7 @@ Uses the Anthropic Messages API (Buildkite Hosted Models in CI), without tools.
 
 import json
 import os
+from http.client import HTTPException
 from pathlib import Path
 import sys
 import time
@@ -29,6 +30,10 @@ receive the original task and reviewed reference answers separately.
 """
 
 
+class SummaryError(Exception):
+    """A credential-free diagnostic produced by this helper, not an HTTP client."""
+
+
 def chunks(text):
     # Split at UTF-8 boundaries without dropping or replacing any source bytes.
     remaining = text.encode("utf-8")
@@ -45,7 +50,7 @@ def summarize(request):
         base = os.environ["BUILDKITE_AGENT_ENDPOINT"].rstrip("/") + "/ai/anthropic"
         key = os.environ.get("BUILDKITE_AGENT_ACCESS_TOKEN")
     if not base or not key:
-        raise ValueError("Haiku requires Buildkite Hosted Models credentials or ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY")
+        raise SummaryError("Haiku requires Buildkite Hosted Models credentials or ANTHROPIC_BASE_URL and ANTHROPIC_API_KEY")
     usage = {"model": MODEL, "calls": 0, "input_tokens": 0, "output_tokens": 0}
     changed = False
     for field in ("trace", "conclusion", "fix"):
@@ -71,35 +76,35 @@ def summarize(request):
                         break
                     except HTTPError as error:
                         if attempt == 3 or error.code not in (408, 429, 500, 502, 503, 504, 529):
-                            raise ValueError(f"Haiku returned HTTP {error.code}") from None
+                            raise SummaryError(f"Haiku returned HTTP {error.code}") from None
                         retry = error.headers.get("Retry-After", "")
                         delay = min(int(retry), 60) if retry.isdigit() else 2 ** (attempt + 1)
                         time.sleep(delay)
                     except (URLError, TimeoutError):
                         if attempt == 3:
-                            raise ValueError("Haiku connection failed") from None
+                            raise SummaryError("Haiku connection failed") from None
                         time.sleep(2 ** (attempt + 1))
                 if result.get("stop_reason") != "end_turn":
-                    raise ValueError("Haiku did not finish its summary; incomplete evidence will not be graded")
+                    raise SummaryError("Haiku did not finish its summary; incomplete evidence will not be graded")
                 summary = "\n".join(block["text"] for block in result.get("content", [])
                                     if block.get("type") == "text").strip()
                 if not summary:
-                    raise ValueError("Haiku returned an empty summary")
+                    raise SummaryError("Haiku returned an empty summary")
                 summaries.append(f"Part {index}/{len(parts)}:\n{summary}")
                 usage["calls"] += 1
                 for token_type in ("input_tokens", "output_tokens"):
                     usage[token_type] += result.get("usage", {}).get(token_type, 0)
             reduced = "\n\n".join(summaries)
             if len(reduced.encode("utf-8")) >= len(text.encode("utf-8")):
-                raise ValueError("Haiku did not reduce the evidence size")
+                raise SummaryError("Haiku did not reduce the evidence size")
             text = reduced
             if len(text.encode("utf-8")) <= CHUNK_BYTES:
                 request["state"][field] = "Haiku summary of observed evidence (lossy):\n" + text
                 break
         else:
-            raise ValueError("Haiku evidence remained oversized after six reduction passes")
+            raise SummaryError("Haiku evidence remained oversized after six reduction passes")
     if not changed:
-        raise ValueError("No oversized observed evidence to summarize; goals and reference answers are never shortened")
+        raise SummaryError("No oversized observed evidence to summarize; goals and reference answers are never shortened")
     # Explicitly tell Jev how to interpret summaries, without changing the rubric.
     request["state"]["evidence_notice"] = (
         "Observed evidence was summarized by Haiku after the full request exceeded "
@@ -115,8 +120,9 @@ if __name__ == "__main__":
         usage = summarize(request)
         Path(sys.argv[2]).write_text(json.dumps(request))
         print(json.dumps(usage))
-    except (ValueError, KeyError, TypeError, AttributeError, OSError) as error:
-        # Never print a raw upstream body or an exception containing credentials.
-        message = str(error) if isinstance(error, ValueError) and not isinstance(error, json.JSONDecodeError) else "Invalid Haiku response or summary file"
+    except (SummaryError, ValueError, KeyError, TypeError, AttributeError, OSError, HTTPException) as error:
+        # Client exceptions can include complete headers or URLs, including
+        # credentials. Only our own credential-free diagnostics may be printed.
+        message = str(error) if isinstance(error, SummaryError) else "Haiku client or data error; details withheld to protect credentials"
         print(json.dumps({"error": message}))
         sys.exit(1)
