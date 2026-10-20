@@ -39,6 +39,7 @@ class YilongTest(unittest.TestCase):
         (self.root / "run.tools.txt").write_text('{"tool":"get_logs","input":{"job":"failing"}}\n')
         self.conclusion_level = 0
         self.status = 200
+        self.answer = None
         self.requests = []
         owner = self
 
@@ -58,6 +59,8 @@ class YilongTest(unittest.TestCase):
                 level = owner.conclusion_level if key == "conclusion" else 2
                 answer = {"probabilities": {str(i): 1 if i == level else 0 for i in range(3)},
                           "score": level, "confidence": 1}
+                if owner.answer is not None:
+                    answer = owner.answer
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(json.dumps({"answers": {key: answer}}).encode())
@@ -179,6 +182,39 @@ class YilongTest(unittest.TestCase):
         self.assertIn("max_tokens_exceeded", result.stdout)
         self.assertIn("evidence not truncated", result.stdout)
         self.assertEqual(len(self.requests), 3)
+
+    def test_invalid_probabilities_withhold_grades_and_metrics(self):
+        for probabilities in ({}, {"0": 0, "1": 1}, [0, 0, 1],
+                              {"0": 0, "1": "0", "2": 1},
+                              {"0": -0.1, "1": 0, "2": 1.1},
+                              {"0": 0, "1": 0, "2": 0},
+                              {"0": 0.2, "1": 0.2, "2": 0.2},
+                              {"0": 0, "1": 0, "2": 1, "3": 0}):
+            with self.subTest(probabilities=probabilities):
+                self.answer = {"probabilities": probabilities, "score": 2, "confidence": 1}
+                questions, result = self.run_judge()
+                for question in questions.values():
+                    self.assertEqual(question["verdict"], "undetermined")
+                    self.assertIsNone(question["score"])
+                    self.assertIsNone(question["expected_score"])
+                self.assertIn("Invalid Jev probability distribution", result.stdout)
+        metrics = subprocess.run([str(self.root / "scripts/dd-metrics.sh")], check=True,
+                                 env={**self.env, "DD_DRY_RUN": "true", "ENTRY_ID": "case",
+                                      "EVALUATOR": "yilong", "YILONG_FILE": str(self.root / "run.yilong.json")},
+                                 text=True, capture_output=True)
+        scores = {s["metric"]: s["points"][0]["value"]
+                  for s in json.loads(metrics.stdout)["series"] if ".yilong." in s["metric"]}
+        self.assertEqual(scores, {"mcp_eval.yilong.undetermined": 3})
+
+    def test_most_probable_grade_uses_lower_level_on_ties(self):
+        for probabilities, score in (({"0": 0, "1": 0.5, "2": 0.5}, 0.5),
+                                     ({"0": 0.5, "1": 0.5, "2": 0}, 0),
+                                     ({"0": 0.1, "1": 0.2, "2": 0.7}, 1),
+                                     ({"0": 0.3333333, "1": 0.3333334, "2": 0.3333333}, 0.5)):
+            with self.subTest(probabilities=probabilities):
+                self.answer = {"probabilities": probabilities, "score": 1, "confidence": 0.5}
+                questions, _ = self.run_judge()
+                self.assertEqual([q["score"] for q in questions.values()], [score] * 3)
 
     def test_references_follow_prompt_scenario_not_entry(self):
         self.judge.write_text(json.dumps({**self.metadata, "entry": "another-model"}))

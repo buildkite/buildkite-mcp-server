@@ -67,6 +67,11 @@ confidence and expected score, saved in `<run>.yilong.json`. The annotation and
 Datadog score use the most probable grade without changing it, even when grades
 contradict one another. Known token patterns are redacted before sending.
 
+Ties select the lower tied grade. Responses must contain exactly one numeric
+probability per rubric level, each in [0,1], summing to 1 within 0.000001.
+Invalid distributions are reported as **undetermined**, with an explanation in
+the annotation and no numeric category score or Datadog category metric.
+
 Yilong does not shorten tool outputs, input fields or patches. TypeSafe documents
 a 32 MiB body limit and default contexts of 64k tokens per request and 32k per
 question ([limits](https://docs.typesafe.ai/models),

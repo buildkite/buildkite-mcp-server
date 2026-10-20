@@ -265,17 +265,28 @@ judge() {
         # expected_score so it lines up with the verdict scores.
         jq -c --argjson jev "$jev" '
             .levels as $lv
-            | ($jev.answers[.key] // null) as $a
-            | ($a.probabilities // null) as $p
-            | (if $p then ([range(0; $lv | length)] | max_by($p[tostring] // 0)) else null end) as $i
+            | (try $jev.answers[.key] catch null) as $a
+            | (try $a.probabilities catch null) as $p
+            # Require every level, numeric probabilities in [0,1], and a total
+            # of 1 (allowing floating-point rounding, not normalising bad data).
+            | (try (
+                ($p | type) == "object"
+                and ($p | keys) == ([range(0; $lv | length) | tostring] | sort)
+                and all($p[]; type == "number" and . >= 0 and . <= 1)
+                and (($p | add) - 1 | fabs) <= 0.000001
+              ) catch false) as $valid
+            | (if $valid then
+                ($p | map(.) | max) as $max
+                | first(range(0; $lv | length) | select($p[tostring] == $max))
+              else null end) as $i
             | {key, title,
                verdict: (if $i != null then $lv[$i].id else "undetermined" end),
                label: (if $i != null then $lv[$i].label else null end),
                score: (if $i != null then $lv[$i].score else null end),
-               expected_score: (if $a.score != null then ($a.score / (($lv | length) - 1) * 100 | round / 100) else null end),
-               confidence: ($a.confidence // null),
-               probabilities: (if $p then ([$lv | to_entries[] | {(.value.id): ($p[.key | tostring] // 0)}] | add) else null end),
-               reason: ($jev.error // null),
+               expected_score: (if $valid and ($a.score | type) == "number" then ($a.score / (($lv | length) - 1) * 100 | round / 100) else null end),
+               confidence: (if $valid then $a.confidence else null end),
+               probabilities: (if $valid then ([$lv | to_entries[] | {(.value.id): $p[.key | tostring]}] | add) else null end),
+               reason: ($jev.error // (if $valid then null else "Invalid Jev probability distribution: expected one numeric probability per level in [0,1], summing to 1 (tolerance 0.000001); no score published." end)),
                model: ($jev.model // null),
                usage: ($jev.usage // null)}
         ' <<<"$q" >> "$results"
