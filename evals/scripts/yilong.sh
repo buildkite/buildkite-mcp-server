@@ -21,8 +21,10 @@
 #
 # Limits (https://docs.typesafe.ai/models): 64k tokens per request and 32k per
 # question, 32 MiB bodies, per-organization rate limits (429/529 are retried
-# with backoff). Evidence is never shortened to fit: oversized bodies are
-# withheld locally; the API enforces its token limits (HTTP 400 max_tokens_exceeded).
+# with backoff). Token-limit failures retry full evidence with 262k long context,
+# then use chunked Haiku summaries if long context also rejects it. Summary-based
+# grades are marked; complete redacted evidence and summary requests are retained.
+# Bodies exceeding 32 MiB are still withheld locally.
 #
 # SECURITY: MCP_EVAL_FRAMEWORK_JEV_TOKEN must never exist in the eval step,
 # where the agent under test has unrestricted Bash. In CI this runs as its own
@@ -80,18 +82,24 @@ else
 fi
 
 # --- Jev ---------------------------------------------------------------------
-# jev_call <request_file> -> the API response on stdout, or {"error": ...}
+# jev_call <request_file> [long_context=false] -> API response or {"error": ...}
 jev_call() {
     local req="$1" resp="$WORK_DIR/jev-resp.json" hdrs="$WORK_DIR/jev-headers.txt" code attempt wait
+    local context_headers=() timeout=60
+    if [[ "${2:-false}" == true ]]; then
+        context_headers=(-H "TypeSafe-Danger-Zone-Long-Context: true")
+        timeout=180
+    fi
     if (( $(wc -c < "$req") > 33554432 )); then
         jq -n '{error: "Complete evidence exceeds the TypeSafe 32 MiB request-body limit; grade withheld, evidence not truncated"}'
         return
     fi
     for attempt in 1 2 3 4; do
-        code="$(curl -sS --max-time 60 -o "$resp" -D "$hdrs" -w '%{http_code}' -X POST "$API_URL" \
+        code="$(curl -sS --max-time "$timeout" -o "$resp" -D "$hdrs" -w '%{http_code}' -X POST "$API_URL" \
             -H "Authorization: Bearer $JEV_TOKEN" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
+            ${context_headers[@]+"${context_headers[@]}"} \
             --data @"$req")" || code="000"
         case "$code" in
             200)
@@ -111,8 +119,12 @@ jev_call() {
                 echo "WARNING: yilong: TypeSafe rejected MCP_EVAL_FRAMEWORK_JEV_TOKEN (401): it is not a valid API key for $API_URL." >&2
                 jq -n '{error: "HTTP 401: TypeSafe rejected MCP_EVAL_FRAMEWORK_JEV_TOKEN"}'; return ;;
             400|413)
-                jq -n --arg code "$code" --arg body "$(head -c 500 "$resp")" \
-                    '{error: "HTTP \($code): complete evidence rejected; grade withheld, evidence not truncated. \($body)"}'
+                local token_limit=false
+                if [[ "$code" == 400 ]] && jq -e '.detail.error_type == "max_tokens_exceeded"' "$resp" >/dev/null 2>&1; then
+                    token_limit=true
+                fi
+                jq -n --arg code "$code" --arg body "$(head -c 500 "$resp")" --argjson token_limit "$token_limit" \
+                    '{error: "HTTP \($code): complete evidence rejected; grade withheld, evidence not truncated. \($body)", token_limit: $token_limit}'
                 return ;;
         esac
         # Error bodies describe the request, never the key; keep a short excerpt.
@@ -221,6 +233,7 @@ judge() {
     local results="$WORK_DIR/results.jsonl"; : > "$results"
     for q in "${questions[@]}"; do
         local key missing req="$WORK_DIR/request.json" jev
+        local evidence_mode=full context_mode=default summary_info=null evidence_artifact="" summary_artifact=""
         key="$(jq -r '.key' <<<"$q")"
         missing="$(jq -r --slurpfile r "$records" '[.requires[] | select($r[0][.] == null)] | join(", ")' <<<"$q")"
         if [[ -z "$reference_path" ]]; then
@@ -259,11 +272,40 @@ judge() {
         else
             echo "yilong: [$key] asking Jev ($(wc -c < "$req") bytes)" >&2
             jev="$(jev_call "$req")"
+            if [[ "$(jq -r '.token_limit // false' <<<"$jev")" == true ]]; then
+                echo "yilong: [$key] token limit exceeded; retrying complete evidence with 262k long context" >&2
+                context_mode=long
+                evidence_artifact="${prefix##*/}.yilong-$key.evidence.json"
+                cp "$req" "$prefix.yilong-$key.evidence.json" || return 1
+                jev="$(jev_call "$req" true)"
+                if [[ "$(jq -r '.token_limit // false' <<<"$jev")" == true ]]; then
+                    echo "yilong: [$key] long-context token limit exceeded; summarizing observed evidence with Haiku" >&2
+                    local summary_request="$WORK_DIR/summarized.json"
+                    if command -v python3 >/dev/null && summary_info="$(python3 "$SCRIPT_DIR/yilong-summarize.py" "$req" "$summary_request")"; then
+                        # Reapply the same redaction to generated text before it
+                        # leaves the judge or becomes a downloadable artifact.
+                        jq "$JQ_LIB"'walk(if type == "string" then redact else . end)' "$summary_request" > "$prefix.yilong-$key.summary.json" || return 1
+                        summary_artifact="${prefix##*/}.yilong-$key.summary.json"
+                        evidence_mode=summarized
+                        jev="$(jev_call "$prefix.yilong-$key.summary.json" true)"
+                    else
+                        # No partial summary, empty response, or unfinished
+                        # completion is allowed to produce a numeric grade.
+                        local summary_error
+                        if ! jq -e 'type == "object" or . == null' <<<"$summary_info" >/dev/null 2>&1; then
+                            summary_info='{"error":"Haiku summarizer failed without a valid response"}'
+                        fi
+                        summary_error="$(jq -r '.error // "python3 is required for Haiku summarization"' <<<"$summary_info")"
+                        jev="$(jq -n --arg reason "$summary_error" '{error: "Long-context token limit exceeded; Haiku summarization failed: \($reason); grade withheld"}')"
+                    fi
+                fi
+            fi
         fi
         # Verdict = the most probable level (first on a tie). Jev's own score
         # is the probability-weighted level; normalised to 0-1 as
         # expected_score so it lines up with the verdict scores.
-        jq -c --argjson jev "$jev" '
+        jq -c --argjson jev "$jev" --arg evidence_mode "$evidence_mode" --arg context_mode "$context_mode" \
+          --argjson summarization "$summary_info" --arg evidence_artifact "$evidence_artifact" --arg summary_artifact "$summary_artifact" '
             .levels as $lv
             | (try $jev.answers[.key] catch null) as $a
             | (try $a.probabilities catch null) as $p
@@ -286,7 +328,11 @@ judge() {
                expected_score: (if $valid and ($a.score | type) == "number" then ($a.score / (($lv | length) - 1) * 100 | round / 100) else null end),
                confidence: (if $valid then $a.confidence else null end),
                probabilities: (if $valid then ([$lv | to_entries[] | {(.value.id): $p[.key | tostring]}] | add) else null end),
-               reason: ($jev.error // (if $valid then null else "Invalid Jev probability distribution: expected one numeric probability per level in [0,1], summing to 1 (tolerance 0.000001); no score published." end)),
+               reason: ((if $evidence_mode == "summarized" then "Based on summarized evidence (Haiku; lossy). " else "" end)
+                 + ($jev.error // (if $valid then "" else "Invalid Jev probability distribution: expected one numeric probability per level in [0,1], summing to 1 (tolerance 0.000001); no score published." end))),
+               evidence_mode: $evidence_mode, context_mode: $context_mode,
+               summarization: $summarization,
+               evidence_artifact: $evidence_artifact, summary_artifact: $summary_artifact,
                model: ($jev.model // null),
                usage: ($jev.usage // null)}
         ' <<<"$q" >> "$results"
@@ -296,19 +342,29 @@ judge() {
         {entry: $judge[0].entry, run_key: $judge[0].run_key, evaluator: "yilong", questions: .}' "$results" > "$out"
 
     # Summary markdown (annotation in CI, stdout locally).
-    jq -r '
+    jq -r --arg artifacts "runs/$(jq -r '.entry' "$judge_file")/" '
         def pct: if . == null then "–" else (. * 100 | round | tostring) + "%" end;
         "<details open><summary>🧑🏻‍⚖️ [\(.entry)] yilong — verdicts</summary>\n",
         (if any(.questions[]; .verdict == "n/a") then
            "**Some categories were not evaluated (n/a).** See the Note column for missing references or evidence. No score is published for those categories.\n"
          else empty end),
+        (if any(.questions[]; .evidence_mode == "summarized") then
+           "**Some verdicts are based on summarized evidence (Haiku; lossy), not the full evidence.** Those categories are marked in the Note column.\n"
+         else empty end),
         "| Question | Verdict | Jev probabilities | Confidence | Note |",
         "| --- | --- | --- | --- | --- |",
         (.questions[] |
-          "| \(.title) | \(if .label then "**\(.label)**" else "_\(.verdict)_" end) | "
+          "| \(.title) | \(if .label then "**\(.label)**" else "_\(.verdict)_" end)"
+          + (if .evidence_mode == "summarized" then "\\*" else "" end) + " | "
           + (if .probabilities then ([.probabilities | to_entries[] | "\(.key) \(.value | pct)"] | join(" · ")) else "–" end)
           + " | \(.confidence | pct) | \((.reason // "") | gsub("[\\r\\n|]"; " ")) |"),
         "",
+        (if any(.questions[]; .evidence_mode == "summarized") then
+           "\\* Jev evaluated Haiku-summarized evidence (lossy), not the complete evidence.\n"
+         else empty end),
+        (.questions[] | select((.evidence_artifact // "") != "") |
+          "\(.title): [Complete redacted request](artifact://\($artifacts)\(.evidence_artifact))"
+          + (if (.summary_artifact // "") != "" then " · [Summarized request](artifact://\($artifacts)\(.summary_artifact))" else "" end)),
         "Verdict = the level Jev finds most probable, without cross-category adjustments. Undetermined means evaluation failed or the complete patch could not be supplied, including input-limit failures; n/a means required references or evidence are missing (see Note).",
         "</details>"
     ' "$out"
@@ -334,6 +390,11 @@ for judge_file in "${JUDGE_FILES[@]}"; do
         REL="${judge_file#"$WORK_DIR/"}"
         (cd "$WORK_DIR" && buildkite-agent artifact upload "${REL%.judge.json}.yilong.json") \
             || echo "WARNING: yilong: failed to upload verdicts for '$ENTRY'" >&2
+        for evidence in "${judge_file%.judge.json}".yilong-*.json; do
+            [[ -f "$evidence" ]] || continue
+            (cd "$WORK_DIR" && buildkite-agent artifact upload "${evidence#"$WORK_DIR/"}") \
+                || echo "WARNING: yilong: failed to upload evidence for '$ENTRY'" >&2
+        done
         buildkite-agent annotate --context "yilong-$ENTRY" --style info --priority 10 < "$SUMMARY" \
             || echo "WARNING: yilong: failed to annotate '$ENTRY'" >&2
     else

@@ -72,20 +72,53 @@ probability per rubric level, each in [0,1], summing to 1 within 0.000001.
 Invalid distributions are reported as **undetermined**, with an explanation in
 the annotation and no numeric category score or Datadog category metric.
 
-Yilong does not shorten tool outputs, input fields or patches. TypeSafe documents
-a 32 MiB body limit and default contexts of 64k tokens per request and 32k per
-question ([limits](https://docs.typesafe.ai/models),
-[errors](https://docs.typesafe.ai/api)). Bodies over 32 MiB are withheld locally;
-the API enforces token limits. Rejections, including `max_tokens_exceeded`, are
-reported as **undetermined**, with the reason in the annotation and no numeric
-category score. No truncated retry or automatic long-context mode is used.
+Yilong first sends complete evidence. TypeSafe documents a 32 MiB body limit and
+default contexts of 64k tokens per request and 32k per question
+([limits](https://docs.typesafe.ai/models), [errors](https://docs.typesafe.ai/api)).
+Only HTTP 400 `detail.error_type: max_tokens_exceeded` triggers these fallbacks:
+
+1. Retry the **identical full request** with
+   `TypeSafe-Danger-Zone-Long-Context: true` (262k tokens per request and question).
+2. If long context also rejects it for tokens, ask **Haiku 4.5** to summarize
+   oversized observed evidence (`trace`, final report, or patch/proposed fix).
+   Send the summarized request to Jev in long-context mode. Jev still assigns
+   the grades; Haiku has no tools and does not grade or generate reference answers.
+
+Summarization processes every part of an oversized field in ordered, UTF-8-safe
+chunks of at most 48,000 bytes. Shorter fields, the task, reviewed references,
+rubric and final build state stay unchanged. Chunk summaries are reduced again
+if needed (at most six passes, requiring size reduction each time). Instructions
+preserve decisive evidence, contradictions, failed attempts, verification gaps,
+and weakened/deleted tests, but summaries are still **lossy**. The annotation
+marks each summary-based verdict with an asterisk (for example, **Sherlock**\*)
+and an explanatory footnote. Each question in `<run>.yilong.json`
+records `evidence_mode: full | summarized`, `context_mode: default | long`, and
+Haiku model/call/token usage when summarization succeeds. Redaction is reapplied
+to generated summaries.
+
+On a token-limit failure, the complete redacted request is saved as
+`<run>.yilong-<category>.evidence.json`; a successful summary is saved as
+`<run>.yilong-<category>.summary.json`. CI uploads these beside the verdicts and
+links them from the annotation. Locally they remain beside the input bundle.
+Bodies over 32 MiB are still withheld locally, without summarization. Unusable,
+unfinished or failed summaries, unchanged oversized goals/references, and final
+Jev rejections produce **undetermined**, with a reason and no numeric category
+score. There is no silent head/tail truncation or repeated summarization loop
+after the final Jev request.
+
 429s and transient failures are retried with backoff. Missing references or
 required evidence mean **n/a**; an unavailable patch for an implemented fix is
 **undetermined**, never replaced by the agent's claims. An empty captured patch
 is sent as evidence that no changes were pushed.
 
 CI runs Yilong in a separate step with `MCP_EVAL_FRAMEWORK_JEV_TOKEN`, never in
-the evaluated agent's container. It downloads `<run>.judge.json`, final reports,
+the evaluated agent's container. Haiku uses the existing Buildkite Hosted Models
+connection (`BUILDKITE_AGENT_ENDPOINT` and `BUILDKITE_AGENT_ACCESS_TOKEN`) through
+the Anthropic Messages API; no extra secret or Claude CLI is needed. The fallback
+requires Python 3 (standard library only), available on hosted Ubuntu agents.
+Outside CI, set `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` to enable Haiku;
+missing credentials leave oversized categories undetermined.
+Yilong downloads `<run>.judge.json`, final reports,
 transcripts and complete `.diff.patch` artifacts, then uploads verdicts and
 annotates the build. Datadog publishing follows it and handles either evaluator.
 Locally, run `./evals/scripts/yilong.sh evals/runs/<id>/<run>.judge.json` with the
