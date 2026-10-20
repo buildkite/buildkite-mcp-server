@@ -467,7 +467,15 @@ STRUGGLES_JQ='
                   and (test("^(?:cd|export|set|source|\\.)(?:\\s|$)") | not)
                   and (test("^[A-Za-z_][A-Za-z0-9_]*=\\S*$") | not)))
     | (.[0] // "") | (split(" ")[0] // "") | sub(".*/"; "");
-  def harmless_programs: ["grep", "egrep", "fgrep", "rg", "test", "[", "[[", "diff", "cmp", "false", "pgrep", "which", "command"];
+  # Without parsing shell syntax, only exempt simple commands. A chain,
+  # pipeline, redirection or substitution can fail outside the named program.
+  # Conservatively reject these characters even inside quoted arguments.
+  def harmless_command:
+    . as $cmd
+    | (test("[;&|\n\r<>`$(){}\\\\]") | not)
+      and ((shell_program as $p
+            | ["grep", "egrep", "fgrep", "rg", "test", "[", "[[", "diff", "cmp", "false", "pgrep", "which"] | index($p) != null)
+           or ($cmd | test("^\\s*command\\s+-[vV]\\s+")));
   def struggle_summary:
     . as $calls
     | ($calls | map(select(.failed))) as $failed
@@ -479,7 +487,7 @@ STRUGGLES_JQ='
          | select($calls[$i].failed and ($calls[$i].harmless | not) and $calls[$i + 1].label == $calls[$i].label
                   and $calls[$i].result_pos != null and $calls[$i + 1].pos != null
                   and $calls[$i].result_pos < $calls[$i + 1].pos)
-         | $calls[$i + 1].failed | not]) as $retries
+         | $calls[$i + 1] | .result_pos != null and .failed == false]) as $retries
     | {
         implemented: true,
         tool_calls: ($calls | length),
@@ -538,7 +546,8 @@ struggles() {
           | {label: $lbl,
              pos: $first[$cid], result_pos: $done[$cid],
              input: (if $t.key == "mcpToolCall" then ($a.args // $a.arguments // {}) else $a end),
-             failed: ($fail != null or $mcp_err),
+             failed: (if $fail != null or $mcp_err then true
+                      elif $r.success != null then false else null end),
              type: (if $mcp_err then "MCP tool error"
                     elif $fail == null then null
                     elif ($fail.aborted? // false) then "interrupted"
@@ -548,7 +557,7 @@ struggles() {
                     else ($fail.stderr? // $fail.message? // $fail.error? // ($fail | tojson)) end),
              harmless: ($shell and ($fail.exitCode? // null) == 1
                         and ((($fail.stdout? // "") + ($fail.stderr? // "")) | test("\\S") | not)
-                        and (($a.command // "" | shell_program) as $p | harmless_programs | index($p) != null))} ]
+                        and ($a.command // "" | harmless_command))} ]
       | struggle_summary
     ' "$f"
     return
@@ -574,15 +583,15 @@ struggles() {
                            tur: (if ($l.toolUseResult | type) == "object" then $l.toolUseResult else {} end)}} ]
               | from_entries) as $results
     | [ $uses[]
-        | ($results[.id] // {is_error: false, text: "", tur: {}}) as $r
+        | ($results[.id] // {is_error: null, text: "", tur: {}}) as $r
         | (.name == "Bash") as $shell
         | (.input.command? // "" | tostring) as $cmd
         # null (not empty) when there is no exit code, or the call would be dropped
         | ([$r.text | capture("^Exit code (?<n>[0-9]+)")? | .n] | first) as $exit
         | {label: (if $shell then ($cmd | shell_program | "Bash: " + .) else (.name | sub("^mcp__[^_]+(?:_[^_]+)*?__"; "")) end),
-           pos: ._turn, result_pos: ._turn,
+           pos: ._turn, result_pos: (if $r.is_error != null then ._turn else null end),
            input: .input,
-           failed: ($r.is_error or ($r.tur.interrupted? // false)),
+           failed: (if $r.is_error != null then ($r.is_error or ($r.tur.interrupted? // false)) else null end),
            type: (if ($r.tur.interrupted? // false) or ($r.text | test("\\[Request interrupted")) then "interrupted"
                   elif $exit != null then "exit \($exit)"
                   elif ($r.text | test("timed out"; "i")) then "timeout"
@@ -592,7 +601,7 @@ struggles() {
            text: ($r.text | sub("^Exit code [0-9]+\n?"; "")),
            harmless: ($shell and $exit == "1"
                       and ($r.text | sub("^Exit code [0-9]+\n?"; "") | test("\\S") | not)
-                      and (($cmd | shell_program) as $p | harmless_programs | index($p) != null))} ]
+                      and ($cmd | harmless_command))} ]
     | struggle_summary
   ' "$f"
 }
