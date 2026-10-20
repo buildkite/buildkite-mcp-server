@@ -175,7 +175,7 @@ func TestRequestLogTransportStartsWithoutRequests(t *testing.T) {
 }
 
 func TestRequestLogTransportRedactsErrorURL(t *testing.T) {
-	const rawURL = "https://user:password@storage.example/artifact?signature=secret#fragment"
+	const rawURL = "https://user:password@storage.example/artifact?signature=secret#fragment" //nolint:gosec // Deliberately fake credentials test URL redaction.
 	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
 	transport, err := recording.NewRequestLogTransport(errTransport{err: fmt.Errorf("download %s failed", rawURL)}, logPath)
 	require.NoError(t, err)
