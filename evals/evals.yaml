@@ -117,7 +117,9 @@
 #                                 /opt/bk/bin/bk; else (local runs) the bk on PATH.
 #                   org_slug      bk's default organization. Default: the
 #                                 token's only organization (GET
-#                                 /v2/organizations), else none.
+#                                 /v2/organizations). If discovery fails or
+#                                 is ambiguous, CLI setup fails before the
+#                                 scenario runs; set org_slug explicitly.
 #                 Every run records what it used — mode, mode_params, the
 #                 harness (agent CLI) version, and the bk CLI or MCP server
 #                 version — in <run>.run-info.json, in <run>.metrics.json under

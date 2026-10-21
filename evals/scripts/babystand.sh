@@ -228,8 +228,9 @@ harness_version() {
 #   - download_url empty: use the bk at BK_CLI_DEFAULT_BIN (CI: the version
 #     pinned in evals/Dockerfile, installed off PATH), else the bk on PATH.
 #   - org: the entry's org_slug, else the token's only organization (GET
-#     /v2/organizations), else none — the agent then has to name the org.
-# Returns non-zero (the entry fails) when no runnable bk can be produced.
+#     /v2/organizations). Fail if discovery is inconclusive: an empty env var
+#     would let bk fall back to the host's saved organization.
+# Returns non-zero when no runnable bk or unambiguous org can be produced.
 prepare_bk_cli() {
     local dir="$1" url="$2" org="$3" token="$4"
     BK_CLI_BIN="" BK_CLI_VERSION="" BK_CLI_ORG=""
@@ -282,14 +283,15 @@ prepare_bk_cli() {
     BK_CLI_VERSION="${raw#bk version }"
     BK_CLI_ORG="$org"
     if [[ -z "$BK_CLI_ORG" ]]; then
-        BK_CLI_ORG="$(curl -fsS --max-time 30 -H "Authorization: Bearer $token" \
+        if ! BK_CLI_ORG="$(curl -fsS --max-time 30 -H "Authorization: Bearer $token" \
             "https://api.buildkite.com/v2/organizations" 2>/dev/null \
-            | jq -r 'if type == "array" and length == 1 then .[0].slug else empty end' 2>/dev/null || true)"
-        if [[ -z "$BK_CLI_ORG" ]]; then
-            echo "WARNING: [$ENTRY_ID] could not work out the token's single organization; set mode_params.org_slug. bk runs with no default organization." >&2
+            | jq -r 'if type == "array" and length == 1 then .[0].slug // empty | select(type == "string") else empty end' 2>/dev/null)" \
+                || [[ -z "$BK_CLI_ORG" ]]; then
+            echo "ERROR: [$ENTRY_ID] could not work out the token's single organization; set mode_params.org_slug. Entry not run to avoid falling back to a saved organization." >&2
+            return 1
         fi
     fi
-    echo "*** [$ENTRY_ID] bk CLI: $BK_CLI_BIN (version $BK_CLI_VERSION, org ${BK_CLI_ORG:-none})"
+    echo "*** [$ENTRY_ID] bk CLI: $BK_CLI_BIN (version $BK_CLI_VERSION, org $BK_CLI_ORG)"
 }
 
 # install_bk_stub <stub_dir>  -- write a `bk` into <stub_dir> (put first on
@@ -707,7 +709,7 @@ run_entry() {
           harness: {agent: $agent, version: $harness, model: $model},
           bk_cli: (if $mode == "cli" then
                      {version: $bk_ver, path: $bk_bin, download_url: ($params.download_url // null),
-                      org_slug: (if $bk_org == "" then null else $bk_org end)}
+                      org_slug: $bk_org}
                    else null end),
           mcp_server: (if $mode == "mcp" then
                          {requested: $mcp_req, version: $mcp_ver,
@@ -776,11 +778,7 @@ run_entry() {
         local MODE_VARS; MODE_VARS="$(mktemp)"
         {
             printf 'BK_CLI_VERSION=%s\n' "$BK_CLI_VERSION"
-            if [[ -n "$BK_CLI_ORG" ]]; then
-                printf 'BK_CLI_ORG_NOTE=Its default organization is `%s` (set through `BUILDKITE_ORGANIZATION_SLUG`).\n' "$BK_CLI_ORG"
-            else
-                printf 'BK_CLI_ORG_NOTE=No default organization is set.\n'
-            fi
+            printf 'BK_CLI_ORG_NOTE=Its default organization is `%s` (set through `BUILDKITE_ORGANIZATION_SLUG`).\n' "$BK_CLI_ORG"
         } > "$MODE_VARS"
         printf '\n\n' >> "$RENDERED"
         render_prompt "$MODE_NOTE" "$MODE_VARS" >> "$RENDERED"

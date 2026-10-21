@@ -219,7 +219,9 @@ bk_cli_table() {
         (tomap($b[0].bk_cli_commands_by_name)) as $B |
         (tomap($c[0].bk_cli_commands_by_name)) as $C |
         (($B|keys) + ($C|keys) | unique) as $names |
-        if ($names | length) == 0 then "_No bk CLI calls in either run._"
+        if $b[0].bk_cli_commands_by_name == null or $c[0].bk_cli_commands_by_name == null then
+          "_bk CLI command counts are not available for one or both runs._"
+        elif ($names | length) == 0 then "_No bk CLI calls in either run._"
         else
           (["| bk command | Base | Target | Δ |", "|---|---:|---:|---:|"]
            + ($names | map(. as $n

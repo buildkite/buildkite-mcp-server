@@ -178,19 +178,26 @@ CURSOR_CLOUD_CALLS_JQ='
 # bk CLI usage (mode: cli entries — and any mcp run that shells out to bk).
 # bk_cli_invocations turns one shell command string into its bk invocations,
 # named by up to two subcommand words ("bk build view", "bk api", "bk").
-# Heuristic: bk must sit in command position — start of the string, or after
-# ; & | ( $( ` or a newline, optionally behind VAR=val / sudo / time / exec /
-# command / do / then / else and a path prefix (./bk, /usr/local/bin/bk) — so `echo bk` and
-# `grep bk` don't count. bk_cli_summary($per_call) takes one invocation list
+# bk_shell_lookup parses shell syntax once per distinct command, shared by
+# metrics and struggle labels. bk_cli_summary($per_call) takes one invocation list
 # per shell tool call and reports how many calls ran bk, plus a per-command
 # count list shaped like tool_calls_by_name.
 BK_CLI_JQ='
-  def bk_cli_invocations:
-    [ scan("(?:^|[;&|(`\\n]|\\$\\()\\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*=\\S*|sudo|time|exec|command|do|then|else)\\s+)*(?:[^\\s;&|()`]*/)?bk(?:\\s+([a-z][a-z-]*))?(?:\\s+([a-z][a-z-]*))?(?=\\s|$|[;&|)`])")
-      | "bk" + (map(select(. != null) | " " + .) | join("")) ];
+  def bk_cli_invocations: if . == "" then [] else $bk_commands[0][.] end;
   def bk_cli_summary($per_call):
-    { tool_calls_bk_cli: ($per_call | map(select(length > 0)) | length),
-      bk_cli_commands_by_name: ($per_call | add // [] | group_by(.) | map("\(length) \(.[0])") | sort | reverse) };'
+    if ($per_call | any(. == null)) then
+      {tool_calls_bk_cli: null, bk_cli_commands_by_name: null}
+    else
+      { tool_calls_bk_cli: ($per_call | map(select(length > 0)) | length),
+        bk_cli_commands_by_name: ($per_call | add // [] | group_by(.) | map("\(length) \(.[0])") | sort | reverse) }
+    end;'
+
+bk_shell_lookup() {
+  local TOOL_FILTER=true NAMES_ONLY=0
+  extract "$1" | jq -c '.input.command? | select(type == "string")' \
+    | node "$(dirname "${BASH_SOURCE[0]}")/bk-shell-commands.mjs"
+}
+
 extract() {
   local f="$1"
   if [[ "$AGENT" == "cursor-cloud" ]]; then
@@ -298,8 +305,10 @@ metrics() {
   [[ -f "$f" ]] || { echo "no such transcript: $f" >&2; exit 1; }
 
   local snap; snap="$(mktemp -t bk-audit.XXXXXX)"
-  trap 'rm -f "$snap"' RETURN
+  local bk_lookup="$snap.bk-commands.json"
+  trap 'rm -f "$snap" "$bk_lookup"' RETURN
   cp "$f" "$snap"
+  bk_shell_lookup "$snap" > "$bk_lookup" || return 1
 
   # cursor-cloud: the SSE capture's assistant events are TEXT DELTAS with no
   # message boundaries, so user/assistant counts would be meaningless and stay
@@ -311,7 +320,7 @@ metrics() {
   # Anthropic pricing and does not model Cursor's.
   if [[ "$AGENT" == "cursor-cloud" ]]; then
     echo "# session: $f" >&2
-    jq -nr "$CURSOR_CLOUD_CALLS_JQ$BK_CLI_JQ"'
+    jq -nr --slurpfile bk_commands "$bk_lookup" "$CURSOR_CLOUD_CALLS_JQ$BK_CLI_JQ"'
       [inputs | select(type=="object")] as $all
       | ($all | cloud_tool_events | dedupe_calls) as $tools
       | ($all | map(select(.type=="result")) | last | .data // {}) as $res
@@ -351,7 +360,7 @@ metrics() {
     echo "# session: $f" >&2
     # Tool names use the same normalization as extract() (mcpToolCall ->
     # mcp__<server>__<tool>), so metrics and tool listings agree.
-    jq -nr "$CURSOR_TOOL_NAME_JQ$BK_CLI_JQ"'
+    jq -nr --slurpfile bk_commands "$bk_lookup" "$CURSOR_TOOL_NAME_JQ$BK_CLI_JQ"'
       [inputs | select(type=="object")] as $all
       | ($all | cursor_calls
               | map((.tool_call | to_entries[0]) as $t | cursor_tool_name($t))) as $tools
@@ -390,7 +399,7 @@ metrics() {
       c1h: ($c1h|tonumber), cread: ($cr|tonumber)}')"
 
   echo "# session: $f" >&2
-  jq -nr --argjson p "$prices" "$BK_CLI_JQ"'
+  jq -nr --argjson p "$prices" --slurpfile bk_commands "$bk_lookup" "$BK_CLI_JQ"'
     def n: . // 0;
     def tsec: sub("\\.[0-9]+";"") | fromdateiso8601;
     [inputs] as $all
@@ -483,7 +492,7 @@ STRUGGLES_JQ='
   # lines and cd/export/VAR= setup (e.g. "cd /tmp\n# note\nsed ..." -> "sed").
   # Always a string, even for a command that is only setup.
   def shell_program:
-    ([bk_cli_invocations[]] | first) // (
+    ([(bk_cli_invocations // [])[]] | first) // (
       split("\n")
       | map(select(test("^\\s*#") | not))
       | map([splits("\\s*(?:&&|\\|\\||;|\\|)\\s*")]) | add // []
@@ -544,8 +553,11 @@ struggles() {
     jq -n '{implemented: false, reason: "not implemented for cursor-cloud yet"}'
     return
   fi
+  local bk_lookup; bk_lookup="$(mktemp -t bk-audit.XXXXXX)"
+  trap 'rm -f "$bk_lookup"' RETURN
+  bk_shell_lookup "$f" > "$bk_lookup" || return 1
   if [[ "$AGENT" == "cursor" ]]; then
-    jq -n "$CURSOR_TOOL_NAME_JQ$BK_CLI_JQ$STRUGGLES_JQ"'
+    jq -n --slurpfile bk_commands "$bk_lookup" "$CURSOR_TOOL_NAME_JQ$BK_CLI_JQ$STRUGGLES_JQ"'
       [inputs | select(type == "object")] as $all
       # Results come on the completed events, keyed by call_id.
       | ($all | map(select(.type == "tool_call" and .subtype == "completed" and (.call_id // "") != ""
@@ -587,7 +599,7 @@ struggles() {
     ' "$f"
     return
   fi
-  jq -n "$BK_CLI_JQ$STRUGGLES_JQ"'
+  jq -n --slurpfile bk_commands "$bk_lookup" "$BK_CLI_JQ$STRUGGLES_JQ"'
     [inputs] as $all
     # Model responses in order (message.id -> 1, 2, ...). Claude Code writes
     # each tool_use of a response on its own line and may run the first before
