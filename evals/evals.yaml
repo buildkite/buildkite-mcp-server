@@ -253,6 +253,7 @@ matrix:
   #     org_slug: buildkite
   #   prompt: red-to-green-comment-only
   #   scenario:
+  #     id: buildkite-204234
   #     vars:
   #       BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
   #   token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
