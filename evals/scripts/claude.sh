@@ -127,6 +127,9 @@ SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_
 TRANSCRIPT="$HOME/.claude/projects/$(pwd | sed -e 's/[\/.]/-/g')/$SESSION_ID.jsonl"
 echo "CLAUDE_SESSION_ID=$SESSION_ID"
 echo "CLAUDE_TRANSCRIPT=$TRANSCRIPT"
+# The raw stream-json: it also carries harness events the transcript may not,
+# e.g. `system`/`api_retry` (model API retries).
+echo "CLAUDE_RAW_LOG=$RAW_LOG"
 
 # Extract the run's final assistant text (the stream-json "result" event) into a
 # file so the caller can surface just the final output (e.g. as an annotation).

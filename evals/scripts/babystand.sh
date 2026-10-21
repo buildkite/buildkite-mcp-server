@@ -240,6 +240,7 @@ run_claude() {
         SESSION_ID=$(sed -n 's/^CLAUDE_SESSION_ID=//p' "$log" | tail -n1)
         TRANSCRIPT=$(sed -n 's/^CLAUDE_TRANSCRIPT=//p' "$log" | tail -n1)
         EVAL_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$log" | tail -n1)
+        RAW_STREAM=$(sed -n 's/^CLAUDE_RAW_LOG=//p' "$log" | tail -n1)
     else
         # Local execution: run claude directly against the harness mcp.json (cwd
         # is the eval-repo clone, so a relative path would not resolve).
@@ -248,6 +249,8 @@ run_claude() {
         fi
         SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_id' "$log" | head -n1)
         TRANSCRIPT="$HOME/.claude/projects/$(pwd | sed -e 's/[\/.]/-/g')/$SESSION_ID.jsonl"
+        # Locally the tee'd log is the raw stream-json itself.
+        RAW_STREAM="$log"
         EVAL_RESULT_FILE="$(mktemp)"
         jq -r 'select(.type == "result") | .result // empty' "$log" > "$EVAL_RESULT_FILE" 2>/dev/null || true
     fi
@@ -527,6 +530,7 @@ run_entry() {
     # --- Run the agent ------------------------------------------------------
     local LOG="/tmp/babystand-$RUN_KEY.log"
     local SESSION_ID="" TRANSCRIPT="" EVAL_RESULT_FILE=""   # set by the runner (dynamic scope)
+    local RAW_STREAM=""   # claude only: raw stream-json, for model API retries
     local EVAL_START; EVAL_START=$(date +%s)
     if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
@@ -570,6 +574,22 @@ run_entry() {
     else
         echo "WARNING: [$ENTRY_ID] struggles summary failed (transcript: $TRANSCRIPT)" >&2
         : > "$STRUGGLES_MD"
+    fi
+
+    # Model API retries: the harness retrying its call to the model API (e.g.
+    # 504 / 429 from the model gateway) — infrastructure, not the agent. From
+    # the raw stream (claude only). Merged into metrics.json as
+    # model_api_retries and shown under the struggles annotation.
+    local RETRIES_JSON; RETRIES_JSON="$(mktemp)"
+    if "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" model-retries "$RAW_STREAM" > "$RETRIES_JSON"; then
+        { echo; "$SCRIPT_DIR/bk-tool-audit-v2.sh" model-retries-markdown "$RETRIES_JSON"; } >> "$STRUGGLES_MD"
+        "$SCRIPT_DIR/bk-tool-audit-v2.sh" model-retries-markdown "$RETRIES_JSON"
+        MERGED_METRICS="$(mktemp)"
+        jq --slurpfile r "$RETRIES_JSON" '. + {model_api_retries: $r[0]}' "$AUDIT_METRICS_FILE" > "$MERGED_METRICS" \
+            && mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
+    else
+        echo "WARNING: [$ENTRY_ID] model API retry summary failed (raw stream: ${RAW_STREAM:-none})" >&2
+        RETRIES_JSON=""
     fi
 
     # --- Goal outcome ---------------------------------------------------------
@@ -694,6 +714,9 @@ run_entry() {
             local STRUGGLES_META STRUGGLES_STYLE="info"
             STRUGGLES_META="$(jq -r 'if .implemented then "\(.failed_calls) failed of \(.tool_calls) tool calls · longest streak \(.longest_failure_streak)" else "not implemented for this agent" end' "$STRUGGLES_JSON")"
             jq -e '.implemented | not' "$STRUGGLES_JSON" >/dev/null 2>&1 && STRUGGLES_STYLE="warning"
+            if [[ -n "$RETRIES_JSON" ]] && jq -e '(.retries // 0) > 0' "$RETRIES_JSON" >/dev/null 2>&1; then
+                STRUGGLES_META+="$(jq -r '" · \(.retries) model API retries"' "$RETRIES_JSON")"
+            fi
             annotate_markdown "eval-struggles-$ENTRY_ID" ":face_with_spiral_eyes: [$ENTRY_ID] Eval — struggles" \
                 "$PREFIX.struggles.md" "${STRUGGLES_META}" "$STRUGGLES_STYLE"
         fi

@@ -76,7 +76,7 @@ jq -n --rawfile goal "$GOAL" --rawfile conclusion "$REPORT" \
     cat "$ROOT_DIR/prompts/klaren.md"
     printf '\nThe LLM session log file to analyze is: %s\n' "$TRANSCRIPT"
     if [[ -s "$STRUGGLES_MD" ]]; then
-        printf '\nFailed tool calls and struggle patterns from the session log ("likely harmless" = e.g. grep with no match). Use them as leads, and check each in the log:\n\n'
+        printf '\nFailed tool calls and struggle patterns from the session log ("likely harmless" = e.g. grep with no match), and model API retries (harness-level, not the agent). Use them as leads, and check each in the log:\n\n'
         cat "$STRUGGLES_MD"
     fi
     printf '\nCanonical rubric (verdict IDs, criteria and required evidence):\n'
