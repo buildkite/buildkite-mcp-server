@@ -245,6 +245,8 @@ matrix:
     # The build above lives in the `buildkite` org, not the default eval org.
     token_env: MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN
     mcp_version: source
+    # This is the main-code eval run, not dogfood build #1.
+    compare_base: build:430
 
   # The same diagnosis driven through the Buildkite CLI (bk) instead of the MCP
   # server — compare its tool calls / tokens / klaren review against the entry
