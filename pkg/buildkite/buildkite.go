@@ -110,8 +110,8 @@ func mcpSanitizedTextResult(span trace.Span, sanitized []byte) (*mcp.CallToolRes
 	return utils.NewToolResultText(string(sanitized)), nil, nil
 }
 
-// payloadStructureBytes reports the serialized size of the payload with every
-// string emptied and the truncation metadata limitSanitizedJSONPayload would
+// payloadStructureBytes reports the serialized size with shortenable strings
+// emptied and the truncation metadata limitSanitizedJSONPayload would
 // add — the smallest size the generic limiter can reach without dropping
 // array items. When this floor exceeds the limit, the generic limiter fails,
 // so semantic item-count reduction is needed exactly then and only then.
@@ -208,6 +208,11 @@ func marshalLimitedJSON(value map[string]any, stringLimit int) ([]byte, error) {
 }
 
 func limitJSONValue(value any, stringLimit int, context string) (any, bool) {
+	// The summary bounds captures by dropping whole records. Preserve their
+	// arbitrary context, status, and pagination URLs even at very small budgets.
+	if context == "job_errors" {
+		return value, false
+	}
 	switch value := value.(type) {
 	case string:
 		limited, truncated := truncateUTF8Bytes(value, stringLimit)
