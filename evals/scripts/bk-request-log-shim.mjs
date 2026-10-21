@@ -26,9 +26,12 @@
 //    method, url, status, duration_ms, bytes, graphql_operation?, error?}
 //   {"source":"bk","type":"invocation", invocation, argv, exit_code,
 //    duration_ms, requests}   — one per bk run, even with zero requests
+// argv contains recognized command words only, never flags or argument values.
+// URLs omit userinfo, queries and fragments; errors retain codes, not messages.
 import http from "node:http";
 import https from "node:https";
 import { spawn } from "node:child_process";
+import { BlockList, isIP } from "node:net";
 import fs from "node:fs";
 import crypto from "node:crypto";
 
@@ -38,6 +41,15 @@ const os_signals = { SIGHUP: 1, SIGINT: 2, SIGKILL: 9, SIGTERM: 15 };
 const realBk = process.env.BK_SHIM_REAL_BK;
 const logPath = process.env.BK_SHIM_REQUEST_LOG;
 const argv = process.argv.slice(2);
+// An allowlist, not a secret-name denylist: arbitrary flags, endpoints,
+// headers, bodies and positional arguments can all contain credentials.
+const globalFlags = new Set(["--quiet", "-q", "--yes", "-y", "--no-input", "--no-pager", "--debug", "--help", "-h"]);
+const words = argv.filter((arg) => !globalFlags.has(arg));
+const groups = new Set(["agent", "artifacts", "artifact", "auth", "build", "cache", "cluster", "maintainer", "queue", "secret", "skill", "team", "config", "job", "organization", "org", "pipeline", "package", "preflight", "user"]);
+const subcommands = new Set(["install", "run", "pause", "list", "ls", "resume", "stop", "view", "download", "login", "logout", "status", "switch", "use", "token", "create", "new", "cancel", "rebuild", "watch", "registry", "update", "delete", "rm", "get", "migrate", "add", "set", "unset", "log", "reprioritize", "priority", "retry", "ssh", "unblock", "vnc", "copy", "cp", "convert", "validate", "push", "cleanup", "invite"]);
+const loggedArgv = groups.has(words[0])
+  ? [words[0], ...(subcommands.has(words[1]) ? [words[1]] : [])]
+  : [new Set(["api", "browse", "init", "update", "version"]).has(words[0]) ? words[0] : "[redacted]"];
 
 // The shim's own settings never reach bk.
 const childEnv = { ...process.env };
@@ -50,7 +62,12 @@ if (!realBk) {
 }
 
 // Without a log path, behave exactly like bk.
+const [major, minor] = process.versions.node.split(".").map(Number);
+const supportsEnvProxy = major > 24 || (major === 24 && minor >= 5) || (major === 22 && minor >= 21);
 if (!logPath) {
+  runBk(childEnv, () => {});
+} else if (!supportsEnvProxy) {
+  process.stderr.write("bk shim: Node.js 22.21 or 24.5+ required for proxy-aware logging; running bk without logging\n");
   runBk(childEnv, () => {});
 } else {
   startProxyAndRun();
@@ -100,6 +117,33 @@ function startProxyAndRun() {
     rest: new URL(process.env.BUILDKITE_REST_API_ENDPOINT || "https://api.buildkite.com/"),
     graphql: new URL(process.env.BUILDKITE_GRAPHQL_ENDPOINT || "https://graphql.buildkite.com/v1"),
   };
+  // Match Go's uppercase-first environment precedence. These agents apply
+  // proxies only to upstream traffic, not bk's loopback connection to us.
+  const proxyEnv = {
+    HTTP_PROXY: process.env.HTTP_PROXY || process.env.http_proxy,
+    HTTPS_PROXY: process.env.HTTPS_PROXY || process.env.https_proxy,
+  };
+  // Match Go's NO_PROXY rules ourselves: Node differs on CIDRs, bare-domain
+  // suffixes, port-qualified suffixes and automatic localhost/loopback bypass.
+  const bypassIPs = new BlockList();
+  bypassIPs.addSubnet("127.0.0.0", 8, "ipv4");
+  bypassIPs.addAddress("::1", "ipv6");
+  const bypassHosts = [];
+  const noProxy = process.env.NO_PROXY || process.env.no_proxy || "";
+  for (const entry of noProxy.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)) {
+    const subnet = entry.match(/^(.+)\/(\d+)$/);
+    if (subnet && isIP(subnet[1])) {
+      try { bypassIPs.addSubnet(subnet[1], Number(subnet[2]), isIP(subnet[1]) === 4 ? "ipv4" : "ipv6"); }
+      catch { /* Go ignores invalid NO_PROXY entries too. */ }
+    } else {
+      const match = isIP(entry) ? [entry, entry, ""] : entry.match(/^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/);
+      if (match) bypassHosts.push({ host: match[1].replace(/^\[|\]$/g, "").replace(/^\*\./, "."), port: match[2] || "" });
+    }
+  }
+  const agents = {
+    "http:": new http.Agent({ proxyEnv }),
+    "https:": new https.Agent({ proxyEnv }),
+  };
   let requests = 0;
   // Requests sent upstream whose response hasn't finished yet: their logOnce.
   const pending = new Set();
@@ -145,11 +189,16 @@ function startProxyAndRun() {
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
       const body = Buffer.concat(chunks);
+      const loggedURL = new URL(target);
+      loggedURL.username = "";
+      loggedURL.password = "";
+      loggedURL.search = "";
+      loggedURL.hash = "";
       const record = {
-        type: "request", invocation, argv, api,
+        type: "request", invocation, argv: loggedArgv, api,
         time: new Date(started).toISOString(),
         method: req.method,
-        url: target.toString(),
+        url: loggedURL.toString(),
       };
       if (api === "graphql") {
         try {
@@ -179,15 +228,23 @@ function startProxyAndRun() {
       // Ask for a plain body, so a JSON response can be rewritten.
       if (rewrite) delete headers["accept-encoding"];
       const client = target.protocol === "http:" ? http : https;
-      const upstreamReq = client.request(target, { method: req.method, headers }, (upstreamRes) => {
+      const hostname = target.hostname.replace(/^\[|\]$/g, "");
+      const ipVersion = isIP(hostname);
+      const port = target.port || (target.protocol === "https:" ? "443" : "80");
+      const bypass = hostname === "localhost"
+        || (ipVersion && bypassIPs.check(hostname, ipVersion === 4 ? "ipv4" : "ipv6"))
+        || bypassHosts.some((rule) => (!rule.port || rule.port === port)
+          && (rule.host === "*" || hostname === rule.host
+            || (!ipVersion && hostname.endsWith(rule.host.startsWith(".") ? rule.host : `.${rule.host}`))));
+      const upstreamReq = client.request(target, { method: req.method, headers, agent: bypass ? false : agents[target.protocol] }, (upstreamRes) => {
         status = upstreamRes.statusCode;
         // The connection can drop after the headers arrived: the body then
         // ends with "close" (and possibly "error") but no "end". Log the
         // request as failed and cut bk's connection too, so bk fails the
         // way it would have against the API directly instead of waiting
         // forever.
-        const fail = (err) => {
-          logOnce({ error: `response interrupted: ${err?.message || "connection closed"}` });
+        const fail = () => {
+          logOnce({ error: "response interrupted" });
           res.destroy();
         };
         upstreamRes.on("error", fail);
@@ -214,9 +271,10 @@ function startProxyAndRun() {
         });
       });
       upstreamReq.on("error", (err) => {
-        logOnce({ error: err.message });
+        // Transport messages may contain a credential-bearing URL or proxy.
+        logOnce({ error: err.code || "upstream request failed" });
         res.writeHead(502, { "content-type": "text/plain" });
-        res.end(`bk shim: upstream request failed: ${err.message}\n`);
+        res.end("bk shim: upstream request failed\n");
       });
       upstreamReq.end(body);
     });
@@ -233,7 +291,7 @@ function startProxyAndRun() {
     };
     runBk(env, (exitCode, durationMs) => {
       for (const finish of [...pending]) finish({ error: "cancelled: bk exited before the response finished" });
-      writeLog({ type: "invocation", invocation, argv, exit_code: exitCode, duration_ms: durationMs, requests });
+      writeLog({ type: "invocation", invocation, argv: loggedArgv, exit_code: exitCode, duration_ms: durationMs, requests });
     });
   });
 }
