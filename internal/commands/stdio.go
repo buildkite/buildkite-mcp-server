@@ -40,6 +40,7 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 		StepUploadsClient:           globals.Client.StepUploads,
 		TestRunsClient:              globals.Client.TestRuns,
 		TestSuitesClient:            globals.Client.TestSuites,
+		TestWorkflowsClient:         globals.Client.TestWorkflows,
 		TestExecutionsClient:        globals.Client.TestRuns,
 		ExecutionTraceClient:        globals.Client.Executions,
 		SlowestExecutionsClient:     globals.Client.Executions,

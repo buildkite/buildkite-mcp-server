@@ -31,6 +31,7 @@ type ToolDependencies struct {
 	StepUploadsClient           StepUploadsClient
 	TestRunsClient              TestRunsClient
 	TestSuitesClient            TestSuitesClient
+	TestWorkflowsClient         TestWorkflowsClient
 	TestExecutionsClient        TestExecutionsClient
 	ExecutionTraceClient        ExecutionTraceClient
 	SlowestExecutionsClient     SlowestExecutionsClient

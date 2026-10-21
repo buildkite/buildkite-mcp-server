@@ -742,6 +742,18 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Contains(toolNames, "list_test_suites_for_pipeline")
 	assert.Contains(toolNames, "slowest_executions_for_build")
 	assert.Contains(toolNames, "read_execution_trace")
+	for _, name := range []string{"list_test_workflows", "get_test_workflow"} {
+		assert.Contains(toolNames, name)
+		var enabled bool
+		for _, tool := range registry.GetEnabledTools([]string{ToolsetTests}, true) {
+			if tool.Tool.Name == name {
+				enabled = true
+				assert.Equal([]string{"read_suites"}, tool.RequiredScopes)
+				assert.False(tool.IsMinimumAccess())
+			}
+		}
+		assert.True(enabled, "%s should be available in read-only mode", name)
+	}
 
 	pipelines, exists := registry.Get(ToolsetPipelines)
 	assert.True(exists)

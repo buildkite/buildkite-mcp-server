@@ -1,0 +1,13 @@
+# Read-only workflow discovery against the Buildkite RSpec suite. No setup.
+matrix:
+  - id: test-workflows
+    agent: claude
+    prompt: test-workflows
+    evaluator: klaren
+    scenario:
+      id: buildkite-rspec
+      vars:
+        TARGET_ORG_SLUG: buildkite
+        TEST_SUITE_SLUG: buildkite-rspec
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source

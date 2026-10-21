@@ -98,6 +98,7 @@ steps:
             # yilong step below. Unset = each entry's `evaluator` (default
             # klaren, the full session review).
             - EVALUATOR
+            - EVALS_CONFIG
     # Secrets are scoped to this step only: the lint/test jobs execute code
     # from the pushed branch and must not see credentials.
     # NOTE: secret-mapped env var names must not start with BUILDKITE/BK
