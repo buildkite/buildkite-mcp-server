@@ -18,7 +18,8 @@ class KlarenTest(unittest.TestCase):
         source = Path(__file__).resolve().parent
         self.scripts = self.root / "scripts"
         self.scripts.mkdir()
-        for name in ("babystand.sh", "klaren.sh", "bk-tool-audit-v2.sh", "dd-metrics.sh", "dd-publish.sh"):
+        for name in ("babystand.sh", "klaren.sh", "bk-tool-audit-v2.sh", "bk-shell-commands.mjs",
+                     "api-fanout.sh", "dd-metrics.sh", "dd-publish.sh"):
             shutil.copy2(source / name, self.scripts / name)
         shutil.copytree(source.parent / "prompts", self.root / "prompts")
         self.refs = self.root / "expected/diagnose/leaked-model"
