@@ -32,7 +32,7 @@ type GetTestWorkflowArgs struct {
 func ListTestWorkflows() (mcp.Tool, mcp.ToolHandlerFor[ListTestWorkflowsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_test_workflows",
-			Description: "List configured workflows for a Buildkite Test Engine suite, newest first. Returns monitors, filters, alarm/recovery actions, and links. Use this to discover automation and labels used to mark flaky tests before querying list_tests. Follow pagination links for more workflows; use get_test_workflow to inspect one. Configuration does not prove an action ran or rank tests by flakiness.",
+			Description: "List configured workflows for a Buildkite Test Engine suite, newest first. Returns monitors, filters, alarm/recovery actions, and links. Use this to discover automation and labels used to mark flaky tests before querying list_tests. Use get_test_workflow to inspect one. Configuration does not prove an action ran or rank tests by flakiness.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Test Workflows",
 				ReadOnlyHint: true,

@@ -64,12 +64,11 @@ and links. Both require `read_suites` and suite access. Supply `org_slug` and
 `test_suite_slug` (a slug or UUID) to list workflows:
 
 ```json
-{"org_slug": "acme", "test_suite_slug": "backend", "page": 1, "per_page": 10}
+{"org_slug": "acme", "test_suite_slug": "backend"}
 ```
 
-Results are newest first in `items`, with pagination in `headers.Link`;
-defaults are page 1 and 100 results. To inspect one, call `get_test_workflow`
-with the same organization and suite and an item's `id` as `workflow_id`.
+To inspect one, call `get_test_workflow` with the same organization and suite
+and an item's `id` as `workflow_id`.
 
 Use the configured labels with `list_tests` to find marked tests; labels alone
 do not rank flakiness. Workflows describe configuration, not proof an action
