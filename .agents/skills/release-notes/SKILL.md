@@ -14,7 +14,7 @@ of recent curated releases in this repository.
    exists.
 2. Identify the comparison base from the release series and verify the full
    comparison range. Do not rely only on locally fetched tags.
-3. Inspect a recent curated release, such as `v1.19.0`, for layout and level of
+3. Inspect a recent curated release, such as `v1.27.0`, for layout and level of
    detail. Treat it as a style reference, not a fixed template.
 4. Collect every pull request in the comparison range. Read the pull request
    descriptions and changed files for user-facing changes. Inspect source at the
@@ -31,8 +31,12 @@ use the following sections when they have relevant content:
 
 - `## What's Changed`, with concise categories such as Features, Agent Guidance,
   Development and Evals, and Dependencies.
-- `## Tool Changes`, describing new tools and material changes to existing tools
-  in practical terms.
+- `## Tool Changes`, kept brief. For each new tool, give its name, toolset, a
+  one-line purpose, and its required scope, destructive status, and read-only
+  mode availability. Describe changes to existing tools in more detail when
+  callers could see different results, such as a changed default. Leave out
+  arguments, response fields, states, and validation rules that the tool
+  description already gives agents.
 - `## New Contributors`, when applicable.
 - A `**Full Changelog**` comparison link as the final line.
 

@@ -17,7 +17,6 @@ type CacheRegistriesClient interface {
 	Get(ctx context.Context, org, clusterID, registryUUID string) (buildkite.CacheRegistry, *buildkite.Response, error)
 	Create(ctx context.Context, org, clusterID string, input buildkite.CacheRegistryCreate) (buildkite.CacheRegistry, *buildkite.Response, error)
 	Update(ctx context.Context, org, clusterID, registryUUID string, input buildkite.CacheRegistryUpdate) (buildkite.CacheRegistry, *buildkite.Response, error)
-	Delete(ctx context.Context, org, clusterID, registryUUID string) (*buildkite.Response, error)
 }
 
 type ListCacheRegistriesArgs struct {
@@ -233,47 +232,6 @@ func SetDefaultCacheRegistry() (mcp.Tool, mcp.ToolHandlerFor[SetDefaultCacheRegi
 		}
 
 		return mcpTextResult(span, &cluster)
-	}, []string{"write_clusters"}
-}
-
-type DeleteCacheRegistryArgs struct {
-	ToolInput
-	OrgSlug      string `json:"org_slug"`
-	ClusterID    string `json:"cluster_id"`
-	RegistryUUID string `json:"registry_uuid" jsonschema:"Cache registry UUID; the registry slug is not accepted"`
-}
-
-type deleteCacheRegistryResult struct {
-	Deleted      bool   `json:"deleted"`
-	RegistryUUID string `json:"registry_uuid"`
-}
-
-func DeleteCacheRegistry() (mcp.Tool, mcp.ToolHandlerFor[DeleteCacheRegistryArgs, any], []string) {
-	return mcp.Tool{
-		Name:        "delete_cache_registry",
-		Description: "Delete a cache registry by UUID, including its cache metadata. The cluster's default cache registry can't be deleted; set another registry as the default first",
-		Annotations: &mcp.ToolAnnotations{
-			Title:           "Delete Cache Registry",
-			ReadOnlyHint:    false,
-			DestructiveHint: boolPtr(true),
-		},
-	}, func(ctx context.Context, request *mcp.CallToolRequest, args DeleteCacheRegistryArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.DeleteCacheRegistry")
-		defer span.End()
-
-		span.SetAttributes(
-			attribute.String("org_slug", args.OrgSlug),
-			attribute.String("cluster_id", args.ClusterID),
-			attribute.String("registry_uuid", args.RegistryUUID),
-		)
-
-		deps := DepsFromContext(ctx)
-		// The API responds 204 No Content on success, so there's no body to decode.
-		if _, err := deps.CacheRegistriesClient.Delete(ctx, args.OrgSlug, args.ClusterID, args.RegistryUUID); err != nil {
-			return handleBuildkiteError(err)
-		}
-
-		return mcpTextResult(span, &deleteCacheRegistryResult{Deleted: true, RegistryUUID: args.RegistryUUID})
 	}, []string{"write_clusters"}
 }
 

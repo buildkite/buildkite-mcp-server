@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v5"
@@ -17,7 +16,6 @@ type mockCacheRegistriesClient struct {
 	get    func(context.Context, string, string, string) (buildkite.CacheRegistry, *buildkite.Response, error)
 	create func(context.Context, string, string, buildkite.CacheRegistryCreate) (buildkite.CacheRegistry, *buildkite.Response, error)
 	update func(context.Context, string, string, string, buildkite.CacheRegistryUpdate) (buildkite.CacheRegistry, *buildkite.Response, error)
-	delete func(context.Context, string, string, string) (*buildkite.Response, error)
 }
 
 func (m *mockCacheRegistriesClient) List(ctx context.Context, org, clusterID string, opt *buildkite.CacheRegistriesListOptions) (buildkite.CacheRegistriesList, *buildkite.Response, error) {
@@ -34,10 +32,6 @@ func (m *mockCacheRegistriesClient) Create(ctx context.Context, org, clusterID s
 
 func (m *mockCacheRegistriesClient) Update(ctx context.Context, org, clusterID, registryUUID string, input buildkite.CacheRegistryUpdate) (buildkite.CacheRegistry, *buildkite.Response, error) {
 	return m.update(ctx, org, clusterID, registryUUID, input)
-}
-
-func (m *mockCacheRegistriesClient) Delete(ctx context.Context, org, clusterID, registryUUID string) (*buildkite.Response, error) {
-	return m.delete(ctx, org, clusterID, registryUUID)
 }
 
 var _ CacheRegistriesClient = (*mockCacheRegistriesClient)(nil)
@@ -292,53 +286,6 @@ func TestSetDefaultCacheRegistryReturnsAPIValidationError(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.IsError)
 	require.Contains(t, getTextResult(t, result).Text, "must be the UUID of a cache registry in this cluster")
-}
-
-func TestDeleteCacheRegistry(t *testing.T) {
-	client := &mockCacheRegistriesClient{
-		delete: func(_ context.Context, org, clusterID, registryUUID string) (*buildkite.Response, error) {
-			require.Equal(t, "acme", org)
-			require.Equal(t, "cluster-uuid", clusterID)
-			require.Equal(t, "registry-uuid", registryUUID)
-			return &buildkite.Response{Response: &http.Response{StatusCode: http.StatusNoContent}}, nil
-		},
-	}
-
-	tool, handler, scopes := DeleteCacheRegistry()
-	require.Equal(t, "delete_cache_registry", tool.Name)
-	require.False(t, tool.Annotations.ReadOnlyHint)
-	require.Equal(t, boolPtr(true), tool.Annotations.DestructiveHint)
-	require.Contains(t, tool.Description, "cache metadata")
-	require.Contains(t, tool.Description, "default cache registry can't be deleted")
-	require.Equal(t, []string{"write_clusters"}, scopes)
-
-	result, _, err := handler(cacheRegistriesContext(client), createMCPRequest(t, map[string]any{}), DeleteCacheRegistryArgs{
-		OrgSlug: "acme", ClusterID: "cluster-uuid", RegistryUUID: "registry-uuid",
-	})
-	require.NoError(t, err)
-	require.False(t, result.IsError)
-	text := getTextResult(t, result).Text
-	requireJSONPathEqual(t, text, true, "deleted")
-	requireJSONPathEqual(t, text, "registry-uuid", "registry_uuid")
-}
-
-func TestDeleteCacheRegistryRejectsDefaultRegistry(t *testing.T) {
-	client := &mockCacheRegistriesClient{
-		delete: func(context.Context, string, string, string) (*buildkite.Response, error) {
-			return nil, &buildkite.ErrorResponse{
-				Response: &http.Response{StatusCode: http.StatusUnprocessableEntity},
-				RawBody:  []byte(`{"message":"Unable to destroy cache registry. Cannot destroy default cache registry"}`),
-			}
-		},
-	}
-
-	_, handler, _ := DeleteCacheRegistry()
-	result, _, err := handler(cacheRegistriesContext(client), createMCPRequest(t, map[string]any{}), DeleteCacheRegistryArgs{
-		OrgSlug: "acme", ClusterID: "cluster-uuid", RegistryUUID: "registry-uuid",
-	})
-	require.NoError(t, err)
-	require.True(t, result.IsError)
-	require.Contains(t, getTextResult(t, result).Text, "Cannot destroy default cache registry")
 }
 
 func cacheRegistriesContext(client CacheRegistriesClient) context.Context {

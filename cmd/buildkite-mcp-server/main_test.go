@@ -4,9 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/alecthomas/kong"
 	"github.com/buildkite/buildkite-mcp-server/internal/headerpassthrough"
 	buildkitetools "github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/recording"
@@ -17,6 +19,44 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMinimumAccessCLI(t *testing.T) {
+	for _, command := range []string{"stdio", "http"} {
+		for _, tt := range []struct {
+			name     string
+			env      string
+			flags    []string
+			minimum  bool
+			readOnly bool
+		}{
+			{name: "default unchanged"},
+			{name: "flag", flags: []string{"--minimum-access"}, minimum: true},
+			{name: "environment", env: "true", minimum: true},
+			{name: "explicit false overrides environment", env: "true", flags: []string{"--minimum-access=false"}},
+			{name: "both restrictions", flags: []string{"--minimum-access", "--read-only"}, minimum: true, readOnly: true},
+		} {
+			t.Run(command+"/"+tt.name, func(t *testing.T) {
+				t.Setenv("BUILDKITE_MINIMUM_ACCESS", tt.env)
+				if tt.env == "" {
+					require.NoError(t, os.Unsetenv("BUILDKITE_MINIMUM_ACCESS"))
+				}
+				t.Setenv("BUILDKITE_READ_ONLY", "false")
+				model := cli
+				parser, err := kong.New(&model)
+				require.NoError(t, err)
+				_, err = parser.Parse(append([]string{command}, tt.flags...))
+				require.NoError(t, err)
+				if command == "stdio" {
+					require.Equal(t, tt.minimum, model.Stdio.MinimumAccess)
+					require.Equal(t, tt.readOnly, model.Stdio.ReadOnly)
+				} else {
+					require.Equal(t, tt.minimum, model.HTTP.MinimumAccess)
+					require.Equal(t, tt.readOnly, model.HTTP.ReadOnly)
+				}
+			})
+		}
+	}
+}
 
 func TestResolveAPITokenForModePreservesExistingAuthentication(t *testing.T) {
 	t.Run("static token", func(t *testing.T) {

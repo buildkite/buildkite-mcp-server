@@ -51,6 +51,38 @@ errors leave the job visible with status `unavailable`; HTTP 401 propagates for
 reauthentication. Set `include_job_errors: false` to skip these requests. Existing
 log, annotation, and test defaults are unchanged.
 
+## Retrying builds with limited permissions
+
+The `retries` toolset supports investigating failures and retrying jobs without
+broader build-write access. It includes `list_builds`, `get_build`,
+`wait_for_build`, `list_jobs`, `get_job`, `search_logs`, `tail_logs`, `read_logs`,
+`retry_job`, and `retry_failed_jobs`. It requires `read_builds`,
+`read_build_logs`, and `retry_builds` scopes, not `write_builds`.
+
+```bash
+buildkite-mcp-server stdio --enabled-toolsets retries
+```
+
+`retry_failed_jobs` retries only infrastructure failures; use its `dry_run`
+option to inspect the proposed retries without executing them. `retry_job`
+retries a specific job. Both are mutating tools and are excluded by
+`--read-only`. The toolset does not expose create, rebuild, cancel, or unblock
+operations. Existing retry tools remain available in `builds`; selecting
+`builds` or `all` still requires `write_builds` for the other mutations.
+
+The Buildkite API must have the `RetryBuildsScope` feature enabled for the token
+owner to accept `retry_builds`; existing `write_builds` tokens remain accepted.
+Hosted MCP OAuth can select this toolset using `/mcp/x/retries` once the hosted
+server adopts a release containing it. Selecting toolsets through request
+headers does not change an existing token's OAuth scopes.
+
+For library consumers, `WithDisabledToolsets` and the HTTP factory's disabled
+toolsets exclude all members of those toolsets, even through overlapping
+groups. For example, disabling `logs` also removes log tools from `retries`;
+disabling `retries` removes its inspection and retry tools from other groups.
+
+---
+
 ## Comparing builds
 
 The read-only `compare_builds` tool in the `investigations` toolset answers questions such as “What changed since this build last worked on main?” Supply `org_slug`, `pipeline_slug`, and the target `build_number`. It selects the most recently created earlier build that is currently passed on the same pipeline and exact branch. It does not require that the baseline had already passed when the target started. Supply `baseline_build_number` to compare against a specific build in that pipeline instead, including a failed build or one on another branch.
@@ -59,9 +91,9 @@ The response identifies the baseline and selection rule, counts outcomes across 
 
 Execution times and deltas cover final attempts only. Scheduling time is `scheduled_at` to `started_at`, not dependency or manual waiting. These are not build wall-clock comparisons or total retry costs. Missing or inconsistent timestamps omit the corresponding timing. Unfinished builds are explicitly identified as changing snapshots.
 
-Transitions between soft and hard failures are reported as `state_changed`, even when both jobs have state `failed`. A passed baseline build can contain soft-failed jobs.
+Any change in `soft_failed` is reported as `state_changed`: transitions between soft and hard failures, even when both jobs have state `failed`, and between passed and soft-failed jobs, which are never reported as `newly_failing` or `recovered` because a soft failure does not block the build. A passed baseline build can contain soft-failed jobs.
 
-By default, up to three newly failing jobs include their last 20 log entries, bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison, except HTTP 401 authentication errors, which propagate through the server's reauthentication path. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
+By default, up to three newly blocking failures include their last 20 log entries: `newly_failing` jobs first, then `state_changed` jobs that are now hard failures, such as a job that soft-failed in the baseline. Logs are bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison, except HTTP 401 authentication errors, which propagate through the server's reauthentication path. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
 
 Baseline discovery searches at most 500 candidates. If none is found, the response says no comparison was performed and asks for an explicit baseline. Job inventories are limited to 1,000 jobs per build; larger inventories return an error instead of misleading partial added/removed results. Output omissions are reported separately from the complete outcome counts.
 

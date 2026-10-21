@@ -25,6 +25,14 @@ func (td ToolDefinition) IsReadOnly() bool {
 	return td.Tool.Annotations.ReadOnlyHint
 }
 
+// IsMinimumAccess reports whether a read-only tool needs only the documented
+// minimum token scopes. Read-only tools requiring no API scopes are included.
+func (td ToolDefinition) IsMinimumAccess() bool {
+	return td.IsReadOnly() && !slices.ContainsFunc(td.RequiredScopes, func(scope string) bool {
+		return scope != "read_builds" && scope != "read_pipelines" && scope != "read_user"
+	})
+}
+
 // Toolset represents a logical grouping of related tools
 type Toolset struct {
 	Name        string
@@ -97,16 +105,19 @@ func (tr *ToolsetRegistry) Get(name string) (Toolset, bool) {
 	return toolset, exists
 }
 
-// GetToolsForToolsets returns tools from specified toolset names, optionally filtering for read-only
+// GetToolsForToolsets returns unique tools from specified toolset names, optionally filtering for read-only
 func (tr *ToolsetRegistry) GetToolsForToolsets(toolsetNames []string, readOnlyMode bool) []ToolDefinition {
 	var tools []ToolDefinition
+	seen := make(map[string]bool)
 
 	for _, name := range toolsetNames {
 		if toolset, exists := tr.toolsets[name]; exists {
-			if readOnlyMode {
-				tools = append(tools, toolset.GetReadOnlyTools()...)
-			} else {
-				tools = append(tools, toolset.GetAllTools()...)
+			for _, tool := range toolset.Tools {
+				if (readOnlyMode && !tool.IsReadOnly()) || seen[tool.Tool.Name] {
+					continue
+				}
+				seen[tool.Tool.Name] = true
+				tools = append(tools, tool)
 			}
 		}
 	}
@@ -135,30 +146,24 @@ func (tr *ToolsetRegistry) expandAllToolsets(enabled []string) []string {
 
 // GetEnabledTools returns tools from enabled toolsets, optionally filtering for read-only
 func (tr *ToolsetRegistry) GetEnabledTools(enabledToolsets []string, readOnlyMode bool) []ToolDefinition {
-	var tools []ToolDefinition
+	return tr.GetToolsForToolsets(tr.expandAllToolsets(enabledToolsets), readOnlyMode)
+}
 
-	enabledToolsets = tr.expandAllToolsets(enabledToolsets)
-
-	for _, toolsetName := range enabledToolsets {
-		if toolset, exists := tr.toolsets[toolsetName]; exists {
-			if readOnlyMode {
-				tools = append(tools, toolset.GetReadOnlyTools()...)
-			} else {
-				tools = append(tools, toolset.GetAllTools()...)
-			}
-		}
+// GetEnabledToolsWithExclusions excludes every tool belonging to disabled
+// toolsets, even when another enabled toolset contains the same tool.
+func (tr *ToolsetRegistry) GetEnabledToolsWithExclusions(enabledToolsets []string, readOnlyMode bool, disabledToolsets []string) []ToolDefinition {
+	blocked := make(map[string]bool)
+	for _, tool := range tr.GetToolsForToolsets(tr.expandAllToolsets(disabledToolsets), false) {
+		blocked[tool.Tool.Name] = true
 	}
-
-	return tools
+	return slices.DeleteFunc(tr.GetEnabledTools(enabledToolsets, readOnlyMode), func(tool ToolDefinition) bool {
+		return blocked[tool.Tool.Name]
+	})
 }
 
 // GetAllTools returns all tools across all toolsets
 func (tr *ToolsetRegistry) GetAllTools() []ToolDefinition {
-	var tools []ToolDefinition
-	for _, toolset := range tr.toolsets {
-		tools = append(tools, toolset.Tools...)
-	}
-	return tools
+	return tr.GetToolsForToolsets(tr.List(), false)
 }
 
 // ToolsetMetadata provides information about a toolset for introspection
@@ -237,20 +242,22 @@ func NewTool(tool mcp.Tool, register func(s *mcp.Server), scopes []string) ToolD
 }
 
 const (
-	ToolsetAll             = "all" // Special name to enable all toolsets
-	ToolsetClusters        = "clusters"
-	ToolsetClusterSecrets  = "cluster_secrets"
-	ToolsetCacheRegistries = "cache_registries"
-	ToolsetAgents          = "agents"
-	ToolsetPipelines       = "pipelines"
-	ToolsetBuilds          = "builds"
-	ToolsetArtifacts       = "artifacts"
-	ToolsetLogs            = "logs"
-	ToolsetTests           = "tests"
-	ToolsetAnnotations     = "annotations"
-	ToolsetInvestigations  = "investigations"
-	ToolsetUser            = "user"
-	ToolsetSkills          = "skills"
+	ToolsetAll                   = "all" // Special name to enable all toolsets
+	ToolsetClusters              = "clusters"
+	ToolsetClusterSecrets        = "cluster_secrets"
+	ToolsetCacheRegistries       = "cache_registries"
+	ToolsetAgents                = "agents"
+	ToolsetPipelines             = "pipelines"
+	ToolsetBuilds                = "builds"
+	ToolsetRetries               = "retries"
+	ToolsetArtifacts             = "artifacts"
+	ToolsetLogs                  = "logs"
+	ToolsetTests                 = "tests"
+	ToolsetAnnotations           = "annotations"
+	ToolsetInvestigations        = "investigations"
+	ToolsetUser                  = "user"
+	ToolsetRepositoryConnections = "repository_connections"
+	ToolsetSkills                = "skills"
 )
 
 var ValidToolsets = []string{
@@ -261,12 +268,14 @@ var ValidToolsets = []string{
 	ToolsetAgents,
 	ToolsetPipelines,
 	ToolsetBuilds,
+	ToolsetRetries,
 	ToolsetArtifacts,
 	ToolsetLogs,
 	ToolsetTests,
 	ToolsetAnnotations,
 	ToolsetInvestigations,
 	ToolsetUser,
+	ToolsetRepositoryConnections,
 	ToolsetSkills,
 }
 
@@ -362,7 +371,6 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CreateCacheRegistry),
 				newToolDef(buildkite.UpdateCacheRegistry),
 				newToolDef(buildkite.SetDefaultCacheRegistry),
-				newToolDef(buildkite.DeleteCacheRegistry),
 			},
 		},
 		ToolsetAgents: {
@@ -406,7 +414,25 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.GetJob),
 				newToolDef(buildkite.UnblockJob),
 				newToolDef(buildkite.RetryJob),
+				newToolDef(buildkite.RetryFailedJobs),
+				newToolDef(buildkite.CancelJob),
 				newToolDef(buildkite.GetJobEnvironmentVariables),
+			},
+		},
+		ToolsetRetries: {
+			Name:        "Build Retries",
+			Description: "Tools for inspecting builds, jobs and logs and retrying jobs without broader build write access",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListBuilds),
+				newToolDef(buildkite.GetBuild),
+				newToolDef(buildkite.WaitForBuild),
+				newToolDef(buildkite.ListJobs),
+				newToolDef(buildkite.GetJob),
+				newToolDef(buildkite.SearchLogs),
+				newToolDef(buildkite.TailLogs),
+				newToolDef(buildkite.ReadLogs),
+				newToolDef(buildkite.RetryJob),
+				newToolDef(buildkite.RetryFailedJobs),
 			},
 		},
 		ToolsetArtifacts: {
@@ -465,6 +491,14 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CurrentUser),
 				newToolDef(buildkite.UserTokenOrganization),
 				newToolDef(buildkite.AccessToken),
+			},
+		},
+		ToolsetRepositoryConnections: {
+			Name:        "Repository Connections",
+			Description: "Tools for inspecting source control repository connections and their GitHub provider rate limits",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListRepositoryConnections),
+				newToolDef(buildkite.GetRepositoryConnection),
 			},
 		},
 		ToolsetSkills: {

@@ -36,6 +36,11 @@
 #                           null metrics are simply not submitted, so gaps in
 #                           Datadog mean "not measured", never zero.
 #   BUILDKITE_BUILD_NUMBER  optional                       -> tag buildkite_build:
+#   EVALUATOR               optional                       -> tag evaluator:
+#   KLAREN_FILE             optional path to the run's klaren.sh verdicts.
+#                           Missing/empty = no klaren rubric series.
+#   YILONG_FILE             optional path to the run's yilong.sh verdicts.
+#                           Missing/empty = no yilong rubric series.
 #
 # Submitted series (all gauges; the point timestamp is DD_TIMESTAMP — the
 # run's end — falling back to submission time; that carries the "datetime"
@@ -49,6 +54,11 @@
 #   <prefix>.tool_calls.total
 #   <prefix>.tool_calls.buildkite_mcp   calls with the mcp__ prefix
 #   <prefix>.tokens.input / .output / .cache_read / .cache_write
+#   <prefix>.klaren.<question>          rubric score (0 / 0.5 / 1), omitted
+#                                       when n/a or undetermined
+#   <prefix>.klaren.undetermined        questions the reviewer could not grade
+#   <prefix>.yilong.<question>          Jev grade (0 / 0.5 / 1), omitted when n/a or undetermined
+#   <prefix>.yilong.undetermined        questions Jev could not evaluate
 #
 set -euo pipefail
 
@@ -75,6 +85,22 @@ if [[ -n "${METRICS_FILE:-}" && -s "${METRICS_FILE:-}" ]]; then
         echo "dd-metrics: $METRICS_FILE is not valid JSON; publishing identity/duration series only." >&2
     fi
 fi
+KLAREN_JSON="{}"
+if [[ -n "${KLAREN_FILE:-}" && -s "${KLAREN_FILE:-}" ]]; then
+    if jq -e . "$KLAREN_FILE" >/dev/null 2>&1; then
+        KLAREN_JSON="$(cat "$KLAREN_FILE")"
+    else
+        echo "dd-metrics: $KLAREN_FILE is not valid JSON; skipping klaren series." >&2
+    fi
+fi
+YILONG_JSON="{}"
+if [[ -n "${YILONG_FILE:-}" && -s "${YILONG_FILE:-}" ]]; then
+    if jq -e . "$YILONG_FILE" >/dev/null 2>&1; then
+        YILONG_JSON="$(cat "$YILONG_FILE")"
+    else
+        echo "dd-metrics: $YILONG_FILE is not valid JSON; skipping yilong series." >&2
+    fi
+fi
 
 # Point timestamp: prefer the recorded run end (CI publishes after the whole
 # matrix finishes). Clamp into Datadog's accepted window — points older than
@@ -98,8 +124,11 @@ PAYLOAD="$(jq -n \
     --arg goal     "${GOAL_ACHIEVED:-unknown}" \
     --arg duration "${EVAL_DURATION_SECONDS:-}" \
     --arg build    "${BUILDKITE_BUILD_NUMBER:-}" \
+    --arg evaluator "${EVALUATOR:-}" \
     --argjson now  "$TS" \
-    --argjson m    "$METRICS_JSON" '
+    --argjson m    "$METRICS_JSON" \
+    --argjson y    "$YILONG_JSON" \
+    --argjson k    "$KLAREN_JSON" '
     # type 3 = gauge in the v2 series API. A null value emits nothing: absent
     # in Datadog must mean "not measured" (cursor tokens), never zero.
     def gauge($name; $v; $tags):
@@ -109,7 +138,8 @@ PAYLOAD="$(jq -n \
       end;
     ([ "entry:\($entry)", "prompt:\($prompt)", "agent:\($agent)",
        "model:\($model)", "goal:\($goal)" ]
-     + (if $build != "" then ["buildkite_build:\($build)"] else [] end)) as $tags
+     + (if $build != "" then ["buildkite_build:\($build)"] else [] end)
+     + (if $evaluator != "" then ["evaluator:\($evaluator)"] else [] end)) as $tags
     | ($m.tokens // {}) as $tok
     # claude reports the cache-write split (5m/1h); cursor-cloud a single
     # cache_write. Publish one combined series so dashboards compare agents.
@@ -127,7 +157,13 @@ PAYLOAD="$(jq -n \
         gauge("tokens.input"; ($tok.input // null); $tags),
         gauge("tokens.output"; ($tok.output // null); $tags),
         gauge("tokens.cache_read"; ($tok.cache_read // null); $tags),
-        gauge("tokens.cache_write"; (if ($m.tokens // null) == null then null else $cw end); $tags)
+        gauge("tokens.cache_write"; (if ($m.tokens // null) == null then null else $cw end); $tags),
+        ($k.questions // [] | .[] | gauge("klaren.\(.key)"; .score; $tags)),
+        (if ($k.questions // null) == null then empty
+         else gauge("klaren.undetermined"; ([$k.questions[] | select(.verdict == "undetermined")] | length); $tags) end),
+        ($y.questions // [] | .[] | gauge("yilong.\(.key)"; .score; $tags)),
+        (if ($y.questions // null) == null then empty
+         else gauge("yilong.undetermined"; ([$y.questions[] | select(.verdict == "undetermined")] | length); $tags) end)
       ]}
 ')"
 

@@ -36,6 +36,13 @@
 #   prompt        Name of a template under prompts/<prompt>.md. Rendered with the
 #                 substitution vars below (Go-style {{.KEY}} placeholders).
 #   scenario:
+#     id          Stable name for the scenario's inputs and expected outcome,
+#                 shared across agent/model variants. References live under
+#                 expected/<prompt>/<scenario.id>/{root_cause,fix}.md. Use a new
+#                 id when changing the target build or expected failure/fix.
+#                 No id means no reference lookup and n/a rubric grades.
+#                 Letters, digits, dot, underscore and hyphen only; excludes
+#                 the path components '.' and '..'.
 #     setup       Optional bash run BEFORE the prompt to establish state (e.g.
 #                 create a branch, push it). It runs inside babystand.sh's clone
 #                 of the EVAL repo (EVAL_REPO_SLUG), under `set -euo pipefail`
@@ -44,6 +51,24 @@
 #                 environment. To pass values on to the prompt, append KEY=VALUE
 #                 lines to the file at $SCENARIO_VARS_FILE.
 #     vars        Static KEY=VALUE map substituted into the prompt template.
+#   evaluator     Optional. How the agent's run is judged afterwards:
+#                 'yilong' (default) — scripts/yilong.sh, in its own pipeline
+#                 step: three cheap Jev (TypeSafe) scored questions, each
+#                 recorded as a verdict (and a mcp_eval.yilong.* Datadog score
+#                 of 0 / 0.5 / 1), or undetermined when the API call fails:
+#                   conclusion     bollocks | sorta | yeah-baby
+#                   investigation  homer-simpson | scooby-doo | sherlock
+#                   fix            airshot | duct-tape | sweeet
+#                 The shared rubric lives in prompts/rubric.json. Jev only
+#                 compares supplied evidence, so references are required in
+#                 expected/<prompt>/<scenario.id>/{root_cause,fix}.md
+#                 (n/a without them). They live outside
+#                 this file so they never reach the agent's container (the
+#                 image copies evals.yaml, not expected/).
+#                 'klaren' — the full klaren session review (prompts/klaren.md):
+#                 detailed and useful, but slow and token-hungry, so run it on
+#                 demand. Set EVALUATOR=klaren when creating a build to use it
+#                 for every entry without editing this file.
 #   kill_agent_on_complete  Optional, cursor-cloud only. Whether to DELETE the
 #                 one-shot cloud agent when the run ends (any outcome — success,
 #                 failure, or abort). Default: true, because the agent is
@@ -85,29 +110,30 @@
 
 matrix:
   # The original babystand scenario: drive a red CI branch to green.
-  - id: red-to-green-complete
-    agent: claude
-    model: claude-opus-4-8
-    prompt: red-to-green-complete
-    scenario:
-      setup: |
-        # Establish the red CI signal: branch from the deliberately-broken base
-        # and push it (the branch push triggers its own Quality Checks build,
-        # which is what the agent then fixes). The branch is pushed to the EVAL
-        # repo (EVAL_REPO_SLUG — this setup runs inside babystand.sh's clone of
-        # it), so its builds run on the EVAL org's pipeline; scenario branches
-        # never exist in the repo hosting this eval, so the eval pipeline cannot
-        # recurse (see the CROSS-REPO note in .buildkite/pipeline.evals.yml).
-        SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
-        git config user.email "secret-agent@llm.com" && git config user.name "secret-agent"
-        git fetch
-        git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
-        git push -u origin HEAD
-        # Hand the generated branch name to the prompt template.
-        echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
-    mcp_version: source
-    # compare_base/compare_target take their defaults: the entry's bundle from
-    # the last successful main build vs this run.
+  #- id: red-to-green-complete
+  #  agent: claude
+  #  model: claude-opus-4-8
+  #  prompt: red-to-green-complete
+  #  scenario:
+  #    id: test-broken-and-failed-jobs
+  #    setup: |
+  #      # Establish the red CI signal: branch from the deliberately-broken base
+  #      # and push it (the branch push triggers its own Quality Checks build,
+  #      # which is what the agent then fixes). The branch is pushed to the EVAL
+  #      # repo (EVAL_REPO_SLUG — this setup runs inside babystand.sh's clone of
+  #      # it), so its builds run on the EVAL org's pipeline; scenario branches
+  #      # never exist in the repo hosting this eval, so the eval pipeline cannot
+  #      # recurse (see the CROSS-REPO note in .buildkite/pipeline.evals.yml).
+  #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
+  #      git config user.email "secret-agent@llm.com" && git config user.name "secret-agent"
+  #      git fetch
+  #      git checkout -b "$SCENARIO_BRANCH" origin/test-broken-and-failed-jobs
+  #      git push -u origin HEAD
+  #      # Hand the generated branch name to the prompt template.
+  #      echo "SCENARIO_BRANCH=$SCENARIO_BRANCH" >> "$SCENARIO_VARS_FILE"
+  #  mcp_version: source
+  #  # compare_base/compare_target take their defaults: the entry's bundle from
+  #  # the last successful main build vs this run.
 
   # The same scenario driven by the Cursor CLI instead of Claude Code — lets a
   # build compare how two different agents fare against the same MCP server.
@@ -120,6 +146,7 @@ matrix:
   #  model: claude-opus-4-8-thinking-high
   #  prompt: red-to-green-complete
   #  scenario:
+  #    id: test-broken-and-failed-jobs
   #    setup: |
   #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
   #      git fetch
@@ -143,6 +170,7 @@ matrix:
   #  model: composer-2.5
   #  prompt: red-to-green-complete
   #  scenario:
+  #    id: test-broken-and-failed-jobs
   #    setup: |
   #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
   #      git fetch
@@ -161,16 +189,17 @@ matrix:
   # compared purely via its runs/ bundle.
   # WARN: This is a difficult scenario for MCP to resolve, and it takes a while
   #       to run. Uncomment if you want to test MCP against it.
-  #- id: red-to-green-comment-only
-  #  agent: claude
-  #  model: claude-opus-4-8
-  #  prompt: red-to-green-comment-only
-  #  scenario:
-  #    vars:
-  #      BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
-  #  # The build above lives in the `buildkite` org, not the default eval org.
-  #  token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
-  #  mcp_version: source
+  - id: red-to-green-comment-only
+    agent: claude
+    model: claude-opus-4-8
+    prompt: red-to-green-comment-only
+    scenario:
+      id: buildkite-204234
+      vars:
+        BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+    # The build above lives in the `buildkite` org, not the default eval org.
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
 
   # A no-build scenario: analyze an existing build and propose speedups. Produces
   # only a written proposal — no git push, no new Buildkite build — so it is
@@ -182,6 +211,7 @@ matrix:
   #   model: claude-opus-4-8
   #   prompt: analyze-build
   #   scenario:
+  #     id: anothertest-677
   #     vars:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source

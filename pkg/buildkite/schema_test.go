@@ -97,6 +97,11 @@ func TestWaitForBuildArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 }
 
+func TestRetryFailedJobsArgsSchema(t *testing.T) {
+	req := sortedRequired[RetryFailedJobsArgs](t)
+	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
+}
+
 func TestGetBuildFailureSummaryArgsSchema(t *testing.T) {
 	s := schemaFor[GetBuildFailureSummaryArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, sortedRequired[GetBuildFailureSummaryArgs](t))
@@ -174,7 +179,6 @@ func TestCacheRegistryArgsSchemas(t *testing.T) {
 	require.Equal(t, []string{"cluster_id", "name", "org_slug"}, sortedRequired[CreateCacheRegistryArgs](t))
 	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[UpdateCacheRegistryArgs](t))
 	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[SetDefaultCacheRegistryArgs](t))
-	require.Equal(t, []string{"cluster_id", "org_slug", "registry_uuid"}, sortedRequired[DeleteCacheRegistryArgs](t))
 
 	for _, schema := range []*jsonschema.Schema{schemaFor[CreateCacheRegistryArgs](t), schemaFor[UpdateCacheRegistryArgs](t)} {
 		require.Contains(t, schema.Properties["policy"].Types, "object")
@@ -187,6 +191,11 @@ func TestCacheRegistryArgsSchemas(t *testing.T) {
 	updateSchema := schemaFor[UpdateCacheRegistryArgs](t)
 	require.Equal(t, "string", updateSchema.Properties["name"].Type)
 	require.Empty(t, updateSchema.Properties["name"].Types)
+}
+
+func TestRepositoryConnectionArgsSchemas(t *testing.T) {
+	require.Equal(t, []string{"org_slug"}, sortedRequired[ListRepositoryConnectionsArgs](t))
+	require.Equal(t, []string{"connection_id", "org_slug"}, sortedRequired[GetRepositoryConnectionArgs](t))
 }
 
 func TestCreateBuildArgsSchema(t *testing.T) {
@@ -401,6 +410,10 @@ func TestUnblockJobArgsSchema(t *testing.T) {
 	for _, opt := range []string{"fields"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+}
+
+func TestCancelJobArgsSchema(t *testing.T) {
+	require.Equal(t, []string{"job_id", "org_slug"}, sortedRequired[CancelJobArgs](t))
 }
 
 func TestListJobsArgsSchemaOptionalFields(t *testing.T) {

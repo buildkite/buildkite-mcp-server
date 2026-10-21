@@ -371,8 +371,13 @@ run_cursor_cloud() {
 # failure in one entry logs and returns without aborting the rest of the matrix.
 run_entry() {
     local entry="$1"
-    local ENTRY_ID AGENT MODEL PROMPT_NAME MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE
+    local ENTRY_ID AGENT MODEL PROMPT_NAME SCENARIO_ID MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE ENTRY_EVALUATOR
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
+    ENTRY_EVALUATOR="${EVALUATOR:-$(jq -r '.evaluator // "yilong"' <<<"$entry")}"
+    case "$ENTRY_EVALUATOR" in
+        yilong|klaren) ;;
+        *) echo "ERROR: [$ENTRY_ID] unknown evaluator '$ENTRY_EVALUATOR' (use yilong or klaren)" >&2; return 1 ;;
+    esac
     AGENT=$(jq -r '.agent // "claude"'        <<<"$entry")
     MODEL=$(jq -r '.model // ""'              <<<"$entry")
     # Model ids are per-agent namespaces (cursor rejects claude-* ids; see
@@ -389,6 +394,7 @@ run_entry() {
         esac
     fi
     PROMPT_NAME=$(jq -r '.prompt'             <<<"$entry")
+    SCENARIO_ID=$(jq -r '.scenario.id // ""'  <<<"$entry")
     MCP_VERSION=$(jq -r '.mcp_version // "source"' <<<"$entry")
     SETUP=$(jq -r '.scenario.setup // ""'     <<<"$entry")
     COMPARE_BASE=$(jq -r '.compare_base // ""'   <<<"$entry")
@@ -485,6 +491,9 @@ run_entry() {
         fi
     fi
 
+    # Capture the scenario baseline before the evaluated agent changes it.
+    local SETUP_SHA; SETUP_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+
     # --- Assemble substitution vars: globals + scenario.vars + setup vars ---
     local VARS_FILE; VARS_FILE="$(mktemp)"
     {
@@ -562,6 +571,19 @@ run_entry() {
         echo "*** [$ENTRY_ID] scenario branch '$SCENARIO_BRANCH_VAL' latest build state: $FINAL_BUILD_STATE (goal_achieved: $GOAL_ACHIEVED)"
     fi
 
+    # Both evaluators receive the complete pushed patch, never an excerpt.
+    local KLAREN_DIFF="$PREFIX.diff.patch" KLAREN_DIFF_STATUS="not_applicable"
+    if [[ -n "$SCENARIO_BRANCH_VAL" ]]; then
+        KLAREN_DIFF_STATUS="unavailable"
+        if [[ -n "$SETUP_SHA" ]] && git fetch --quiet origin "$SCENARIO_BRANCH_VAL" \
+            && git diff "$SETUP_SHA" FETCH_HEAD > "$KLAREN_DIFF"; then
+            KLAREN_DIFF_STATUS="available"
+        else
+            rm -f "$KLAREN_DIFF"
+            echo "WARNING: [$ENTRY_ID] could not capture the complete pushed diff; fix score will be withheld" >&2
+        fi
+    fi
+
     # --- Datadog run metadata ------------------------------------------------
     # SECURITY: DD_API_KEY must never exist in this process or any of its
     # children while the evaluated agent runs (see the header note). This
@@ -583,9 +605,10 @@ run_entry() {
         --arg model    "${MODEL:-default}" \
         --arg goal     "$GOAL_ACHIEVED" \
         --arg duration "$EVAL_ELAPSED_SECS" \
+        --arg evaluator "$ENTRY_EVALUATOR" \
         --argjson end_ts "$(date +%s)" \
         '{entry: $entry, prompt: $prompt, agent: $agent, model: $model,
-          goal: $goal, duration_seconds: $duration, end_ts: $end_ts}' \
+          goal: $goal, duration_seconds: $duration, evaluator: $evaluator, end_ts: $end_ts}' \
         > "$PREFIX.dd.json"; then
         echo "WARNING: [$ENTRY_ID] failed to write $PREFIX.dd.json; Datadog publish will skip this entry" >&2
     fi
@@ -594,55 +617,40 @@ run_entry() {
     # --- Klaren review (best-effort) ---------------------------------------
     # Klaren always runs on claude regardless of the entry's agent: it is the
     # judge, not the subject under test, and holding the reviewer fixed keeps
-    # reviews comparable across agents. It only reads the transcript file, so
-    # cursor's stream-json capture works as input too.
-    # Use the harness copy of the prompt, not the checked-out subject-under-test
-    # copy.
-    echo "--- :female-detective: [$ENTRY_ID] klaren review"
-    local KLAREN_LOG="/tmp/klaren-$RUN_KEY.log"
-    local KLAREN_PROMPT_FILE KLAREN_RESULT_FILE=""
-    KLAREN_PROMPT_FILE="$(mktemp)"
-    {
-        cat "$ROOT_DIR/prompts/klaren.md"
-        echo
-        echo "The LLM session log file to analyze is: $TRANSCRIPT"
-    } > "$KLAREN_PROMPT_FILE"
-    # klaren reads the transcript and inspects the repo; it needs read/search
-    # tools. Same permission posture as the eval run above: CI bypasses via
-    # claude.sh; local bypasses only when LOCAL_BYPASS_PERMISSION=true, else an
-    # allowlist (no MCP entry — klaren analyzes the transcript file, not
-    # Buildkite).
-    local KLAREN_ARGS=( --output-format stream-json --verbose )
-    if [[ "${RUN_IN_CI:-false}" != "true" ]]; then
-        if [[ "$LOCAL_BYPASS_PERMISSION" == "true" ]]; then
-            KLAREN_ARGS+=(--permission-mode bypassPermissions)
-        else
-            KLAREN_ARGS+=(--allowedTools "Read" "Grep" "Glob" "Bash")
-        fi
-    fi
-    local KLAREN_START; KLAREN_START=$(date +%s)
-    if [[ "${RUN_IN_CI:-false}" == "true" ]]; then
-        if ! ANNOTATION_CONTEXT_PREFIX="klaren-$ENTRY_ID" \
-            "$SCRIPT_DIR/claude.sh" "$KLAREN_PROMPT_FILE" "${KLAREN_ARGS[@]}" | tee "$KLAREN_LOG"; then
+    # reviews comparable across agents. Use the harness prompt and rubric,
+    # not copies from the checked-out subject under test.
+    local KLAREN_ELAPSED=""
+    if [[ "$ENTRY_EVALUATOR" == "klaren" ]]; then
+        echo "--- :female-detective: [$ENTRY_ID] klaren review"
+        local KLAREN_START; KLAREN_START=$(date +%s)
+        if ! ENTRY_ID="$ENTRY_ID" AGENT="$AGENT" FINAL_BUILD_STATE="$FINAL_BUILD_STATE" \
+            PROMPT_NAME="$PROMPT_NAME" SCENARIO_ID="$SCENARIO_ID" DIFF_STATUS="$KLAREN_DIFF_STATUS" \
+            "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX"; then
             echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
         fi
-        KLAREN_RESULT_FILE=$(sed -n 's/^CLAUDE_RESULT_FILE=//p' "$KLAREN_LOG" | tail -n1)
-    else
-        if ! claude -p "$(cat "$KLAREN_PROMPT_FILE")" --mcp-config "$ROOT_DIR/mcp.json" "${KLAREN_ARGS[@]}" | tee "$KLAREN_LOG"; then
-            echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
-        fi
-        KLAREN_RESULT_FILE="$(mktemp)"
-        jq -r 'select(.type == "result") | .result // empty' "$KLAREN_LOG" > "$KLAREN_RESULT_FILE" 2>/dev/null || true
+        KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
+        echo "*** [$ENTRY_ID] KLAREN ELAPSED: $KLAREN_ELAPSED"
     fi
-    local KLAREN_ELAPSED; KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
-    echo "*** [$ENTRY_ID] KLAREN ELAPSED: $KLAREN_ELAPSED"
 
     # --- Write the run bundle to <harness>/runs/<id>/<id>-<datetime>.<ext> ---
     [[ -s "$EVAL_RESULT_FILE"   ]] && cp "$EVAL_RESULT_FILE"   "$PREFIX.eval-final.md"     || : > "$PREFIX.eval-final.md"
     [[ -s "$AUDIT_METRICS_FILE" ]] && cp "$AUDIT_METRICS_FILE" "$PREFIX.metrics.json"      || : > "$PREFIX.metrics.json"
     [[ -s "$AUDIT_TOOLS_FILE"   ]] && cp "$AUDIT_TOOLS_FILE"   "$PREFIX.tools.txt"         || : > "$PREFIX.tools.txt"
-    [[ -s "$KLAREN_RESULT_FILE" ]] && cp "$KLAREN_RESULT_FILE" "$PREFIX.klaren.md"         || : > "$PREFIX.klaren.md"
+    # klaren.sh writes the review, rubric verdicts and candidate references
+    # directly into this bundle before its artifacts are uploaded.
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
+    if [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
+        # The separate judge step reads sibling artifacts; no absolute container paths.
+        if ! jq -n --arg entry "$ENTRY_ID" --arg run_key "$RUN_KEY" \
+            --arg prompt "$PROMPT_NAME" --arg scenario "$SCENARIO_ID" --arg agent "$AGENT" \
+            --rawfile goal "$RENDERED" --arg state "$FINAL_BUILD_STATE" \
+            --arg diff_status "$KLAREN_DIFF_STATUS" \
+            '{entry: $entry, run_key: $run_key, prompt: $prompt, scenario: $scenario,
+              agent: $agent, goal: $goal, final_build_state: $state, diff_status: $diff_status}' \
+            > "$PREFIX.judge.json"; then
+            echo "WARNING: [$ENTRY_ID] failed to write judge metadata" >&2
+        fi
+    fi
     echo "*** [$ENTRY_ID] run bundle: $PREFIX.*"
 
     # --- CI: upload the bundle as build artifacts (dual store) + annotate ---
@@ -657,8 +665,14 @@ run_entry() {
             "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED}" "success"
         annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics" "$PREFIX.metrics.json"
         annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls" "$PREFIX.tools.txt"
-        annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
-            "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
+        if [[ "$ENTRY_EVALUATOR" == "klaren" ]]; then
+            annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
+                "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"
+            annotate_markdown "klaren-verdicts-$ENTRY_ID" ":female-detective: [$ENTRY_ID] Klaren — verdicts and candidate references" \
+                "$PREFIX.klaren-verdicts.md" ""
+        fi
+    elif [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
+        echo "*** [$ENTRY_ID] to judge locally: $SCRIPT_DIR/yilong.sh $PREFIX.judge.json"
     fi
 
     # --- Compare against the baseline (best-effort) -------------------------

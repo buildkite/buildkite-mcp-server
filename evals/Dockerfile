@@ -1,6 +1,6 @@
 # Build the Buildkite MCP server from this repo's source, so the eval exercises
 # the code under review rather than a published release.
-ARG GO_VERSION="1.26"
+ARG GO_VERSION="1.27.3"
 FROM golang:${GO_VERSION} AS mcp-builder
 WORKDIR /src
 # Cache module downloads separately from the source.
@@ -63,6 +63,8 @@ COPY evals/tsconfig.json /workspace/
 COPY evals/mcp_in_ci.json /workspace/
 COPY evals/mcp_cursor_cloud.json /workspace/
 COPY evals/evals.yaml /workspace/
+# Do not copy evals/expected/: these are the reviewed answer keys. Klaren
+# loads pinned references only after the evaluated agent has finished.
 
 # Run the build.
 RUN npm ci && npm run build

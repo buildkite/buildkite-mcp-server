@@ -52,6 +52,10 @@ tidy-check: ## Check that Go module files are tidy
 fix-check: ## Check for changes recommended by go fix
 	go fix -diff ./...
 
+.PHONY: token-report
+token-report: ## Print MCP tool definition token report
+	go run ./cmd/tool-token-report --markdown -
+
 .PHONY: clean
 clean: ## Clean build artifacts
 	rm -f $(BINARY_NAME) $(COVERAGE_FILE)
