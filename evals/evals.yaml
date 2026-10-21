@@ -239,7 +239,7 @@ matrix:
         jobs=$(curl --fail --silent --show-error --max-time 30 \
           -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN}" \
           "$api/jobs?per_page=100")
-        job_ids=$(jq -er '[.[] | select(.state == "failed" or .state == "timed_out") | .id] | if length == 15 then .[] else error("Expected 15 problem jobs") end' <<<"$jobs")
+        job_ids=$(jq -er '[.items[] | select(.state == "failed" or .state == "timed_out") | .id] | if length == 15 then .[] else error("Expected 15 problem jobs") end' <<<"$jobs")
         total=0
         while IFS= read -r job_id; do
           count=$(curl --fail --silent --show-error --max-time 30 \
@@ -255,7 +255,7 @@ matrix:
     token_env: MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN
     mcp_version: source
     # Compare against this round's fixed main baseline on dogfood build #2.
-    compare_base: build:432
+    compare_base: build:434
 
   # The same diagnosis driven through the Buildkite CLI (bk) instead of the MCP
   # server — compare its tool calls / tokens / klaren review against the entry
