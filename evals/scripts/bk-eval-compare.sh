@@ -148,6 +148,7 @@ metrics_table() {
           r("Cache write (total)"; cwt($B.tokens);           cwt($C.tokens)),
           r("Cache read";          $B.tokens.cache_read;     $C.tokens.cache_read),
           r("Tool calls (total)";  $B.tool_calls_total;      $C.tool_calls_total),
+          r("Shell calls running bk"; $B.tool_calls_bk_cli;  $C.tool_calls_bk_cli),
           r("API requests (total)"; $B.api_fanout.total_requests?; $C.api_fanout.total_requests?),
           # Struggles: real failures only (likely-harmless ones left out).
           r("Failed tool calls";   (if $B.struggles.implemented? then $B.struggles.failed_calls - $B.struggles.likely_harmless else null end);
@@ -166,6 +167,32 @@ metrics_table() {
         ] | .[]'
 }
 
+# run_info_table BASE_JSON CUR_JSON  -> what each run used (metrics.json's
+# run_info: mode, harness / bk CLI / MCP server versions). Strings, so the last
+# column says whether they match rather than a numeric delta. Bundles from
+# before run_info existed show N/A.
+run_info_table() {
+    jq -rn --slurpfile b "$1" --slurpfile c "$2" '
+        ($b[0].run_info // null) as $B | ($c[0].run_info // null) as $C |
+        def cell(x): if x == null or x == "" then "N/A" else "`\(x)`" end;
+        def same(bv; cv): if (bv // "") == (cv // "") then "same" else "**changed**" end;
+        def r(lbl; f): ($B | if . == null then null else f end) as $bv
+                     | ($C | if . == null then null else f end) as $cv
+                     | "| \(lbl) | \(cell($bv)) | \(cell($cv)) | \(same($bv; $cv)) |";
+        [
+          "| Run setup | Base | Target | |",
+          "|---|---|---|---|",
+          r("Mode";               .mode),
+          r("Agent";              .harness.agent),
+          r("Harness version";    .harness.version),
+          r("Model";              .harness.model),
+          r("bk CLI version";     .bk_cli.version?),
+          r("bk CLI download";    .bk_cli.download_url?),
+          r("MCP server version"; .mcp_server.version?),
+          r("MCP source SHA";     .mcp_server.source_sha?)
+        ] | .[]'
+}
+
 # tool_table BASE_JSON CUR_JSON  -> per-tool call-count comparison table
 tool_table() {
     jq -rn --slurpfile b "$1" --slurpfile c "$2" '
@@ -180,6 +207,28 @@ tool_table() {
              | (($B[$n]) // 0) as $bv | (($C[$n]) // 0) as $cv
              | "| `\($n)` | \($bv) | \($cv) | \(if ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) |")))
         | .[]'
+}
+
+# bk_cli_table BASE_JSON CUR_JSON  -> per-bk-command count comparison table
+# (bk_cli_commands_by_name; same shape as tool_calls_by_name).
+bk_cli_table() {
+    jq -rn --slurpfile b "$1" --slurpfile c "$2" '
+        def tomap(a): ((a // [])
+          | map(capture("^(?<n>[0-9]+) (?<name>.+)$"))
+          | map({(.name): (.n|tonumber)}) | add // {});
+        (tomap($b[0].bk_cli_commands_by_name)) as $B |
+        (tomap($c[0].bk_cli_commands_by_name)) as $C |
+        (($B|keys) + ($C|keys) | unique) as $names |
+        if $b[0].bk_cli_commands_by_name == null or $c[0].bk_cli_commands_by_name == null then
+          "_bk CLI command counts are not available for one or both runs._"
+        elif ($names | length) == 0 then "_No bk CLI calls in either run._"
+        else
+          (["| bk command | Base | Target | Δ |", "|---|---:|---:|---:|"]
+           + ($names | map(. as $n
+               | (($B[$n]) // 0) as $bv | (($C[$n]) // 0) as $cv
+               | "| `\($n)` | \($bv) | \($cv) | \(if ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) |")))
+          | .[]
+        end'
 }
 
 # fanout_table BASE_JSON CUR_JSON  -> Buildkite API requests per MCP tool
@@ -355,9 +404,14 @@ main() {
         echo "## :bar_chart: Metrics"
         echo
         if [[ -s "$BASE_METRICS" && -s "$TGT_METRICS" ]]; then
+            run_info_table "$BASE_METRICS" "$TGT_METRICS"
+            echo
             metrics_table "$BASE_METRICS" "$TGT_METRICS" "$BASE_LABEL" "$TGT_LABEL"
             echo; echo "<details><summary>Per-tool call counts</summary>"; echo
             tool_table "$BASE_METRICS" "$TGT_METRICS"
+            echo; echo "</details>"
+            echo; echo "<details><summary>bk CLI command counts</summary>"; echo
+            bk_cli_table "$BASE_METRICS" "$TGT_METRICS"
             echo; echo "</details>"
             echo; echo "<details><summary>API fan-out (Buildkite API requests per tool)</summary>"; echo
             fanout_table "$BASE_METRICS" "$TGT_METRICS"

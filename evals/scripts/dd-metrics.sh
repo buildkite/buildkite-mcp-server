@@ -30,6 +30,11 @@
 #   AGENT                   claude | cursor | cursor-cloud -> tag agent:
 #   MODEL                   model id ("default" if unset)  -> tag model:
 #   GOAL_ACHIEVED           true | false | unknown         -> tag goal:
+#   MODE                    mcp | cli (default mcp)        -> tag mode:
+#   HARNESS_VERSION         agent harness version, as reported (e.g.
+#                           "2.1.300 (Claude Code)")       -> tag harness_version:
+#                           (its first dotted version only; omitted if none)
+#   BK_CLI_VERSION          bk CLI version, cli mode only  -> tag bk_cli_version:
 #   EVAL_DURATION_SECONDS   agent wall-clock measured by run_entry
 #   METRICS_FILE            path to the metrics JSON. May be empty or hold
 #                           null fields (cursor runs emit no token usage);
@@ -53,6 +58,7 @@
 #                                       (wait_for_build / Bash sleep; claude only)
 #   <prefix>.tool_calls.total
 #   <prefix>.tool_calls.buildkite_mcp   calls with the mcp__ prefix
+#   <prefix>.tool_calls.bk_cli          shell tool calls that ran the bk CLI
 #   <prefix>.api_requests.total         Buildkite API requests (fan-out; from
 #   <prefix>.api_requests.mcp           the run's request log — omitted when
 #                                       no log was collected, e.g. cursor-cloud)
@@ -133,6 +139,9 @@ PAYLOAD="$(jq -n \
     --arg agent    "${AGENT:-unknown}" \
     --arg model    "${MODEL:-default}" \
     --arg goal     "${GOAL_ACHIEVED:-unknown}" \
+    --arg mode     "${MODE:-mcp}" \
+    --arg harness  "${HARNESS_VERSION:-}" \
+    --arg bk_cli   "${BK_CLI_VERSION:-}" \
     --arg duration "${EVAL_DURATION_SECONDS:-}" \
     --arg build    "${BUILDKITE_BUILD_NUMBER:-}" \
     --arg evaluator "${EVALUATOR:-}" \
@@ -147,8 +156,15 @@ PAYLOAD="$(jq -n \
       else {metric: "\($prefix).\($name)", type: 3,
             points: [{timestamp: $now, value: ($v | tonumber)}], tags: $tags}
       end;
+    # Version tags carry only the dotted version ("2.1.300 (Claude Code)" ->
+    # "2.1.300"): Datadog tags must not hold spaces or parentheses.
+    def version_tag($name; $v):
+      ([$v | scan("[0-9]+(?:\\.[0-9]+)+")] | first) as $num
+      | if $num == null then [] else ["\($name):\($num)"] end;
     ([ "entry:\($entry)", "prompt:\($prompt)", "agent:\($agent)",
-       "model:\($model)", "goal:\($goal)" ]
+       "model:\($model)", "goal:\($goal)", "mode:\($mode)" ]
+     + version_tag("harness_version"; $harness)
+     + version_tag("bk_cli_version"; $bk_cli)
      + (if $build != "" then ["buildkite_build:\($build)"] else [] end)
      + (if $evaluator != "" then ["evaluator:\($evaluator)"] else [] end)) as $tags
     | ($m.tokens // {}) as $tok
@@ -165,6 +181,7 @@ PAYLOAD="$(jq -n \
         gauge("wait_seconds"; (($m.wait // {}) | .seconds // null); $tags),
         gauge("tool_calls.total"; ($m.tool_calls_total // null); $tags),
         gauge("tool_calls.buildkite_mcp"; ($m.tool_calls_mcp // null); $tags),
+        gauge("tool_calls.bk_cli"; ($m.tool_calls_bk_cli // null); $tags),
         gauge("api_requests.total"; ($m.api_fanout.total_requests? // null); $tags),
         gauge("api_requests.mcp"; ($m.api_fanout.mcp.requests? // null); $tags),
         # Struggles; absent (not zero) when not implemented for the agent.

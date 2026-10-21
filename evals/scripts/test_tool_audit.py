@@ -40,6 +40,54 @@ def transcript(agent, calls):
 
 
 class StrugglesTest(unittest.TestCase):
+    def test_bk_counts_shell_commands_not_quoted_text(self):
+        cases = [
+            ("cat <<'EOF'\nbk build view 123\nEOF", []),
+            ("printf '%s\\n' 'example; bk build view 123'", []),
+            ('echo "bk build view 123"', []),
+            ('# bk build view 123\necho done', []),
+            ('env BK_TELEMETRY=false bk build view 123', ['bk build view']),
+            ('env -u BUILDKITE_TOKEN BK_TELEMETRY=false /opt/bk build view 123', ['bk build view']),
+            ('env -u bk echo hi', []),
+            ('command -v bk', []),
+            ('sudo -u agent -- bk build view 123', ['bk build view']),
+            ('command -- bk build view 123', ['bk build view']),
+            ('exec bk build view 123', ['bk build view']),
+            ('BK_TELEMETRY=false "bk" build view 123', ['bk build view']),
+            ('echo "$(bk build view 123)"', ['bk build view']),
+            ("cat <<'EOF'\n$(bk build view 123)\nEOF", []),
+            ('cat <<EOF\n$(bk build view 123)\nEOF', ['bk build view']),
+            ('bk build view 123 && bk builds list', ['bk build view', 'bk builds list']),
+            ('bk build view 123; if', None),
+        ]
+        for agent in ('claude', 'cursor', 'cursor-cloud'):
+            for command, commands in cases:
+                with self.subTest(agent=agent, command=command), \
+                        tempfile.NamedTemporaryFile(mode='w') as log:
+                    events = (transcript(agent, [(command, True)]) if agent != 'cursor-cloud'
+                              else [{'type': 'tool_call', 'data': {
+                                  'callId': 'one', 'name': 'shell', 'args': {'command': command}}}])
+                    log.write(''.join(json.dumps(e) + '\n' for e in events))
+                    log.flush()
+                    result = subprocess.run(
+                        ['bash', str(AUDIT), '--agent', agent, 'metrics', log.name],
+                        check=True, capture_output=True, text=True)
+                    metrics = json.loads(result.stdout)
+                    if commands is None:
+                        self.assertIsNone(metrics['tool_calls_bk_cli'])
+                        self.assertIsNone(metrics['bk_cli_commands_by_name'])
+                    else:
+                        self.assertEqual(metrics['tool_calls_bk_cli'], int(bool(commands)))
+                        self.assertEqual(sorted(metrics['bk_cli_commands_by_name']),
+                                         sorted('1 ' + c for c in commands))
+                    if agent != 'cursor-cloud':
+                        report = self.report(agent, [(command, True)])
+                        self.assertEqual(report['failed_calls'], 1)
+                        labels = [label for by_tool in report['errors_by_type'].values()
+                                  for label in by_tool]
+                        if commands is not None:
+                            self.assertEqual(any(k.startswith('Bash: bk') for k in labels), bool(commands))
+
     def report(self, agent, calls):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl") as log:
             for event in transcript(agent, calls):
