@@ -547,6 +547,30 @@ run_entry() {
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" --all "$TRANSCRIPT" | tee "$AUDIT_TOOLS_FILE" || true
     echo "--- :bar_chart: [$ENTRY_ID] session metrics"
     "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" metrics "$TRANSCRIPT" | tee "$AUDIT_METRICS_FILE" || true
+    # The steps below merge their results into the metrics, so it must be an
+    # object even when the audit produced nothing.
+    # (-s: plain `jq -e` exits 0 on an empty file.)
+    jq -e -s 'length == 1 and (.[0] | type == "object")' "$AUDIT_METRICS_FILE" >/dev/null 2>&1 || echo '{}' > "$AUDIT_METRICS_FILE"
+
+    # --- Struggles (failed tool calls + patterns) ---------------------------
+    # From the transcript: failures by type and tool, likely-harmless ones
+    # (grep with no match), failure streaks, repeated failing calls, and
+    # retries. Merged into metrics.json as `struggles`; rendered for the
+    # eval-struggles annotation and klaren. cursor-cloud is not implemented
+    # yet — the audit script warns and the annotation says so.
+    echo "--- :face_with_spiral_eyes: [$ENTRY_ID] struggles"
+    local STRUGGLES_JSON STRUGGLES_MD MERGED_METRICS
+    STRUGGLES_JSON="$(mktemp)"; STRUGGLES_MD="$(mktemp)"
+    if "$SCRIPT_DIR/bk-tool-audit-v2.sh" --agent "$AGENT" struggles "$TRANSCRIPT" > "$STRUGGLES_JSON" \
+            && "$SCRIPT_DIR/bk-tool-audit-v2.sh" struggles-markdown "$STRUGGLES_JSON" > "$STRUGGLES_MD"; then
+        cat "$STRUGGLES_MD"
+        MERGED_METRICS="$(mktemp)"
+        jq --slurpfile s "$STRUGGLES_JSON" '. + {struggles: $s[0]}' "$AUDIT_METRICS_FILE" > "$MERGED_METRICS" \
+            && mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
+    else
+        echo "WARNING: [$ENTRY_ID] struggles summary failed (transcript: $TRANSCRIPT)" >&2
+        : > "$STRUGGLES_MD"
+    fi
 
     # --- Goal outcome ---------------------------------------------------------
     # Scenario-shaped: entries whose setup pushed a scenario branch
@@ -625,7 +649,7 @@ run_entry() {
         local KLAREN_START; KLAREN_START=$(date +%s)
         if ! ENTRY_ID="$ENTRY_ID" AGENT="$AGENT" FINAL_BUILD_STATE="$FINAL_BUILD_STATE" \
             PROMPT_NAME="$PROMPT_NAME" SCENARIO_ID="$SCENARIO_ID" DIFF_STATUS="$KLAREN_DIFF_STATUS" \
-            "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX"; then
+            "$SCRIPT_DIR/klaren.sh" "$TRANSCRIPT" "$RENDERED" "$EVAL_RESULT_FILE" "$KLAREN_DIFF" "$PREFIX" "$STRUGGLES_MD"; then
             echo "WARNING: klaren review failed for '$ENTRY_ID'" >&2
         fi
         KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
@@ -639,6 +663,7 @@ run_entry() {
     # klaren.sh writes the review, rubric verdicts and candidate references
     # directly into this bundle before its artifacts are uploaded.
     [[ -s "$TRANSCRIPT"         ]] && cp "$TRANSCRIPT"         "$PREFIX.transcript.jsonl"  || true
+    [[ -s "$STRUGGLES_MD"       ]] && cp "$STRUGGLES_MD"       "$PREFIX.struggles.md"
     if [[ "$ENTRY_EVALUATOR" == "yilong" ]]; then
         # The separate judge step reads sibling artifacts; no absolute container paths.
         if ! jq -n --arg entry "$ENTRY_ID" --arg run_key "$RUN_KEY" \
@@ -665,6 +690,13 @@ run_entry() {
             "$PREFIX.eval-final.md" "⏱️ Elapsed: ${EVAL_ELAPSED}" "success"
         annotate_codeblock "eval-metrics-$ENTRY_ID" ":bar_chart: [$ENTRY_ID] Eval — session metrics" "$PREFIX.metrics.json"
         annotate_codeblock "eval-tools-$ENTRY_ID"   ":hammer_and_wrench: [$ENTRY_ID] Eval — tool calls" "$PREFIX.tools.txt"
+        if [[ -s "$PREFIX.struggles.md" ]]; then
+            local STRUGGLES_META STRUGGLES_STYLE="info"
+            STRUGGLES_META="$(jq -r 'if .implemented then "\(.failed_calls) failed of \(.tool_calls) tool calls · longest streak \(.longest_failure_streak)" else "not implemented for this agent" end' "$STRUGGLES_JSON")"
+            jq -e '.implemented | not' "$STRUGGLES_JSON" >/dev/null 2>&1 && STRUGGLES_STYLE="warning"
+            annotate_markdown "eval-struggles-$ENTRY_ID" ":face_with_spiral_eyes: [$ENTRY_ID] Eval — struggles" \
+                "$PREFIX.struggles.md" "${STRUGGLES_META}" "$STRUGGLES_STYLE"
+        fi
         if [[ "$ENTRY_EVALUATOR" == "klaren" ]]; then
             annotate_markdown "klaren-final-$ENTRY_ID"   ":female-detective: [$ENTRY_ID] Klaren — session review" \
                 "$PREFIX.klaren.md" "⏱️ Elapsed: ${KLAREN_ELAPSED}"

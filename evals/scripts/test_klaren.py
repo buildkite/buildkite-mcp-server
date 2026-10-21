@@ -226,7 +226,7 @@ fi
 ''')
         executable(self.scripts / "bk-eval-compare.sh", "exit 0\n")
         executable(self.root / "bin/buildkite-agent", '''
-if [[ "$1" == annotate ]]; then cat > /dev/null
+if [[ "$1" == annotate ]]; then cat >> "$STUB_ROOT/annotations.md"
 elif [[ "$1" == artifact && "$2" == upload ]]; then
     mkdir -p "$STUB_ROOT/upload"
     for file in $3; do cp "$file" "$STUB_ROOT/upload/"; done
@@ -242,6 +242,7 @@ else exit 1; fi
             with self.subTest(evaluator=evaluator):
                 home = self.root / evaluator
                 home.mkdir()
+                (self.root / "annotations.md").write_text("")
                 for directory in ("runs", "upload"):
                     shutil.rmtree(self.root / directory, ignore_errors=True)
                 # Reset the remote branch between independent runs.
@@ -259,8 +260,16 @@ else exit 1; fi
                 self.assertIn(b"@pytest.mark.skip", patch.read_bytes())
                 meta = json.loads(next((self.root / "upload").glob("*.dd.json")).read_text())
                 self.assertEqual(meta["evaluator"], evaluator)
+                struggles = next((self.root / "upload").glob("*.struggles.md")).read_text()
+                self.assertIn("**Tool calls: 1, failed: 0**", struggles)
+                metrics = json.loads(next((self.root / "upload").glob("*.metrics.json")).read_text())
+                self.assertTrue(metrics["struggles"]["implemented"])
+                annotations = (self.root / "annotations.md").read_text()
+                self.assertIn("Eval — struggles", annotations)
                 if evaluator == "klaren":
                     prompt = (self.root / "prompt.md").read_text()
+                    self.assertIn(struggles, prompt)
+                    self.assertIn("Klaren — session review", annotations)
                     original_patch = next((self.root / "runs/case").glob("*.diff.patch"))
                     self.assertIn(str(original_patch), prompt)
                     summary = next((self.root / "upload").glob("*.klaren-verdicts.md")).read_text()
@@ -270,6 +279,7 @@ else exit 1; fi
                     self.assertEqual((judge["prompt"], judge["scenario"], judge["diff_status"]),
                                      ("fixture", "leaked-model", "available"))
                     self.assertFalse(list((self.root / "upload").glob("*.klaren*")))
+                    self.assertNotIn("Klaren — session review", annotations)
 
     def test_ci_uses_pinned_harness_references(self):
         # The production wrapper still runs; only the external CLI/network edges are fixtures.
