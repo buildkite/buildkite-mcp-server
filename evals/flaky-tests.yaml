@@ -1,8 +1,8 @@
-# Read-only workflow discovery against the Buildkite RSpec suite. No setup.
+# Read-only flaky-test investigation against the Buildkite RSpec suite. No setup.
 matrix:
-  - id: test-workflows
+  - id: flaky-tests
     agent: claude
-    prompt: test-workflows
+    prompt: flaky-tests
     evaluator: klaren
     scenario:
       id: buildkite-rspec
