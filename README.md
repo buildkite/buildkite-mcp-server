@@ -46,7 +46,12 @@ response budget. Whole records are omitted when needed, with `content_truncated`
 and `truncated` set. Read `job_errors.url` to recover omitted records on the first
 page; `next_url` continues after that page, not after the last displayed record.
 `truncated` also indicates more API pages. `jobs_truncated` separately reports
-the existing problem-job limit.
+the existing problem-job limit, not missing error capture. For complete coverage,
+raise `max_jobs` only if the server permits it; `job_limit` reports the applied
+cap. If jobs are still omitted, use `list_jobs` to identify them rather than
+repeatedly requesting a larger summary. Read structured evidence through the
+available tools first, and fetch focused logs only when that evidence is
+unavailable or insufficient.
 
 The token needs `read_job_errors` for this section. HTTP 403/404 and other lookup
 errors leave the job visible with status `unavailable`; HTTP 401 propagates for

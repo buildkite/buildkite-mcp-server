@@ -117,7 +117,7 @@ var instructionSections = []instructionSection{
 	{
 		toolsets: []string{toolsets.ToolsetInvestigations},
 		tools:    []string{"get_build_failure_summary"},
-		text:     "Build failure investigation: start with get_build_failure_summary. It combines build state, blocking failed and canceled jobs, promised failures from running jobs, soft-failed jobs (listed after blocking failures and canceled jobs), structured Job Errors, relevant annotations, and failed tests in one response, without fetching logs by default; jobs that never ran (broken, waiting_failed, blocked_failed, unblocked_failed) fill the remaining max_jobs slots unless include_never_ran_jobs is false. Read the structured evidence first. Use tail_logs only for specific jobs needing more evidence, or include_logs=true for bounded tails. Missing errors do not mean success. Use individual build, job, annotation, and test tools only when the summary needs deeper inspection.",
+		text:     "Build failure investigation: start with get_build_failure_summary. It combines build state, blocking failed and canceled jobs, promised failures from running jobs, soft-failed jobs (listed after blocking failures and canceled jobs), structured Job Errors, relevant annotations, and failed tests in one response, without fetching logs by default; jobs that never ran (broken, waiting_failed, blocked_failed, unblocked_failed) fill the remaining max_jobs slots unless include_never_ran_jobs is false. Read the structured evidence first. If jobs_truncated is true, omitted jobs may still have captured errors; job_limit reports the applied cap. For complete coverage, increase max_jobs only if the server permits it; otherwise identify omitted jobs with list_jobs. Do not repeatedly request a larger summary beyond the cap. Use structured errors through available tools first, then focused logs when that evidence is unavailable or insufficient. Use tail_logs only for specific jobs needing more evidence, or include_logs=true for bounded tails. Missing errors do not mean success. Use individual build, job, annotation, and test tools only when the summary needs deeper inspection.",
 	},
 	{
 		toolsets: []string{toolsets.ToolsetPipelines},
@@ -156,7 +156,7 @@ var instructionSections = []instructionSection{
 	{
 		toolsets: []string{toolsets.ToolsetLogs, toolsets.ToolsetRetries},
 		tools:    []string{"tail_logs", "search_logs", "read_logs"},
-		text:     "Log investigation order: start with tail_logs to see recent output (cheapest, catches most failures), then search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Avoid calling read_logs without a limit on large logs.",
+		text:     "Log investigation order: only fetch logs when the available structured evidence is missing, unavailable, or insufficient. For those jobs, start with tail_logs to see recent output; tails may contain cleanup rather than the cause. If needed, use search_logs with a pattern and limit for targeted investigation, and only use read_logs with seek and limit for deep sequential inspection. Stop when the evidence answers the question; do not fetch logs for every job by default. Avoid calling read_logs without a limit on large logs.",
 	},
 	{
 		toolsets:  []string{toolsets.ToolsetAnnotations},

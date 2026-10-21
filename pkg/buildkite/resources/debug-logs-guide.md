@@ -59,6 +59,8 @@ Always set `limit` — logs can be very large.
 ### Step 0: Get the Failure Summary
 Call `get_build_failure_summary` with the organization slug, pipeline slug, and build number. In most cases this is enough to identify the root cause without additional calls.
 
+If `jobs_truncated` is true, the summary does not cover every problem job. Omitted jobs may still have captured errors. If complete coverage is needed, increase `max_jobs` only if the server permits it; `job_limit` reports the applied limit. If the limit still excludes jobs, use `list_jobs` to identify them. Do not repeatedly request a larger summary beyond that limit or assume the omitted jobs lack errors. Use structured errors through available tools first; when they cannot provide enough evidence, use focused logs for those jobs and explain the coverage limit.
+
 Interpret its jobs as follows:
 - **`failed`**, **`timed_out`** and **`expired`** jobs without `soft_failed: true` are blocking failures (an `expired` job never reached an agent). These are the root cause candidates, start here
 - **`soft_failed: true`** jobs (see [Soft Failures](#soft-failures)) ran and failed, but the step's `soft_fail` setting allowed that exit status, so they did not block the build
@@ -66,7 +68,7 @@ Interpret its jobs as follows:
 - **`waiting_failed` / `blocked_failed` / `unblocked_failed`** jobs never ran because a job they depend on failed. They are consequences of that upstream failure, not root causes, and have no logs — investigate the blocking failure instead
 - **`running` with a non-zero `promised_exit_status`** has declared an early failure but may still produce more logs, artifacts, or test results before it finishes
 
-If you need more context, take a blocking failed job's `id` as the `job_id` for the lower-level log tools.
+Read the job errors, annotations, and test results before fetching logs. If that evidence explains the failure, stop; the steps below are optional follow-up, not a checklist to run for every job. When logs are needed, take the blocking failed job's `id` as the `job_id` for the lower-level log tools.
 
 ### Soft Failures
 A soft-failed job is a real, unsuccessful execution whose exit status the pipeline author explicitly allowed through `soft_fail`. Rules for handling them:
@@ -79,11 +81,11 @@ A soft-failed job is a real, unsuccessful execution whose exit status the pipeli
 - `build.job_state_counts` tallies jobs by state only, so a `failed` count can include soft-failed jobs.
 - `retry_failed_jobs` skips soft-failed jobs, and `compare_builds` reports a change in `soft_failed` as `state_changed`, never `newly_failing` or `recovered`.
 
-### Step 1: Quick Assessment
-Use `tail_logs` with `tail: 50-100` to see the most recent output. Most failures surface here.
+### Step 1: Focused Log Follow-up, Only If Needed
+When structured evidence is missing, unavailable, or insufficient, use `tail_logs` with `tail: 50-100` for that job. A tail may contain cleanup rather than the cause; do not fetch tails for every job by default or continue if the evidence already answers the question.
 
 ### Step 2: Error Hunting
-Use `search_logs` with common error patterns:
+If the cause is still unclear, use `search_logs` with a pattern from the available evidence and a bounded `limit`. When there is no more specific clue, common patterns include:
 - `error|failed|exception`
 - `fatal|panic|abort`
 - `timeout|cancelled`
