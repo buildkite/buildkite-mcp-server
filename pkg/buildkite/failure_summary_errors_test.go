@@ -24,6 +24,7 @@ func TestGetBuildFailureSummaryJobErrors(t *testing.T) {
 		status     int
 		body       string
 		limit      int
+		logTail    int
 		command    string
 		disabled   bool
 		wantStatus string
@@ -31,6 +32,7 @@ func TestGetBuildFailureSummaryJobErrors(t *testing.T) {
 		truncated  bool
 	}{
 		{name: "grouped findings", body: `{"items":[` + capture + `]}`, wantStatus: "found", wantItems: 1},
+		{name: "log tail limit does not enable logs", logTail: 20, body: `{"items":[` + capture + `]}`, wantStatus: "found", wantItems: 1},
 		{name: "next page", body: `{"items":[` + capture + `],"links":{"self":"` + firstURL + `","next":"` + nextURL + `"}}`, wantStatus: "found", wantItems: 1, truncated: true},
 		{name: "no capture", body: `{"items":[]}`, wantStatus: "none_recorded"},
 		{name: "forbidden", status: 403, body: `{"message":"Forbidden"}`, wantStatus: "unavailable"},
@@ -80,7 +82,7 @@ func TestGetBuildFailureSummaryJobErrors(t *testing.T) {
 					}
 				}},
 				JobErrorsClient:     &BuildkiteClientAdapter{Client: client},
-				BuildkiteLogsClient: &MockBuildkiteLogsClient{}, // Any log read panics: logs were explicitly disabled.
+				BuildkiteLogsClient: &MockBuildkiteLogsClient{}, // No log reads expected by default.
 			})
 			_, handler, _ := GetBuildFailureSummary()
 			var includeJobErrors *bool
@@ -89,7 +91,7 @@ func TestGetBuildFailureSummaryJobErrors(t *testing.T) {
 			}
 			result, _, err := handler(ctx, createMCPRequest(t, nil), GetBuildFailureSummaryArgs{
 				OrgSlug: "org?", PipelineSlug: "pipeline#", BuildNumber: "42",
-				IncludeLogs: boolPtr(false), IncludeJobErrors: includeJobErrors, ContentLimitBytes: tc.limit,
+				IncludeJobErrors: includeJobErrors, ContentLimitBytes: tc.limit, LogTail: tc.logTail,
 			})
 			if tc.status == 401 {
 				require.ErrorIs(t, err, ErrUnauthorized)
@@ -105,6 +107,8 @@ func TestGetBuildFailureSummaryJobErrors(t *testing.T) {
 			require.Equal(t, 507, summary.Build.JobStateCounts.Total)
 			require.Equal(t, map[string]int{"failed": 1, "passed": 282, "broken": 224}, summary.Build.JobStateCounts.States)
 			require.Len(t, summary.Jobs, 2)
+			require.Empty(t, summary.Jobs[0].LogTail)
+			require.Empty(t, summary.Jobs[0].LogError)
 			require.True(t, summary.Jobs[0].SoftFailed)
 			require.Equal(t, "failed", summary.Jobs[0].State)
 			require.Nil(t, summary.Jobs[1].JobErrors)

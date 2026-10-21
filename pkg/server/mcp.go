@@ -117,7 +117,7 @@ var instructionSections = []instructionSection{
 	{
 		toolsets: []string{toolsets.ToolsetInvestigations},
 		tools:    []string{"get_build_failure_summary"},
-		text:     "Build failure investigation: start with get_build_failure_summary. It combines build state, blocking failed and canceled jobs, promised failures from running jobs, soft-failed jobs (listed after blocking failures and canceled jobs), bounded log tails, relevant annotations, and failed tests in one response; jobs that never ran (broken, waiting_failed, blocked_failed, unblocked_failed) fill the remaining max_jobs slots unless include_never_ran_jobs is false. Use the individual build, job, log, annotation, and test tools only when the summary identifies an area that needs deeper inspection.",
+		text:     "Build failure investigation: start with get_build_failure_summary. It combines build state, blocking failed and canceled jobs, promised failures from running jobs, soft-failed jobs (listed after blocking failures and canceled jobs), structured Job Errors, relevant annotations, and failed tests in one response, without fetching logs by default; jobs that never ran (broken, waiting_failed, blocked_failed, unblocked_failed) fill the remaining max_jobs slots unless include_never_ran_jobs is false. Read the structured evidence first. Use tail_logs only for specific jobs needing more evidence, or include_logs=true for bounded tails. Missing errors do not mean success. Use individual build, job, annotation, and test tools only when the summary needs deeper inspection.",
 	},
 	{
 		toolsets: []string{toolsets.ToolsetPipelines},

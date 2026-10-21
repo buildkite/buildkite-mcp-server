@@ -146,6 +146,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 		PipelineSlug:        "pipeline",
 		BuildNumber:         "42",
 		LogTail:             2,
+		IncludeLogs:         boolPtr(true),
 		IncludeNeverRanJobs: boolPtr(true),
 	})
 	require.NoError(t, err)
@@ -390,6 +391,7 @@ func TestGetBuildFailureSummaryEnforcesServerJobLimit(t *testing.T) {
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1", MaxJobs: 50,
+		IncludeLogs:        boolPtr(true),
 		IncludeAnnotations: &include,
 	})
 	require.NoError(t, err)
@@ -440,6 +442,7 @@ func TestGetBuildFailureSummaryIncludesTimedOutJobAndLog(t *testing.T) {
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		IncludeLogs:        boolPtr(true),
 		IncludeAnnotations: &include,
 	})
 	require.NoError(t, err)
@@ -493,6 +496,7 @@ func TestGetBuildFailureSummaryIncludesExpiredAndDownstreamFailedJobsWithoutLogs
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		IncludeLogs:         boolPtr(true),
 		IncludeAnnotations:  &include,
 		IncludeNeverRanJobs: boolPtr(true),
 	})
@@ -703,6 +707,7 @@ func TestGetBuildFailureSummaryHonorsContentLimitBytesArg(t *testing.T) {
 			PipelineSlug:       "pipeline",
 			BuildNumber:        "1",
 			ContentLimitBytes:  requested,
+			IncludeLogs:        boolPtr(true),
 			IncludeAnnotations: &include,
 		})
 
@@ -837,6 +842,7 @@ func TestGetBuildFailureSummaryPreservesPartialResultForForbiddenOptionalSection
 	_, handler, _ := GetBuildFailureSummary()
 	callResult, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
 		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		IncludeLogs: boolPtr(true),
 	})
 
 	require.NoError(t, err)
