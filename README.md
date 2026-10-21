@@ -15,20 +15,22 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 `get_build_failure_summary` includes structured Job Errors by default, alongside
 build status, job-state counts, and bounded problem jobs (including soft failures).
-It does not fetch the complete job inventory. For an errors-first response without
-logs or other diagnostic sections, call it with:
+It does not fetch the complete job inventory or any logs by default. Start with:
 
 ```json
 {
   "org_slug": "example-org",
   "pipeline_slug": "example-pipeline",
-  "build_number": "123",
-  "include_logs": false,
-  "include_annotations": false,
-  "include_failed_tests": false,
-  "include_never_ran_jobs": false
+  "build_number": "123"
 }
 ```
+
+Annotations and failed Test Engine tests remain enabled by default. Read the
+structured evidence first, then use `tail_logs` only for specific jobs that need
+more evidence. Set `include_logs: true` to include bounded log tails in the
+summary (50 lines per eligible job by default, max 200). `log_tail` adjusts that
+limit but does not enable logs. Missing or unavailable capture does not
+automatically fetch logs.
 
 Each returned failed, timed-out, expired, canceled, or promised-failing job has
 `job_errors.status`: `found`, `none_recorded`, or `unavailable`. Empty capture is
@@ -49,7 +51,7 @@ the existing problem-job limit.
 The token needs `read_job_errors` for this section. HTTP 403/404 and other lookup
 errors leave the job visible with status `unavailable`; HTTP 401 propagates for
 reauthentication. Set `include_job_errors: false` to skip these requests. Existing
-log, annotation, and test defaults are unchanged.
+annotation and test defaults are unchanged; disabling errors does not enable logs.
 
 ## Retrying builds with limited permissions
 
