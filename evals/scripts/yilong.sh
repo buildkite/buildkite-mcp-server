@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# yilong.sh — the default (cheap) evaluator: grade each eval run with Jev,
+# yilong.sh — the opt-in (cheap) evaluator: grade each eval run with Jev,
 # TypeSafe's System One model (https://docs.typesafe.ai), called directly.
 #
 # For every run whose evaluator is yilong, babystand.sh leaves a

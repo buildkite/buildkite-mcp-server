@@ -270,8 +270,8 @@ semantic_compare() {
     local b_eval="$1" c_eval="$2" b_klaren="$3" c_klaren="$4"
     [[ -s "$c_eval" || -s "$c_klaren" ]] || return 0
 
-    # Klaren runs only on demand (evaluator: klaren), so either side may lack a
-    # report; scoring one against nothing would read as every issue resolved
+    # Either run may lack a Klaren report (for example, evaluator: yilong).
+    # Scoring one against nothing would read as every issue resolved
     # (or new). Compare klaren only when both runs have one.
     local with_klaren=false
     [[ -s "$b_klaren" && -s "$c_klaren" ]] && with_klaren=true

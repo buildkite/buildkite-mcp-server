@@ -40,16 +40,16 @@ The klaren reviewer always runs on claude regardless of the entry's agent — it
 
 ## Evaluator selection
 
-Each `evals.yaml` entry selects `evaluator: yilong | klaren` (default `yilong`).
-Set `EVALUATOR=klaren` when creating a build to override all entries.
+Each `evals.yaml` entry selects `evaluator: yilong | klaren` (default `klaren`).
+Set `EVALUATOR=klaren` or `EVALUATOR=yilong` when creating a build to override all entries.
 
 * **Yilong** calls Jev, TypeSafe's System One model, directly at
   `https://api.typesafe.ai/v1/systemone` (`YILONG_MODEL`, default `jev-1.14.0`).
   It uses the same `prompts/rubric.json` and prompt/scenario reference paths as
   Klaren. There is no second rubric file or automatic grade adjustment.
 * **Klaren** produces the detailed review, rubric grades and candidate references
-  described below. Use it on demand; comparison annotations compare its reports
-  only when both runs have one.
+  described below. It runs by default; comparison annotations compare its
+  reports only when both runs have one.
 
 Yilong sends one request per category, with these input fields:
 
