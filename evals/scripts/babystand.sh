@@ -526,7 +526,7 @@ run_entry() {
     local ENTRY_ID AGENT MODEL PROMPT_NAME SCENARIO_ID MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE ENTRY_EVALUATOR
     local MODE MODE_PARAMS
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
-    ENTRY_EVALUATOR="${EVALUATOR:-$(jq -r '.evaluator // "yilong"' <<<"$entry")}"
+    ENTRY_EVALUATOR="${EVALUATOR:-$(jq -r '.evaluator // "klaren"' <<<"$entry")}"
     case "$ENTRY_EVALUATOR" in
         yilong|klaren) ;;
         *) echo "ERROR: [$ENTRY_ID] unknown evaluator '$ENTRY_EVALUATOR' (use yilong or klaren)" >&2; return 1 ;;

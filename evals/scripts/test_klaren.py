@@ -233,15 +233,24 @@ elif [[ "$1" == artifact && "$2" == upload ]]; then
     for file in $3; do cp "$file" "$STUB_ROOT/upload/"; done
 else exit 1; fi
 ''')
-        (self.root / "matrix.json").write_text(json.dumps([{
+        matrix_entry = {
             "id": "case", "prompt": "fixture", "scenario": {"id": "leaked-model", "setup":
                 'git switch -c scenario\ngit push origin HEAD\nprintf "SCENARIO_BRANCH=scenario\\n" >> "$SCENARIO_VARS_FILE"'},
-        }]))
+        }
         (self.root / "evals.yaml").write_text("matrix fixture\n")
         (self.root / "prompts/fixture.md").write_text("Fix case.\n")
-        for evaluator in ("klaren", "yilong"):
-            with self.subTest(evaluator=evaluator):
-                home = self.root / evaluator
+        for index, (evaluator, configured, override) in enumerate((
+            ("klaren", None, ""),
+            ("yilong", "yilong", ""),
+            ("klaren", "yilong", "klaren"),
+            ("yilong", "klaren", "yilong"),
+        )):
+            with self.subTest(evaluator=evaluator, configured=configured, override=override):
+                entry = dict(matrix_entry)
+                if configured is not None:
+                    entry["evaluator"] = configured
+                (self.root / "matrix.json").write_text(json.dumps([entry]))
+                home = self.root / f"home-{index}"
                 home.mkdir()
                 (self.root / "annotations.md").write_text("")
                 for directory in ("runs", "upload"):
@@ -250,7 +259,7 @@ else exit 1; fi
                 git("update-ref", "refs/heads/scenario", baseline, cwd=remote)
                 result = subprocess.run([str(self.scripts / "babystand.sh")], cwd=self.root, capture_output=True, text=True,
                                         env={**self.env, "RUN_IN_CI": "true", "LOCAL_CI": "false", "DEBUG_PERMISSIONS": "false",
-                                             "EVALUATOR": "klaren" if evaluator == "klaren" else "",
+                                             "EVALUATOR": override,
                                              "HOME": str(home), "REAL_GIT": real_git, "FIXTURE_REPO": str(remote),
                                              "MCP_SRC_SHA": "a" * 40, "DD_API_KEY": ""}, timeout=30)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

@@ -52,7 +52,7 @@
 #                 lines to the file at $SCENARIO_VARS_FILE.
 #     vars        Static KEY=VALUE map substituted into the prompt template.
 #   evaluator     Optional. How the agent's run is judged afterwards:
-#                 'yilong' (default) — scripts/yilong.sh, in its own pipeline
+#                 'yilong' — scripts/yilong.sh, in its own pipeline
 #                 step: three cheap Jev (TypeSafe) scored questions, each
 #                 recorded as a verdict (and a mcp_eval.yilong.* Datadog score
 #                 of 0 / 0.5 / 1), or undetermined when the API call fails:
@@ -65,10 +65,10 @@
 #                 (n/a without them). They live outside
 #                 this file so they never reach the agent's container (the
 #                 image copies evals.yaml, not expected/).
-#                 'klaren' — the full klaren session review (prompts/klaren.md):
-#                 detailed and useful, but slow and token-hungry, so run it on
-#                 demand. Set EVALUATOR=klaren when creating a build to use it
-#                 for every entry without editing this file.
+#                 'klaren' (default) — the full klaren session review
+#                 (prompts/klaren.md): detailed, but slower and token-hungry.
+#                 Set EVALUATOR=klaren or EVALUATOR=yilong when creating a build
+#                 to override every entry without editing this file.
 #   kill_agent_on_complete  Optional, cursor-cloud only. Whether to DELETE the
 #                 one-shot cloud agent when the run ends (any outcome — success,
 #                 failure, or abort). Default: true, because the agent is

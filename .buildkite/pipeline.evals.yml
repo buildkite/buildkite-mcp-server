@@ -93,10 +93,10 @@ steps:
             # Per-message parser annotations are on by default; set to "false"
             # (in the top-level env: block) to rely only on the curated summaries.
             - ANNOTATE_MESSAGES
-            # Build-wide evaluator override: set EVALUATOR=klaren when
-            # creating a build to run the (slow, token-hungry) klaren review
-            # for every entry. Unset = each entry's `evaluator` (default
-            # yilong, judged in the yilong step below).
+            # Build-wide evaluator override: set EVALUATOR=yilong when
+            # creating a build to use Jev for every entry, judged in the
+            # yilong step below. Unset = each entry's `evaluator` (default
+            # klaren, the full session review).
             - EVALUATOR
     # Secrets are scoped to this step only: the lint/test jobs execute code
     # from the pushed branch and must not see credentials.
