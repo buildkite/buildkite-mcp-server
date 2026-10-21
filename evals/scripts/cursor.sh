@@ -135,7 +135,11 @@ $prompt_content"
 # version that failed to resolve it would hand the server the literal
 # placeholder and 401 loudly — a visible failure, not a leak.
 mkdir -p .cursor
-jq '.mcpServers |= with_entries(.value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}")' \
+# BUILDKITE_REQUEST_LOG (the run's API request log, set by babystand.sh) is
+# re-spelled the same way — the source config uses Claude's ${VAR:-} syntax.
+jq '.mcpServers |= with_entries(
+      .value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}"
+      | .value.env.BUILDKITE_REQUEST_LOG = "${env:BUILDKITE_REQUEST_LOG}")' \
     "$ROOT_DIR/mcp_in_ci.json" > .cursor/mcp.json
 # Diff hygiene, not a security control (the file holds no secret): the agent
 # is told to commit and push its fixes, and a plain `git add -A` would drag

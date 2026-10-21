@@ -148,6 +148,7 @@ metrics_table() {
           r("Cache write (total)"; cwt($B.tokens);           cwt($C.tokens)),
           r("Cache read";          $B.tokens.cache_read;     $C.tokens.cache_read),
           r("Tool calls (total)";  $B.tool_calls_total;      $C.tool_calls_total),
+          r("API requests (total)"; $B.api_fanout.total_requests?; $C.api_fanout.total_requests?),
           # Struggles: real failures only (likely-harmless ones left out).
           r("Failed tool calls";   (if $B.struggles.implemented? then $B.struggles.failed_calls - $B.struggles.likely_harmless else null end);
                                    (if $C.struggles.implemented? then $C.struggles.failed_calls - $C.struggles.likely_harmless else null end)),
@@ -179,6 +180,33 @@ tool_table() {
              | (($B[$n]) // 0) as $bv | (($C[$n]) // 0) as $cv
              | "| `\($n)` | \($bv) | \($cv) | \(if ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) |")))
         | .[]'
+}
+
+# fanout_table BASE_JSON CUR_JSON  -> Buildkite API requests per MCP tool
+# (metrics.json's api_fanout), base vs target. A run without api_fanout
+# (recorded before request logging, or cursor-cloud) was not measured, so
+# deltas against it are N/A; a tool missing from a measured run counts as 0.
+fanout_table() {
+    jq -rn --slurpfile b "$1" --slurpfile c "$2" '
+        def rows(f): ((f // {}) as $f
+          | (($f.mcp.tools // []) | map({key: "mcp \(.tool)", value: {calls: .calls, requests: .requests}}))
+          | from_entries);
+        def cell(x): if x == null then "–" else "\(x)" end;
+        ($b[0].api_fanout | if .available == false then null else . end) as $BF |
+        ($c[0].api_fanout | if .available == false then null else . end) as $CF |
+        if $BF == null and $CF == null then "_No API fan-out recorded in either run._"
+        else
+          rows($BF) as $B | rows($CF) as $C |
+          (($B | keys) + ($C | keys) | unique) as $names |
+          (["| Tool | Base calls | Base API requests | Target calls | Target API requests | Δ requests |",
+            "|---|---:|---:|---:|---:|---:|"]
+           + ($names | map(. as $n
+               | ($B[$n].requests // 0) as $bv | ($C[$n].requests // 0) as $cv
+               | (if $BF == null or $CF == null then "N/A"
+                  elif ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) as $delta
+               | "| `\($n)` | \(cell($B[$n].calls)) | \(cell($B[$n].requests)) | \(cell($C[$n].calls)) | \(cell($C[$n].requests)) | \($delta) |")))
+          | .[]
+        end'
 }
 
 # _sect FILE -- print a file, or a placeholder if empty/missing.
@@ -330,6 +358,9 @@ main() {
             metrics_table "$BASE_METRICS" "$TGT_METRICS" "$BASE_LABEL" "$TGT_LABEL"
             echo; echo "<details><summary>Per-tool call counts</summary>"; echo
             tool_table "$BASE_METRICS" "$TGT_METRICS"
+            echo; echo "</details>"
+            echo; echo "<details><summary>API fan-out (Buildkite API requests per tool)</summary>"; echo
+            fanout_table "$BASE_METRICS" "$TGT_METRICS"
             echo; echo "</details>"
         else
             echo "_Metrics unavailable (missing base or target metrics)._"

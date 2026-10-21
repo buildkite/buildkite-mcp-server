@@ -209,6 +209,15 @@ three categories with the level markers above. Yilong publishes matching
 Run the focused checks with
 `python3 -B -m unittest discover -s evals/scripts -p 'test_*.py' -v`.
 
+## API fan-out
+
+Each run also records every Buildkite API request the MCP server makes, so you can see how many requests sit behind each MCP tool call ("fan-out"). Not available for `cursor-cloud` (its MCP server runs inside Cursor's VM).
+
+* The server's `--request-log <file>` flag (env `BUILDKITE_REQUEST_LOG`) appends a startup record, then one JSON line per API request — method, URL without query parameters, fragment or userinfo, status, duration, bytes, and the MCP tool name + tool call id that made it (no headers or bodies). `mcp.json` / `mcp_in_ci.json` pass `BUILDKITE_REQUEST_LOG` through (`${BUILDKITE_REQUEST_LOG:-}`, so an unset value just means no log); the cursor config generators re-spell it as `${env:BUILDKITE_REQUEST_LOG}`.
+* It writes to `runs/<id>/<run>.api-requests.jsonl`. `scripts/api-fanout.sh` summarizes it per MCP tool (calls from the transcript, API requests, avg / max per call, top endpoints with ids normalized). Failed requests are also grouped by HTTP status, then by tool (`errors_by_status`, e.g. `504: {list_builds: 2, get_test: 1}`; no response at all is `network error`; requests outside any tool call are `(no tool call)`).
+* A missing or empty log is **not measured**, not zero usage: `api_fanout.available` is false, counts are omitted, comparisons show N/A, and Datadog API-request gauges are omitted. A startup record (excluded from counts) confirms logging worked even if no requests were made. Actual request records also establish availability for older logs without a startup record.
+* The summary lands in: the `eval-fanout-<id>` annotation (and `<run>.api-fanout.md`), `api_fanout` in `<run>.metrics.json`, an "API requests (total)" row plus a per-tool table in the comparison report, Datadog gauges `api_requests.total` / `.mcp`, and klaren's prompt (with the raw log path) so its review can quantify waste.
+
 ## Struggles
 
 `bk-tool-audit-v2.sh struggles` reads the transcript for failed tool calls and the patterns around them — signs the agent was struggling:
@@ -217,6 +226,7 @@ Run the focused checks with
 * "Likely harmless" failures — exit 1 with no output from `grep`/`rg`/`test`/`diff`/... (no match / false) — are counted separately and left out of the patterns.
 * Patterns: longest run of failed calls in a row, the same call (tool + exact input) failing 2+ times, and a failed call followed straight away by the same tool (and whether that retry worked). Example error lines per type.
 * Supported for `claude` (tool_result `is_error`, `Exit code N`) and `cursor` (`failure` results, shell `exitCode` / `aborted`, MCP `isError`), both checked against real transcripts. **Not implemented for `cursor-cloud` yet**: the run logs a WARNING and the annotation says so (no numbers, so nothing reads as zero failures).
+* The annotation also repeats the API side of struggles from the fan-out (`api-fanout.sh errors-markdown`): **Buildkite API errors**, failed requests by status → tool. The count goes in the annotation title.
 * Output: the `eval-struggles-<id>` annotation (and `<run>.struggles.md`), `struggles` in `<run>.metrics.json`, comparison rows (failed calls, longest streak, calls failing 2+ times), Datadog `tool_errors.failed` / `.likely_harmless` / `.longest_streak` / `.repeated`, and klaren's prompt.
 
 ### Model API retries
@@ -354,6 +364,8 @@ All new code are mostly in `evals/` folder
     * Given an buildkite mcp version, build that buildkite mcp version into a docker image (not implemented yet, currently it just builds the buildkite mcp based on current code
   * mcp_in_ci.json
     * The mcp config used when `babystand.sh` is running in ci
+  * api-fanout.sh
+    * Per-run API request log summary (see "API fan-out" above)
   * mcp.json
     * The mcp config used when `babystand.sh` is running locally
   * mcp_cursor_cloud.json
