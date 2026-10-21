@@ -294,6 +294,28 @@ prepare_bk_cli() {
     echo "*** [$ENTRY_ID] bk CLI: $BK_CLI_BIN (version $BK_CLI_VERSION, org $BK_CLI_ORG)"
 }
 
+# install_bk_shim <shim_dir> <real_bk> <request_log>  -- write a `bk` wrapper
+# into <shim_dir> (put first on the agent's PATH) that runs the real bk through
+# bk-request-log-shim.mjs, which logs each Buildkite API request bk makes to
+# <request_log>. bk's output and exit code are passed through unchanged.
+# Needs node; returns non-zero (caller warns, bk runs unlogged) without it.
+install_bk_shim() {
+    local dir="$1" real="$2" log="$3" node_bin
+    node_bin="$(command -v node || true)"
+    if [[ -z "$node_bin" ]]; then
+        echo "WARNING: [$ENTRY_ID] node not found; bk API requests will not be logged." >&2
+        return 1
+    fi
+    mkdir -p "$dir"
+    {
+        echo '#!/usr/bin/env bash'
+        echo '# Eval harness wrapper: runs the real bk and logs its Buildkite API requests.'
+        printf 'BK_SHIM_REAL_BK=%q BK_SHIM_REQUEST_LOG=%q exec %q %q "$@"\n' \
+            "$real" "$log" "$node_bin" "$SCRIPT_DIR/bk-request-log-shim.mjs"
+    } > "$dir/bk"
+    chmod +x "$dir/bk"
+}
+
 # install_bk_stub <stub_dir>  -- write a `bk` into <stub_dir> (put first on
 # the agent's PATH) that fails like a missing command, for modes that don't
 # use bk (mcp): the agent must reach Buildkite through the MCP server, even
@@ -679,18 +701,28 @@ run_entry() {
         install_bk_stub "$BK_STUB_DIR"
     fi
 
-    # API request log (fan-out): one JSON line per Buildkite API request the
-    # MCP server makes (--request-log via BUILDKITE_REQUEST_LOG in the MCP
-    # configs), tagged with the tool call that made it. NO_REQUEST_LOG says
+    # API request log (fan-out): one JSON line per Buildkite API request, from
+    # the MCP server (--request-log via BUILDKITE_REQUEST_LOG in the MCP
+    # configs; tagged with the tool call) and, in cli mode, from bk (a logging
+    # wrapper first on PATH; tagged with the bk command). NO_REQUEST_LOG says
     # why a run has none.
-    local REQUEST_LOG="" NO_REQUEST_LOG=""
+    local REQUEST_LOG="" NO_REQUEST_LOG="" BK_SHIM_DIR=""
     if [[ "$AGENT" == "cursor-cloud" ]]; then
         NO_REQUEST_LOG="agent \`$AGENT\` runs its MCP server in Cursor's VM, where the request log cannot be collected"
-    elif [[ "$MODE" != "mcp" ]]; then
-        NO_REQUEST_LOG="not implemented for mode \`$MODE\` yet"
     else
         REQUEST_LOG="$PREFIX.api-requests.jsonl"
         : > "$REQUEST_LOG"
+        if [[ "$MODE" == "cli" ]]; then
+            BK_SHIM_DIR="$HOME/.eval-bk-cli/$RUN_KEY/shim"
+            # Without the wrapper bk runs unlogged: report fan-out as not
+            # available rather than as zero requests.
+            if ! install_bk_shim "$BK_SHIM_DIR" "$BK_CLI_BIN" "$REQUEST_LOG"; then
+                BK_SHIM_DIR=""
+                rm -f "$REQUEST_LOG"
+                REQUEST_LOG=""
+                NO_REQUEST_LOG="node is not installed, so bk's API requests could not be logged"
+            fi
+        fi
     fi
     local HARNESS_VERSION; HARNESS_VERSION="$(harness_version "$AGENT")"
     # One record of what this run used — written to the bundle as
@@ -703,9 +735,9 @@ run_entry() {
         --arg agent "$AGENT" --arg harness "$HARNESS_VERSION" --arg model "${MODEL:-default}" \
         --arg bk_bin "$BK_CLI_BIN" --arg bk_ver "$BK_CLI_VERSION" --arg bk_org "$BK_CLI_ORG" \
         --arg mcp_req "$MCP_VERSION" --arg mcp_ver "$MCP_SERVER_VERSION" --arg mcp_sha "$MCP_SOURCE_SHA" \
-        --arg req_log "$REQUEST_LOG" \
+        --arg req_log "$REQUEST_LOG" --arg bk_shim "$BK_SHIM_DIR" \
         '{mode: $mode, mode_params: $params,
-          api_request_log: {mcp_server: ($req_log != "" and $mode == "mcp")},
+          api_request_log: {mcp_server: ($req_log != "" and $mode == "mcp"), bk_cli: ($bk_shim != "")},
           harness: {agent: $agent, version: $harness, model: $model},
           bk_cli: (if $mode == "cli" then
                      {version: $bk_ver, path: $bk_bin, download_url: ($params.download_url // null),
@@ -804,6 +836,8 @@ run_entry() {
         AGENT_ORG="$BK_CLI_ORG"
     fi
     [[ -n "$BK_STUB_DIR" ]] && AGENT_PATH="$BK_STUB_DIR:$AGENT_PATH"
+    # The logging bk wrapper goes in front of the real bk.
+    [[ -n "$BK_SHIM_DIR" ]] && AGENT_PATH="$BK_SHIM_DIR:$AGENT_PATH"
     if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" EVAL_MODE="$MODE" PATH="$AGENT_PATH" \
             BUILDKITE_ORGANIZATION_SLUG="$AGENT_ORG" BK_TELEMETRY=false \
             BUILDKITE_REQUEST_LOG="$REQUEST_LOG" \
@@ -835,7 +869,7 @@ run_entry() {
     jq --argjson ri "$RUN_INFO" '. + {run_info: $ri}' "$AUDIT_METRICS_FILE" > "$MERGED_METRICS" \
         && mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
 
-    # --- API fan-out (requests per MCP tool call) ---------------------------
+    # --- API fan-out (requests per MCP tool call / per bk command) ----------
     # From the request log; merged into metrics.json as api_fanout (so the
     # comparison and Datadog see it) and rendered as markdown for the
     # eval-fanout annotation and klaren.
@@ -876,8 +910,8 @@ run_entry() {
     fi
 
     # Buildkite API errors (from the fan-out): failed API requests by status
-    # then tool — the API-side view of the same struggles, repeated here so it
-    # sits next to them.
+    # then tool / bk command, and bk runs that exited non-zero — the API-side
+    # view of the same struggles, repeated here so it sits next to them.
     if [[ -n "$FANOUT_JSON" ]]; then
         { echo; "$SCRIPT_DIR/api-fanout.sh" errors-markdown "$FANOUT_JSON"; } | tee -a "$STRUGGLES_MD"
     else
@@ -1044,7 +1078,10 @@ run_entry() {
             STRUGGLES_META="$(jq -r 'if .implemented then "\(.failed_calls) failed of \(.tool_calls) tool calls · longest streak \(.longest_failure_streak)" else "not implemented for this agent" end' "$STRUGGLES_JSON")"
             jq -e '.implemented | not' "$STRUGGLES_JSON" >/dev/null 2>&1 && STRUGGLES_STYLE="warning"
             if [[ -n "$FANOUT_JSON" ]]; then
-                STRUGGLES_META+="$(jq -r 'if .errors > 0 then " · \(.errors) API error\(if .errors == 1 then "" else "s" end)" else "" end' "$FANOUT_JSON")"
+                STRUGGLES_META+="$(jq -r '
+                    def s(n): if n == 1 then "" else "s" end;
+                    (if .errors > 0 then " · \(.errors) API error\(s(.errors))" else "" end)
+                    + ((.bk_cli.failed_runs // []) | length | if . > 0 then " · \(.) failed bk run\(s(.))" else "" end)' "$FANOUT_JSON")"
             fi
             if [[ -n "$RETRIES_JSON" ]] && jq -e '(.retries // 0) > 0' "$RETRIES_JSON" >/dev/null 2>&1; then
                 STRUGGLES_META+="$(jq -r '" · \(.retries) model API retries"' "$RETRIES_JSON")"

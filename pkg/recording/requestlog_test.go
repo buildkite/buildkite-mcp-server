@@ -53,7 +53,7 @@ func TestRequestLogTransport(t *testing.T) {
 		newMockResponse(200, `{"id":"1"}`, "application/json"),
 		newMockResponse(404, `{"message":"Not Found"}`, "application/json"),
 	}}
-	transport, err := recording.NewRequestLogTransport(mock, logPath)
+	transport, err := recording.NewRequestLogTransport(mock, logPath, "https://api.buildkite.com/")
 	r.NoError(err)
 
 	// One request made on behalf of a tool call, one with no tool call.
@@ -73,6 +73,7 @@ func TestRequestLogTransport(t *testing.T) {
 	entries := readRequestLog(t, logPath)
 	r.Len(entries, 2)
 	r.Equal("mcp", entries[0].Source)
+	r.True(entries[0].APIRequest)
 	r.Equal(http.MethodGet, entries[0].Method)
 	r.Equal("https://api.buildkite.com/v2/organizations/acme/pipelines/app/builds/1", entries[0].URL)
 	r.Equal(200, entries[0].Status)
@@ -91,7 +92,7 @@ func TestRequestLogTransportLogsErrors(t *testing.T) {
 	r := require.New(t)
 	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
 
-	transport, err := recording.NewRequestLogTransport(errTransport{}, logPath)
+	transport, err := recording.NewRequestLogTransport(errTransport{}, logPath, "https://api.buildkite.com/")
 	r.NoError(err)
 
 	req, err := http.NewRequest(http.MethodGet, "https://api.buildkite.com/v2/user", nil)
@@ -111,7 +112,7 @@ func TestRequestLogTransportAppends(t *testing.T) {
 	r.NoError(os.WriteFile(logPath, []byte(`{"source":"mcp","method":"GET","url":"earlier"}`+"\n"), 0o600))
 
 	mock := &mockTransport{responses: []*http.Response{newMockResponse(200, `{}`, "application/json")}}
-	transport, err := recording.NewRequestLogTransport(mock, logPath)
+	transport, err := recording.NewRequestLogTransport(mock, logPath, "https://api.buildkite.com/")
 	r.NoError(err)
 	req, err := http.NewRequest(http.MethodGet, "https://api.buildkite.com/v2/user", nil)
 	r.NoError(err)
@@ -124,17 +125,13 @@ func TestRequestLogTransportAppends(t *testing.T) {
 }
 
 func TestNewRequestLogTransportBadPath(t *testing.T) {
-	_, err := recording.NewRequestLogTransport(http.DefaultTransport, filepath.Join(t.TempDir(), "missing-dir", "requests.jsonl"))
+	_, err := recording.NewRequestLogTransport(http.DefaultTransport, filepath.Join(t.TempDir(), "missing-dir", "requests.jsonl"), "https://api.buildkite.com/")
 	require.Error(t, err)
 }
 
 func TestRequestLogTransportSignedRedirect(t *testing.T) {
 	const query = "X-Amz-Signature=test-signature&X-Amz-Security-Token=test-security-token"
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.URL.Path == "/download" {
-			http.Redirect(w, req, "/artifact?"+query, http.StatusFound)
-			return
-		}
+	storage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Logging must not remove credentials from the actual download.
 		if req.URL.RawQuery != query {
 			http.Error(w, "missing download credentials", http.StatusForbidden)
@@ -142,12 +139,16 @@ func TestRequestLogTransportSignedRedirect(t *testing.T) {
 		}
 		_, _ = w.Write([]byte("artifact contents"))
 	}))
+	defer storage.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, storage.URL+"/artifact?"+query, http.StatusFound)
+	}))
 	defer server.Close()
 	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
-	transport, err := recording.NewRequestLogTransport(http.DefaultTransport, logPath)
+	transport, err := recording.NewRequestLogTransport(http.DefaultTransport, logPath, server.URL+"/proxy/")
 	require.NoError(t, err)
 	client := &http.Client{Transport: transport}
-	resp, err := client.Get(server.URL + "/download")
+	resp, err := client.Get(server.URL + "/proxy/download")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -155,16 +156,20 @@ func TestRequestLogTransportSignedRedirect(t *testing.T) {
 	require.Equal(t, "artifact contents", string(body))
 	entries := readRequestLog(t, logPath)
 	require.Len(t, entries, 2)
-	require.Equal(t, server.URL+"/artifact", entries[1].URL)
+	require.True(t, entries[0].APIRequest)
+	require.False(t, entries[1].APIRequest)
+	require.Equal(t, storage.URL+"/artifact", entries[1].URL)
 	raw, err := os.ReadFile(logPath)
 	require.NoError(t, err)
+	// False must be persisted explicitly: missing fields mean legacy API logs.
+	require.Contains(t, string(raw), `"api_request":false`)
 	require.NotContains(t, string(raw), "test-signature")
 	require.NotContains(t, string(raw), "test-security-token")
 }
 
 func TestRequestLogTransportStartsWithoutRequests(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
-	_, err := recording.NewRequestLogTransport(http.DefaultTransport, logPath)
+	_, err := recording.NewRequestLogTransport(http.DefaultTransport, logPath, "https://api.buildkite.com/")
 	require.NoError(t, err)
 	raw, err := os.ReadFile(logPath)
 	require.NoError(t, err)
@@ -177,7 +182,7 @@ func TestRequestLogTransportStartsWithoutRequests(t *testing.T) {
 func TestRequestLogTransportRedactsErrorURL(t *testing.T) {
 	const rawURL = "https://user:password@storage.example/artifact?signature=secret#fragment" //nolint:gosec // Deliberately fake credentials test URL redaction.
 	logPath := filepath.Join(t.TempDir(), "requests.jsonl")
-	transport, err := recording.NewRequestLogTransport(errTransport{err: fmt.Errorf("download %s failed", rawURL)}, logPath)
+	transport, err := recording.NewRequestLogTransport(errTransport{err: fmt.Errorf("download %s failed", rawURL)}, logPath, "https://api.buildkite.com/")
 	require.NoError(t, err)
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	require.NoError(t, err)

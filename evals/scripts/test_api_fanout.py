@@ -12,6 +12,43 @@ SCRIPTS = Path(__file__).parent
 
 
 class FanoutTest(unittest.TestCase):
+    def test_storage_requests_do_not_count_as_api_requests(self):
+        records = [
+            {"source": "mcp", "method": "GET", "api_request": True,
+             "url": "https://api.example/proxy/v2/artifact/download", "status": 302,
+             "tool": "get_artifact", "tool_call_id": "one"},
+            {"source": "mcp", "method": "GET", "api_request": False,
+             "url": "https://storage.example/artifact", "status": 200,
+             "tool": "get_artifact", "tool_call_id": "one"},
+            {"source": "mcp", "method": "GET", "api_request": False,
+             "url": "https://storage.example/missing", "status": 403,
+             "tool": "get_artifact", "tool_call_id": "two"},
+        ]
+        # Non-API traffic still proves logging is available, even without a marker.
+        for selected, expected in ((records, 1), (records[1:], 0)):
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as tmp:
+                log = Path(tmp) / "requests.jsonl"
+                log.write_text("".join(json.dumps(r) + "\n" for r in selected))
+                metrics = Path(tmp) / "metrics.json"
+                metrics.write_text(json.dumps({"tool_calls_by_name": [
+                    "2 mcp__buildkite-mcp-server__get_artifact"]}))
+                result = subprocess.run(
+                    ["bash", str(SCRIPTS / "api-fanout.sh"), "json", str(log), str(metrics)],
+                    check=True, capture_output=True, text=True,
+                )
+                fanout = json.loads(result.stdout)
+                self.assertTrue(fanout["available"])
+                self.assertEqual(fanout["total_requests"], expected)
+                self.assertEqual(fanout["errors"], 0)
+                self.assertEqual(fanout["errors_by_status"], {})
+                self.assertEqual(fanout["mcp"]["requests"], expected)
+                tool = fanout["mcp"]["tools"][0]
+                self.assertEqual(tool["requests"], expected)
+                self.assertEqual(tool["avg_per_call"], expected / 2)
+                self.assertEqual(tool["max_per_call"], expected)
+                self.assertEqual(len(tool["endpoints"]), expected)
+                self.assertNotIn("storage.example", result.stdout)
+
     def test_measurement_availability(self):
         started = {"source": "mcp", "type": "started"}
         request = {"source": "mcp", "method": "GET", "url": "https://api.buildkite.com/v2/user",

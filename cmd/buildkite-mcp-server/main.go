@@ -101,7 +101,7 @@ func run(ctx context.Context, cmd *kong.Context) error {
 	if cli.RequestLog != "" {
 		// Wrapped inside the tracing transport (below), so each request still
 		// carries the context of the MCP tool call that made it.
-		innerTransport, err = recording.NewRequestLogTransport(innerTransport, cli.RequestLog)
+		innerTransport, err = recording.NewRequestLogTransport(innerTransport, cli.RequestLog, cli.BaseURL)
 		if err != nil {
 			return err
 		}
