@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// RequestLogEntry is one line of a request log: a single outbound API request
+// RequestLogEntry is one line of a request log: a single outbound HTTP request
 // and, when it was made on behalf of an MCP tool call, that call's identity.
 // It deliberately holds no headers or bodies (no credentials, small lines).
 type RequestLogEntry struct {
@@ -23,6 +24,7 @@ type RequestLogEntry struct {
 	DurationMS float64 `json:"duration_ms"`
 	Method     string  `json:"method"`
 	URL        string  `json:"url"`
+	APIRequest bool    `json:"api_request"`
 	Status     int     `json:"status,omitempty"`
 	Error      string  `json:"error,omitempty"`
 	Bytes      int64   `json:"bytes,omitempty"`
@@ -35,6 +37,7 @@ type RequestLogEntry struct {
 // appends, so it stays cheap for long sessions and log-heavy tools.
 type RequestLogTransport struct {
 	wrapped http.RoundTripper
+	apiURL  *url.URL
 	mu      sync.Mutex
 	file    *os.File
 }
@@ -44,7 +47,13 @@ type RequestLogTransport struct {
 // it is appended to, not truncated, so a restarted server keeps earlier lines.
 // A started record distinguishes an active logger with no requests from a
 // placeholder file left by a harness running an older server.
-func NewRequestLogTransport(wrapped http.RoundTripper, path string) (*RequestLogTransport, error) {
+// baseURL identifies the API origin; other destinations remain in the raw log
+// but are marked as non-API requests for API-only summaries.
+func NewRequestLogTransport(wrapped http.RoundTripper, path, baseURL string) (*RequestLogTransport, error) {
+	apiURL, err := url.Parse(baseURL)
+	if err != nil || apiURL.Host == "" || (apiURL.Scheme != "http" && apiURL.Scheme != "https") {
+		return nil, fmt.Errorf("request log: API base URL must be an absolute HTTP or HTTPS URL")
+	}
 	f, err := os.OpenFile(filepath.Clean(path), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // path is a user-supplied output file
 	if err != nil {
 		return nil, fmt.Errorf("request log: cannot open %s: %w", path, err)
@@ -53,7 +62,7 @@ func NewRequestLogTransport(wrapped http.RoundTripper, path string) (*RequestLog
 		_ = f.Close()
 		return nil, fmt.Errorf("request log: cannot write startup record: %w", err)
 	}
-	return &RequestLogTransport{wrapped: wrapped, file: f}, nil
+	return &RequestLogTransport{wrapped: wrapped, apiURL: apiURL, file: f}, nil
 }
 
 // RoundTrip forwards the request and logs it, whether or not it succeeded.
@@ -75,6 +84,7 @@ func (t *RequestLogTransport) RoundTrip(req *http.Request) (*http.Response, erro
 		DurationMS: float64(time.Since(start).Microseconds()) / 1000,
 		Method:     req.Method,
 		URL:        loggedURL.String(),
+		APIRequest: strings.EqualFold(req.URL.Scheme, t.apiURL.Scheme) && strings.EqualFold(req.URL.Host, t.apiURL.Host),
 	}
 	if err != nil {
 		entry.Error = strings.ReplaceAll(err.Error(), req.URL.String(), loggedURL.String())

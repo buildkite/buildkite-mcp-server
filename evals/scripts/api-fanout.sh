@@ -4,8 +4,9 @@
 # bk CLI command made in one eval run ("fan-out").
 #
 # Input is the run's request log (<run>.api-requests.jsonl): JSON lines from
-#   - the MCP server's --request-log (source "mcp"): one per API request,
-#     tagged with the tool name + tool call id that made it
+#   - the MCP server's --request-log (source "mcp"): one per HTTP request,
+#     tagged with the tool name + tool call id that made it; api_request=false
+#     destinations (e.g. artifact storage) are excluded from API summaries
 #   - bk-request-log-shim.mjs (source "bk"): one per API request, tagged with
 #     the bk invocation (argv), plus one "invocation" line per bk run
 #
@@ -78,10 +79,12 @@ cmd_json() {
     # 128 KiB, which a long run's log can exceed.
     jq --argjson m "$metrics_json" "$FANOUT_JQ"'
       . as $all
-      | ($all | map(select(.source == "mcp" and .method != null))) as $mcp
+      | ($all | map(select(.source == "mcp" and .method != null))) as $mcp_http
+      # Older logs have no classification; retain their existing interpretation.
+      | ($mcp_http | map(select(.api_request != false))) as $mcp
       | ($all | map(select(.source == "bk" and .type == "request"))) as $bkreq
       | ($all | map(select(.source == "bk" and .type == "invocation"))) as $bkinv
-      | if ($mcp + $bkreq + $bkinv | length) == 0
+      | if ($mcp_http + $bkreq + $bkinv | length) == 0
            and ($all | any((.source == "mcp" or .source == "bk") and .type == "started") | not) then
           {available: false, reason: "API request logging did not start (no startup record, requests or bk invocations)"}
         else
