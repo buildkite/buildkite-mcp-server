@@ -220,28 +220,37 @@ matrix:
   #  # postmortems in the Cursor dashboard.
   #  kill_agent_on_complete: true
 
-  # Isolated Job Errors smoke comparison against one completed dogfood build.
+  # Isolated comparison against the completed multi-failure dogfood build #2.
   # Setup only checks API access; the agent produces a diagnosis without writes.
   # No reviewed answer keys exist for this new scenario yet: Klaren provides
   # qualitative feedback, but rubric grades must remain n/a.
-  - id: job-errors-dogfood-comment-only
+  - id: job-errors-dogfood-build-2
     agent: claude
     model: claude-opus-4-8
     mode: mcp
     mode_params: {}
     prompt: red-to-green-comment-only
     scenario:
-      id: job-errors-dogfood-1
+      id: job-errors-dogfood-2
       # Check the dedicated token before spending an agent run. Discard the
-      # response: the evaluated agent must investigate the build independently.
+      # error contents: the evaluated agent must investigate independently.
       setup: |
-        curl --fail --silent --show-error --max-time 30 \
+        api=https://api.buildkite.com/v2/organizations/buildkite/pipelines/job-errors-dogfood/builds/2
+        jobs=$(curl --fail --silent --show-error --max-time 30 \
           -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN}" \
-          https://api.buildkite.com/v2/organizations/buildkite/pipelines/job-errors-dogfood/builds/1/jobs/01a15cc4-383c-4c96-84a1-515b914d2c89/errors \
-          | jq -e '.items | type == "array" and length > 0' >/dev/null
-        echo "Dedicated token preflight passed: target job errors are readable."
+          "$api/jobs?per_page=100")
+        job_ids=$(jq -er '[.[] | select(.state == "failed" or .state == "timed_out") | .id] | if length == 15 then .[] else error("Expected 15 problem jobs") end' <<<"$jobs")
+        total=0
+        while IFS= read -r job_id; do
+          count=$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN}" \
+            "$api/jobs/$job_id/errors" \
+            | jq -er '.items | if type == "array" and length > 0 then length else error("No captured errors") end')
+          total=$((total + count))
+        done <<<"$job_ids"
+        echo "Dedicated token preflight passed: all 15 problem jobs have readable errors ($total records)."
       vars:
-        BUILD_URL: https://buildkite.com/buildkite/job-errors-dogfood/builds/1
+        BUILD_URL: https://buildkite.com/buildkite/job-errors-dogfood/builds/2
     # The build above lives in the `buildkite` org, not the default eval org.
     token_env: MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN
     mcp_version: source
