@@ -46,6 +46,8 @@ buildkite-agent artifact download "runs/*/*.metrics.json" "$WORK_DIR/" \
     || echo "dd-publish: no metrics artifacts; publishing identity/duration series only." >&2
 buildkite-agent artifact download "runs/*/*.klaren.json" "$WORK_DIR/" \
     || echo "dd-publish: no klaren verdict artifacts." >&2
+buildkite-agent artifact download "runs/*/*.yilong.json" "$WORK_DIR/" \
+    || echo "dd-publish: no yilong verdict artifacts." >&2
 
 PUBLISHED=0 FAILED=0
 while IFS= read -r META; do
@@ -63,11 +65,15 @@ while IFS= read -r META; do
         AGENT="$(jq -r '.agent // "unknown"' "$META")" \
         MODEL="$(jq -r '.model // "default"' "$META")" \
         GOAL_ACHIEVED="$(jq -r '.goal // "unknown"' "$META")" \
+        MODE="$(jq -r '.mode // "mcp"' "$META")" \
+        HARNESS_VERSION="$(jq -r '.harness_version // ""' "$META")" \
+        BK_CLI_VERSION="$(jq -r '.bk_cli_version // ""' "$META")" \
         EVAL_DURATION_SECONDS="$(jq -r '.duration_seconds // ""' "$META")" \
         DD_TIMESTAMP="$(jq -r '.end_ts // ""' "$META")" \
         EVALUATOR="$(jq -r '.evaluator // ""' "$META")" \
         METRICS_FILE="${META%.dd.json}.metrics.json" \
         KLAREN_FILE="${META%.dd.json}.klaren.json" \
+        YILONG_FILE="${META%.dd.json}.yilong.json" \
         "$SCRIPT_DIR/dd-metrics.sh"; then
         PUBLISHED=$(( PUBLISHED + 1 ))
     else

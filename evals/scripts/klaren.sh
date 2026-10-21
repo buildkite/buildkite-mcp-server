@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the detailed reviewer, export rubric verdicts and candidate answer keys.
 # Usage: ENTRY_ID=id PROMPT_NAME=prompt SCENARIO_ID=scenario AGENT=claude
-#        klaren.sh transcript goal final-report diff prefix
+#        klaren.sh transcript goal final-report diff prefix [struggles-markdown] [fanout-markdown] [request-log]
 # CI loads checked-in references from MCP_SRC_SHA only AFTER the evaluated run;
 # expected/ remains excluded from the agent image. Local runs use expected/.
 set -euo pipefail
@@ -11,6 +11,8 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TRANSCRIPT="${1:?transcript required}" GOAL="${2:?goal required}"
 REPORT="${3:?final report required}" DIFF="${4:?diff file required}"
 PREFIX="${5:?output prefix required}"
+STRUGGLES_MD="${6:-}"
+FANOUT_MD="${7:-}" REQUEST_LOG="${8:-}"
 : "${ENTRY_ID:?entry id required}"
 : "${PROMPT_NAME:?prompt name required}"
 SCENARIO_ID="${SCENARIO_ID:-}"
@@ -74,6 +76,19 @@ jq -n --rawfile goal "$GOAL" --rawfile conclusion "$REPORT" \
 {
     cat "$ROOT_DIR/prompts/klaren.md"
     printf '\nThe LLM session log file to analyze is: %s\n' "$TRANSCRIPT"
+    if [[ "${MODE:-mcp}" == "cli" ]]; then
+        printf '\nRun context: the agent had NO Buildkite MCP server; it reached Buildkite through the Buildkite CLI `bk` (version %s) via Bash. Judge the bk commands, flags and output as the tools under review.\n' "${BK_CLI_VERSION:-}"
+    else
+        printf '\nRun context: the agent reached Buildkite through the Buildkite MCP server (mode: mcp).\n'
+    fi
+    if [[ -s "$FANOUT_MD" ]]; then
+        printf '\nBuildkite API requests behind each tool call / bk command (fan-out). Use it to quantify waste. The raw request log, one JSON line per API request tagged with the tool call or bk command that made it, is: %s\n\n' "$REQUEST_LOG"
+        cat "$FANOUT_MD"
+    fi
+    if [[ -s "$STRUGGLES_MD" ]]; then
+        printf '\nFailed tool calls and struggle patterns from the session log ("likely harmless" = e.g. grep with no match), failed Buildkite API requests and failed bk runs from the request log, and model API retries (harness-level, not the agent). Use them as leads, and check each in the log:\n\n'
+        cat "$STRUGGLES_MD"
+    fi
     printf '\nCanonical rubric (verdict IDs, criteria and required evidence):\n'
     cat "$ROOT_DIR/prompts/rubric.json"
     printf '\nHarness evidence and reviewed references (empty strings mean unavailable):\n'

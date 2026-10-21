@@ -38,6 +38,94 @@ A set of artifacts, and annotations in the Buildkite build showing:
 
 The klaren reviewer always runs on claude regardless of the entry's agent — it's the judge, not the subject under test, and a fixed reviewer keeps reviews comparable across agents.
 
+## Evaluator selection
+
+Each `evals.yaml` entry selects `evaluator: yilong | klaren` (default `klaren`).
+Set `EVALUATOR=klaren` or `EVALUATOR=yilong` when creating a build to override all entries.
+
+* **Yilong** calls Jev, TypeSafe's System One model, directly at
+  `https://api.typesafe.ai/v1/systemone` (`YILONG_MODEL`, default `jev-1.14.0`).
+  It uses the same `prompts/rubric.json` and prompt/scenario reference paths as
+  Klaren. There is no second rubric file or automatic grade adjustment.
+* **Klaren** produces the detailed review, rubric grades and candidate references
+  described below. It runs by default; comparison annotations compare its
+  reports only when both runs have one.
+
+Yilong sends one request per category, with these input fields:
+
+| Category | Input sent to Jev |
+| --- | --- |
+| Conclusion | Reviewed root-cause reference; agent's final report |
+| Investigation | Rendered task; reviewed root-cause reference; tool calls paired with full captured tool outputs; final report |
+| Fix | Reviewed root cause (when available) and fix reference; complete pushed patch, or final report for diagnosis-only tasks; final build state when available |
+
+A **tool output** is the response to one tool call (for example, returned build
+logs). The **trace** combines calls and their captured outputs; it is not the
+whole conversation or private reasoning. An **input field** is one named piece
+of evidence in the request. Jev's **result** contains the grading probabilities,
+confidence and expected score, saved in `<run>.yilong.json`. The annotation and
+Datadog score use the most probable grade without changing it, even when grades
+contradict one another. Known token patterns are redacted before sending.
+
+Ties select the lower tied grade. Responses must contain exactly one numeric
+probability per rubric level, each in [0,1], summing to 1 within 0.000001.
+Invalid distributions are reported as **undetermined**, with an explanation in
+the annotation and no numeric category score or Datadog category metric.
+
+Yilong first sends complete evidence. TypeSafe documents a 32 MiB body limit and
+default contexts of 64k tokens per request and 32k per question
+([limits](https://docs.typesafe.ai/models), [errors](https://docs.typesafe.ai/api)).
+Only HTTP 400 `detail.error_type: max_tokens_exceeded` triggers these fallbacks:
+
+1. Retry the **identical full request** with
+   `TypeSafe-Danger-Zone-Long-Context: true` (262k tokens per request and question).
+2. If long context also rejects it for tokens, ask **Haiku 4.5** to summarize
+   oversized observed evidence (`trace`, final report, or patch/proposed fix).
+   Send the summarized request to Jev in long-context mode. Jev still assigns
+   the grades; Haiku has no tools and does not grade or generate reference answers.
+
+Summarization processes every part of an oversized field in ordered, UTF-8-safe
+chunks of at most 48,000 bytes. Shorter fields, the task, reviewed references,
+rubric and final build state stay unchanged. Chunk summaries are reduced again
+if needed (at most six passes, requiring size reduction each time). Instructions
+preserve decisive evidence, contradictions, failed attempts, verification gaps,
+and weakened/deleted tests, but summaries are still **lossy**. The annotation
+marks each summary-based verdict with an asterisk (for example, **Sherlock**\*)
+and an explanatory footnote. Each question in `<run>.yilong.json`
+records `evidence_mode: full | summarized`, `context_mode: default | long`, and
+Haiku model/call/token usage when summarization succeeds. Redaction is reapplied
+to generated summaries.
+
+On a token-limit failure, the complete redacted request is saved as
+`<run>.yilong-<category>.evidence.json`; a successful summary is saved as
+`<run>.yilong-<category>.summary.json`. CI uploads these beside the verdicts and
+links them from the annotation. Locally they remain beside the input bundle.
+Bodies over 32 MiB are still withheld locally, without summarization. Unusable,
+unfinished or failed summaries, unchanged oversized goals/references, and final
+Jev rejections produce **undetermined**, with a reason and no numeric category
+score. There is no silent head/tail truncation or repeated summarization loop
+after the final Jev request.
+
+429s and transient failures are retried with backoff. Missing references or
+required evidence mean **n/a**; an unavailable patch for an implemented fix is
+**undetermined**, never replaced by the agent's claims. An empty captured patch
+is sent as evidence that no changes were pushed.
+
+CI runs Yilong in a separate step with `MCP_EVAL_FRAMEWORK_JEV_TOKEN`, never in
+the evaluated agent's container. Haiku uses the existing Buildkite Hosted Models
+connection (`BUILDKITE_AGENT_ENDPOINT` and `BUILDKITE_AGENT_ACCESS_TOKEN`) through
+the Anthropic Messages API; no extra secret or Claude CLI is needed. The fallback
+requires Python 3 (standard library only), available on hosted Ubuntu agents.
+Outside CI, set `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` to enable Haiku;
+missing credentials leave oversized categories undetermined.
+Yilong downloads `<run>.judge.json`, final reports,
+transcripts and complete `.diff.patch` artifacts, then uploads verdicts and
+annotates the build. Datadog publishing follows it and handles either evaluator.
+Locally, run `./evals/scripts/yilong.sh evals/runs/<id>/<run>.judge.json` with the
+token in your environment; `YILONG_DRY_RUN=true` prints requests without calling
+the API or requiring a key. Old bundles lacking prompt/scenario metadata must
+be regenerated rather than falling back to entry-ID references.
+
 ## Klaren rubric and reference answers
 
 Klaren keeps its detailed session review and also grades three outcomes using
@@ -115,11 +203,59 @@ CI publishes `mcp_eval.klaren.{conclusion,investigation,fix}` and
 metrics. n/a and undetermined categories publish no score. Both
 [MCP Evals](https://app.datadoghq.com/dashboard/vsr-kw9-upf/) and
 [MCP Evals by Build](https://app.datadoghq.com/dashboard/rx7-bme-f27/) show the
-three categories with the level markers above. Klaren still runs after each eval
-as before.
+three categories with the level markers above. Yilong publishes matching
+`mcp_eval.yilong.*` metrics separately; selecting Klaren retains its full workflow.
 
 Run the focused checks with
-`python3 -B -m unittest discover -s evals/scripts -p test_klaren.py -v`.
+`python3 -B -m unittest discover -s evals/scripts -p 'test_*.py' -v`.
+
+## Modes: MCP server or Buildkite CLI
+
+Each entry also picks HOW its agent reaches Buildkite (`mode:`, default `mcp`), with per-mode settings in `mode_params:` (a hash; unknown keys skip the entry loudly). Full field docs are at the top of `evals.yaml`.
+
+* `mcp` — the MCP server under test (see `mcp_version`). Takes no `mode_params`. bk is not available: the CI image installs it off PATH, and a stub `bk` first on the agent's PATH fails like a missing command (exit 127), so a bk on your own PATH can't leak into a local run either.
+* `cli` — the [Buildkite CLI](https://github.com/buildkite/cli) (`bk`) and NO MCP server, so the same scenario can be compared across the two. For `claude` and `cursor` agents (cursor-cloud is skipped: bk is installed on this host, not in Cursor's VM).
+  * `mode_params.download_url` — an https release archive (`.tar.gz`/`.tgz`/`.zip`) or bare binary. It is fetched into `~/.eval-bk-cli/<run>/bin/` (outside the eval-repo clone) and put first on the agent's PATH. Without it, the bk at `/opt/bk/bin/bk` is used — `BK_CLI_VERSION` pinned in `evals/Dockerfile`, installed off PATH — or, locally, the `bk` on PATH. `bk --version` must run, so a linux archive fails a local macOS run loudly.
+  * `mode_params.org_slug` — bk's default org (`BUILDKITE_ORGANIZATION_SLUG`). Default: the token's only org from `GET /v2/organizations`. If discovery fails or is ambiguous, CLI setup fails before scenario execution; set `mode_params.org_slug` explicitly. This prevents bk from falling back to a saved repository/user organization. The ambient `BUILDKITE_ORGANIZATION_SLUG` is never passed through: in CI it names the org hosting the eval.
+  * The entry token (`token_env`) reaches bk as `BUILDKITE_API_TOKEN`, which bk reads before any stored credential. An unset or empty resolved token skips the entry before setup, preventing credential fallback. `BK_TELEMETRY=false`, so eval runs don't count as real CLI usage.
+  * The MCP config is `mcp_none.json` (empty). Locally, claude also gets `--strict-mcp-config`, so MCP servers from your own Claude settings don't leak in; cursor has no equivalent, so a cli entry for cursor is skipped loudly when `~/.cursor/mcp.json` defines any servers or can't be parsed (e.g. it has `//` comments). The restricted allowlist (`LOCAL_BYPASS_PERMISSION=false`) swaps the MCP tools for `Bash(bk:*)`.
+  * `prompts/modes/cli.md` is appended to the prompt: one line saying bk (with its version and default org) is installed and authenticated. An MCP server announces itself through its tool list; a CLI does not.
+  * klaren runs as normal on the transcript, with one line telling it the run used bk, not MCP.
+
+`bk-tool-audit-v2.sh metrics` reports `tool_calls_bk_cli` (shell tool calls containing bk commands) and `bk_cli_commands_by_name` (e.g. `2 bk build view`) for every agent and mode, so an mcp run is expected to show 0 (attempts against the stub still count). The audit requires Node.js and `shfmt` (CI pins v3.10.0); install both on PATH for local audits. It parses Bash syntax without executing it: quoted examples, comments and literal heredocs do not count, while command substitutions and common `env` / `sudo` / `command` / `exec` wrappers do. These are static command counts, not runtime traces: variables, aliases, evaluated strings and arbitrary wrappers cannot be resolved, nor can branch execution or loop iteration counts. Invalid shell syntax makes the CLI counts `null` (unavailable), while other metrics and failed-call reporting remain available. The comparison report gets a "Shell calls running bk" row and a per-command table, and Datadog `tool_calls.bk_cli`.
+
+Every run records what it used — mode, `mode_params`, the harness (agent CLI) version, and the bk CLI version (cli) or MCP server version + source SHA (mcp):
+
+* `runs/<id>/<run>.run-info.json` (bundle + build artifact)
+* `run_info` inside `<run>.metrics.json`, so it shows in the `eval-metrics-<id>` annotation, and the comparison report gets a "Run setup" table (base vs target, `same`/`changed`)
+* the `eval-final` / `eval-metrics` / `eval-tools` annotation titles, e.g. `mode: cli · claude 2.1.300 (Claude Code) · bk 3.59.1`
+* Datadog tags `mode:`, `harness_version:`, `bk_cli_version:`
+
+## API fan-out
+
+Each run also records every Buildkite API request the agent caused, so you can see how many requests sit behind each MCP tool call and each bk command ("fan-out"). Not available for `cursor-cloud` (its MCP server runs inside Cursor's VM).
+
+* **MCP server**: the server's `--request-log <file>` flag (env `BUILDKITE_REQUEST_LOG`) appends a startup record, then one JSON line per outbound HTTP request — method, URL without query parameters, fragment or userinfo, status, duration, bytes, and the MCP tool name + tool call id that made it (no headers or bodies). `api_request` is true only for the configured API origin (`BUILDKITE_BASE_URL`, matching scheme and host including port). Requests to other origins, such as artifact storage downloads, remain in the raw log but are excluded from API fan-out and API error counts, matching the CLI measurement boundary. Older logs without this field retain their previous counting behavior. `mcp.json` / `mcp_in_ci.json` pass `BUILDKITE_REQUEST_LOG` through (`${BUILDKITE_REQUEST_LOG:-}`, so an unset value just means no log); the cursor config generators re-spell it as `${env:BUILDKITE_REQUEST_LOG}`.
+* **bk CLI** (`mode: cli`): `scripts/bk-request-log-shim.mjs`, installed as a `bk` wrapper first on the agent's PATH (`~/.eval-bk-cli/<run>/shim/bk`, needs node). For each bk run it starts a local proxy and points bk at it via bk's own `BUILDKITE_REST_API_ENDPOINT` / `BUILDKITE_GRAPHQL_ENDPOINT` settings, forwarding every request unchanged to the real API and logging it (GraphQL by operation name) plus one line per bk run. stdin/stdout/stderr and the exit code pass through untouched. Artifact downloads: `bk artifacts download` and `bk build download` fetch each file from the artifact's absolute `download_url`, which would skip the proxy, so for those commands only the proxy rewrites each artifact's `download_url` to point back at itself, and the download requests are logged too (they never print them; nothing else in a response is changed, so e.g. downloaded job logs stay intact, and other commands' responses are left untouched). If the API connection drops mid-response, the request is logged as failed and bk's connection is cut too, so bk fails as it would without the wrapper. Requests still in flight when bk exits (e.g. sibling downloads it cancels after an error) are logged as cancelled: they count toward fan-out, but not as API errors. Without node, bk runs unwrapped and the run reports fan-out as not available. Not seen: other requests bk sends to absolute URLs from API responses, e.g. the S3 redirect after a download (not a Buildkite API request).
+* CLI logs retain only allowlisted command words (e.g. `build view`), not flags or positional arguments. Like MCP logs, URLs omit queries, fragments and userinfo; transport errors retain codes rather than potentially sensitive messages. Forwarded requests and the real CLI's arguments are unchanged. The upstream transport honors `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` (including lowercase variants, with uppercase taking precedence). Logging needs Node.js 22.21 or 24.5+; older versions run bk without logging rather than risk bypassing a configured proxy.
+* Both write to `runs/<id>/<run>.api-requests.jsonl`. `scripts/api-fanout.sh` summarizes it per MCP tool (calls from the transcript, API requests, avg / max per call, top endpoints with ids normalized) and per bk command (runs, requests, avg / max per run, top endpoints). Failed requests are also grouped by HTTP status, then by tool / bk command (`errors_by_status`, e.g. `504: {list_builds: 2, get_test: 1}`; no response at all is `network error`; MCP requests outside any tool call are `(no tool call)`).
+* The summary lands in: the `eval-fanout-<id>` annotation (and `<run>.api-fanout.md`), `api_fanout` in `<run>.metrics.json`, an "API requests (total)" row plus a per-tool / per-command table in the comparison report (an mcp run and a cli run line up side by side), Datadog gauges `api_requests.total` / `.mcp` / `.bk_cli`, and klaren's prompt (with the raw log path) so its review can quantify waste.
+* A missing or empty log is **not measured**, not zero usage: `api_fanout.available` is false, counts are omitted, comparisons show N/A, and Datadog API-request gauges are omitted. A startup record (excluded from counts) confirms logging worked even if no requests were made. Actual request records or bk invocation records also establish availability for older logs without a startup record.
+
+## Struggles
+
+`bk-tool-audit-v2.sh struggles` reads the transcript for failed tool calls and the patterns around them — signs the agent was struggling:
+
+* Failed calls grouped by type, then tool: `exit N` (shell exit code), `timeout`, `interrupted`, `blocked` (permission / harness refusal), `MCP tool error`, `tool error`. Shell calls are labelled by their first real program (`Bash: git`, `Bash: bk build view`).
+* "Likely harmless" failures — exit 1 with no output from `grep`/`rg`/`test`/`diff`/... (no match / false) — are counted separately and left out of the patterns.
+* Patterns: longest run of failed calls in a row, the same call (tool + exact input) failing 2+ times, and a failed call followed straight away by the same tool (and whether that retry worked). Example error lines per type.
+* Supported for `claude` (tool_result `is_error`, `Exit code N`) and `cursor` (`failure` results, shell `exitCode` / `aborted`, MCP `isError`), both checked against real transcripts. **Not implemented for `cursor-cloud` yet**: the run logs a WARNING and the annotation says so (no numbers, so nothing reads as zero failures).
+* The annotation also repeats the API side of struggles from the fan-out (`api-fanout.sh errors-markdown`): **Buildkite API errors** (failed requests by status → tool / bk command) and **failed bk runs** (`bk_cli.failed_runs`: command, exit code, API requests made before failing — 0 means it failed before calling the API, e.g. bad flags). A bk run can fail with no failed API request, which is why the two are listed apart. Counts go in the annotation title.
+* Output: the `eval-struggles-<id>` annotation (and `<run>.struggles.md`), `struggles` in `<run>.metrics.json`, comparison rows (failed calls, longest streak, calls failing 2+ times), Datadog `tool_errors.failed` / `.likely_harmless` / `.longest_streak` / `.repeated`, and klaren's prompt.
+
+### Model API retries
+
+Separate from the agent's own struggles: `bk-tool-audit-v2.sh model-retries` counts the agent harness retrying its call to the **model API** — Claude Code's `{"type":"system","subtype":"api_retry", error_status, retry_delay_ms, ...}` stream events, e.g. a 504 or 429 from the model gateway (Buildkite Hosted Models in CI). These are not tool calls (and not Buildkite API requests), so the struggles report does not see them, but they add wall-clock time. Grouped by status with the time spent waiting; read from claude.sh's raw stream (`CLAUDE_RAW_LOG`). Claude only — other agents show "not available". Shown at the bottom of the `eval-struggles-<id>` annotation (count in its title), as `model_api_retries` in `<run>.metrics.json`, a "Model API retries" comparison row, and Datadog `model_api.retries` / `.retry_wait_seconds`.
 
 ## Permission posture
 
@@ -205,12 +341,15 @@ All new code are mostly in `evals/` folder
       cursor-cloud streams carry no per-event timestamps, so `wait` /
       `tool_time_seconds` are null there (their result event still reports
       total duration)
+  * yilong.sh
+    * Jev evaluator — see "Evaluator selection" above. CI runs it with no
+      arguments; locally, pass the `<run>.judge.json` paths to evaluate.
   * dd-metrics.sh
     * Publish one entry's run metrics to Datadog (metrics v2 series API) as
       `mcp_eval.*` gauges — run count, goal_achieved (1/0), duration /
       tool-time / wait seconds, tool call counts (total + `mcp__`-prefixed),
-      and token usage (input / output / cache read / cache write), plus klaren
-      rubric scores — tagged `entry:`, `prompt:`, `agent:`, `model:`, `goal:`,
+      and token usage (input / output / cache read / cache write), plus separate
+      klaren/yilong rubric scores — tagged `entry:`, `prompt:`, `agent:`, `model:`, `goal:`,
       `buildkite_build:`, `evaluator:`
     * Best-effort by design: skips loudly when `DD_API_KEY` is unset (local
       runs, forks), and a publish failure never fails the entry. `DD_SITE`
@@ -249,6 +388,10 @@ All new code are mostly in `evals/` folder
     * Given an buildkite mcp version, build that buildkite mcp version into a docker image (not implemented yet, currently it just builds the buildkite mcp based on current code
   * mcp_in_ci.json
     * The mcp config used when `babystand.sh` is running in ci
+  * mcp_none.json
+    * The empty mcp config used by `mode: cli` entries (see "Modes" above)
+  * api-fanout.sh / bk-request-log-shim.mjs
+    * Per-run API request log summary, and the logging bk wrapper (see "API fan-out" above)
   * mcp.json
     * The mcp config used when `babystand.sh` is running locally
   * mcp_cursor_cloud.json

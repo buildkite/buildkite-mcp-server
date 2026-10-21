@@ -110,9 +110,15 @@ echo "--- :robot_face: Starting Claude agent"
 # while still piping it through the parser for human-readable rendering.
 # NOTE: the parser requires --output-format=stream-json --verbose; the caller is
 # responsible for passing those (babystand.sh does).
+# EVAL_MODE=cli (set by babystand.sh for `mode: cli` entries): no MCP server;
+# the agent reaches Buildkite through the bk CLI on PATH instead.
+MCP_CONFIG="$ROOT_DIR/mcp_in_ci.json"
+if [[ "${EVAL_MODE:-mcp}" == "cli" ]]; then
+    MCP_CONFIG="$ROOT_DIR/mcp_none.json"
+fi
 RAW_LOG="$(mktemp)"
 echo "$prompt_content" | claude \
-    --mcp-config "$ROOT_DIR/mcp_in_ci.json" \
+    --mcp-config "$MCP_CONFIG" \
     --strict-mcp-config \
     -p \
     --permission-mode bypassPermissions \
@@ -127,6 +133,9 @@ SESSION_ID=$(jq -r 'select(.type == "system" and .subtype == "init") | .session_
 TRANSCRIPT="$HOME/.claude/projects/$(pwd | sed -e 's/[\/.]/-/g')/$SESSION_ID.jsonl"
 echo "CLAUDE_SESSION_ID=$SESSION_ID"
 echo "CLAUDE_TRANSCRIPT=$TRANSCRIPT"
+# The raw stream-json: it also carries harness events the transcript may not,
+# e.g. `system`/`api_retry` (model API retries).
+echo "CLAUDE_RAW_LOG=$RAW_LOG"
 
 # Extract the run's final assistant text (the stream-json "result" event) into a
 # file so the caller can surface just the final output (e.g. as an annotation).
