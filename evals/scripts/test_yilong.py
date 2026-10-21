@@ -311,6 +311,25 @@ class YilongTest(unittest.TestCase):
                 self.assertIsNone(questions["investigation"]["score"])
                 self.assertIn("grade withheld", result.stdout)
 
+    def test_invalid_haiku_credentials_never_appear_in_diagnostics(self):
+        self.oversized_trace()
+        sentinel = "synthetic-credential-not-a-real-token"
+        for credential in ("ANTHROPIC_API_KEY", "BUILDKITE_AGENT_ACCESS_TOKEN"):
+            with self.subTest(credential=credential):
+                self.env["ANTHROPIC_BASE_URL"] = self.env["YILONG_API_URL"] if credential == "ANTHROPIC_API_KEY" else ""
+                self.env["ANTHROPIC_API_KEY"] = ""
+                self.env["BUILDKITE_AGENT_ENDPOINT"] = self.env["YILONG_API_URL"]
+                self.env[credential] = sentinel + "\n"
+                questions, result = self.run_judge()
+                grade = questions["investigation"]
+                self.assertEqual(grade["verdict"], "undetermined")
+                self.assertIsNone(grade["score"])
+                self.assertNotIn(sentinel, result.stdout + result.stderr)
+                for artifact in self.root.glob("run.*"):
+                    self.assertNotIn(sentinel, artifact.read_text(), artifact.name)
+                self.assertIn("Haiku client or data error", grade["reason"])
+        self.assertEqual(self.haiku_requests, [])
+
     def test_missing_haiku_credentials_withhold_score(self):
         self.oversized_trace()
         for name in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "BUILDKITE_AGENT_ENDPOINT", "BUILDKITE_AGENT_ACCESS_TOKEN"):
@@ -319,6 +338,7 @@ class YilongTest(unittest.TestCase):
         self.assertEqual(questions["investigation"]["verdict"], "undetermined")
         self.assertIsNone(questions["investigation"]["score"])
         self.assertIn("Haiku summarization failed", result.stdout)
+        self.assertIn("Haiku requires Buildkite Hosted Models credentials", result.stdout)
         self.assertEqual(self.haiku_requests, [])
 
     def test_invalid_probabilities_withhold_grades_and_metrics(self):
