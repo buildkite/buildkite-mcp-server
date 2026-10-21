@@ -239,7 +239,7 @@ matrix:
         jobs=$(curl --fail --silent --show-error --max-time 30 \
           -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN}" \
           "$api/jobs?per_page=100")
-        job_ids=$(jq -er '[.[] | select(.state == "failed" or .state == "timed_out") | .id] | if length == 15 then .[] else error("Expected 15 problem jobs") end' <<<"$jobs")
+        job_ids=$(jq -er '[.items[] | select(.state == "failed" or .state == "timed_out") | .id] | if length == 15 then .[] else error("Expected 15 problem jobs") end' <<<"$jobs")
         total=0
         while IFS= read -r job_id; do
           count=$(curl --fail --silent --show-error --max-time 30 \
