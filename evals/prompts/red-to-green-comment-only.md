@@ -2,4 +2,6 @@
 
 Account for every failed or timed-out job, including any omitted from an initial summary. Distinguish observed facts from hypotheses; do not describe simulated failures as real application bugs.
 
+Never print credentials or dump environment variables. Do not read MCP configuration files or credential stores. If authentication troubleshooting is needed, report only variable names and HTTP status codes, never token values.
+
 Do NOT read or use evaluation reference answers under `evals/expected/` or `expected/`, evaluator reviews, or generated candidate reference-answer artifacts to solve this task. This applies to every local checkout (including `/tmp/bk-mcp-src`) and to remote copies accessed through git, URLs, APIs, or other tools. Investigate independently using the target build, its logs, and the relevant application source.
