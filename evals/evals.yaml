@@ -220,24 +220,30 @@ matrix:
   #  # postmortems in the Cursor dashboard.
   #  kill_agent_on_complete: true
 
-  # Diagnosis-only variant: point at ANY existing red build — including one on a
-  # pipeline we don't own and must not mutate — and produce a written diagnosis.
-  # No setup (no branch, no push); BUILD_URL is the only parameter, so it is
-  # compared purely via its runs/ bundle.
-  # WARN: This is a difficult scenario for MCP to resolve, and it takes a while
-  #       to run. Uncomment if you want to test MCP against it.
-  - id: red-to-green-comment-only
+  # Isolated Job Errors smoke comparison against one completed dogfood build.
+  # Setup only checks API access; the agent produces a diagnosis without writes.
+  # No reviewed answer keys exist for this new scenario yet: Klaren provides
+  # qualitative feedback, but rubric grades must remain n/a.
+  - id: job-errors-dogfood-comment-only
     agent: claude
     model: claude-opus-4-8
     mode: mcp
     mode_params: {}
     prompt: red-to-green-comment-only
     scenario:
-      id: buildkite-204234
+      id: job-errors-dogfood-1
+      # Check the dedicated token before spending an agent run. Discard the
+      # response: the evaluated agent must investigate the build independently.
+      setup: |
+        curl --fail --silent --show-error --max-time 30 \
+          -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN}" \
+          https://api.buildkite.com/v2/organizations/buildkite/pipelines/job-errors-dogfood/builds/1/jobs/01a15cc4-383c-4c96-84a1-515b914d2c89/errors \
+          | jq -e '.items | type == "array" and length > 0' >/dev/null
+        echo "Dedicated token preflight passed: target job errors are readable."
       vars:
-        BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+        BUILD_URL: https://buildkite.com/buildkite/job-errors-dogfood/builds/1
     # The build above lives in the `buildkite` org, not the default eval org.
-    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    token_env: MCP_EVAL_FRAMEWORK_DOGFOOD_JOB_ERRORS_BUILDKITE_API_TOKEN
     mcp_version: source
 
   # The same diagnosis driven through the Buildkite CLI (bk) instead of the MCP
