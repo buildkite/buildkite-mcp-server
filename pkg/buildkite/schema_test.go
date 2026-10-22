@@ -379,6 +379,20 @@ func TestGetTestRunArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"org_slug", "run_id", "test_suite_slug"}, req)
 }
 
+func TestTestWorkflowArgsSchema(t *testing.T) {
+	list := schemaFor[ListTestWorkflowsArgs](t)
+	require.Equal(t, []string{"org_slug", "test_suite_slug"}, sortedRequired[ListTestWorkflowsArgs](t))
+	for _, property := range []string{"page", "per_page"} {
+		require.Contains(t, list.Properties, property)
+		require.NotContains(t, list.Required, property)
+	}
+	require.Contains(t, list.Properties["test_suite_slug"].Description, "UUID")
+	require.Equal(t, []string{"org_slug", "test_suite_slug", "workflow_id"}, sortedRequired[GetTestWorkflowArgs](t))
+	get := schemaFor[GetTestWorkflowArgs](t)
+	require.Contains(t, get.Properties["test_suite_slug"].Description, "UUID")
+	require.Contains(t, get.Properties["workflow_id"].Description, "list_test_workflows")
+}
+
 func TestListPipelinesArgsSchema(t *testing.T) {
 	s := schemaFor[ListPipelinesArgs](t)
 	req := sortedToolRequired(t, s)

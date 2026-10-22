@@ -56,6 +56,27 @@ Baseline discovery searches at most 500 candidates. If none is found, the respon
 
 ---
 
+## Inspecting Test Engine workflows
+
+The read-only `list_test_workflows` and `get_test_workflow` tools in the `tests`
+toolset expose a suite's configured monitors, filters, alarm/recovery actions,
+and links. Both require `read_suites` and suite access. Supply `org_slug` and
+`test_suite_slug` (a slug or UUID) to list workflows:
+
+```json
+{"org_slug": "acme", "test_suite_slug": "backend"}
+```
+
+To inspect one, call `get_test_workflow` with the same organization and suite
+and an item's `id` as `workflow_id`.
+
+Use the configured labels with `list_tests` to find marked tests; labels alone
+do not rank flakiness. Workflows describe configuration, not proof an action
+ran or event history. Both tools always replace webhook endpoints with
+`[REDACTED]`, regardless of the caller's API permissions.
+
+---
+
 ## Library Usage
 
 The exported Go API of this module should be considered unstable, and subject to breaking changes as we evolve this project.
