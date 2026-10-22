@@ -79,7 +79,6 @@ type BuildFailureSummaryBuild struct {
 	JobStateCounts *FailureSummaryJobStateCounts `json:"job_state_counts,omitempty"`
 	ScheduledAt    *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
 	StartedAt      *buildkite.Timestamp          `json:"started_at,omitempty"`
-	FinishedAt     *buildkite.Timestamp          `json:"finished_at,omitempty"`
 }
 
 type FailureSummaryLogEntry struct {
@@ -229,7 +228,6 @@ func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
 		JobStateCounts: jobStateCounts,
 		ScheduledAt:    build.ScheduledAt,
 		StartedAt:      build.StartedAt,
-		FinishedAt:     build.FinishedAt,
 	}
 }
 
