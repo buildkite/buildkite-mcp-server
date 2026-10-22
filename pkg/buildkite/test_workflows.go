@@ -32,7 +32,7 @@ type GetTestWorkflowArgs struct {
 func ListTestWorkflows() (mcp.Tool, mcp.ToolHandlerFor[ListTestWorkflowsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_test_workflows",
-			Description: "List configured workflows for a Buildkite Test Engine suite, newest first. Returns monitors, filters, alarm/recovery actions, and links. Use this to discover automation and labels used to mark flaky tests before querying list_tests. Use get_test_workflow to inspect one. Configuration does not prove an action ran or rank tests by flakiness.",
+			Description: "List configured workflows for a Buildkite Test Engine suite, newest first. Returns monitors, filters, alarm/recovery actions, and links. Webhook endpoints are always redacted. Use this to discover automation and labels used to mark flaky tests before querying list_tests. Use get_test_workflow to inspect one. Configuration does not prove an action ran or rank tests by flakiness.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Test Workflows",
 				ReadOnlyHint: true,
@@ -58,6 +58,9 @@ func ListTestWorkflows() (mcp.Tool, mcp.ToolHandlerFor[ListTestWorkflowsArgs, an
 				return handleBuildkiteError(err)
 			}
 
+			for i := range workflows {
+				redactWorkflowWebhookEndpoints(&workflows[i])
+			}
 			result := PaginatedResult[buildkite.TestWorkflow]{
 				Items: workflows,
 				Headers: map[string]string{
@@ -72,7 +75,7 @@ func ListTestWorkflows() (mcp.Tool, mcp.ToolHandlerFor[ListTestWorkflowsArgs, an
 func GetTestWorkflow() (mcp.Tool, mcp.ToolHandlerFor[GetTestWorkflowArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_test_workflow",
-			Description: "Inspect a configured Buildkite Test Engine workflow by UUID, including its monitor conditions, filters, alarm/recovery actions, and links. Webhook endpoints may be redacted according to the caller's suite permissions. Describes configured behavior, not event history or proof that an action ran.",
+			Description: "Inspect a configured Buildkite Test Engine workflow by UUID, including its monitor conditions, filters, alarm/recovery actions, and links. Webhook endpoints are always redacted. Describes configured behavior, not event history or proof that an action ran.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Test Workflow",
 				ReadOnlyHint: true,
@@ -93,6 +96,18 @@ func GetTestWorkflow() (mcp.Tool, mcp.ToolHandlerFor[GetTestWorkflowArgs, any], 
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
+			redactWorkflowWebhookEndpoints(&workflow)
 			return mcpTextResult(span, &workflow)
 		}, []string{"read_suites"}
+}
+
+func redactWorkflowWebhookEndpoints(workflow *buildkite.TestWorkflow) {
+	for _, actions := range [][]buildkite.TestWorkflowAction{workflow.AlarmActions, workflow.RecoverActions} {
+		for i := range actions {
+			if actions[i].Type == "send_webhook_notification" && actions[i].Endpoint != nil {
+				redacted := "[REDACTED]"
+				actions[i].Endpoint = &redacted
+			}
+		}
+	}
 }

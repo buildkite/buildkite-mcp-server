@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v5"
@@ -27,8 +28,8 @@ func (m *MockTestWorkflowsClient) Get(ctx context.Context, org, suite, workflowI
 
 var _ TestWorkflowsClient = (*MockTestWorkflowsClient)(nil)
 
-// An explicit zero recovery threshold must survive, and a viewer's redacted
-// endpoint must not be replaced with a guessed URL or discarded.
+// Webhook endpoints must be fully redacted in both action lists, while
+// other configuration and an explicit zero recovery threshold survive.
 const testWorkflowJSON = `{
 	"id": "0199e940-7e01-7000-8000-000000000001",
 	"url": "https://api.buildkite.com/v2/analytics/organizations/acme/suites/backend/workflows/0199e940-7e01-7000-8000-000000000001",
@@ -37,9 +38,13 @@ const testWorkflowJSON = `{
 	"filters": [{"key": "name", "operator": "starts_with", "value": "Checkout"}],
 	"alarm_actions": [
 		{"type": "add_label", "label": "intermittent"},
-		{"type": "send_webhook_notification", "endpoint": "https://example.com/[REDACTED]"}
+		{"type": "send_webhook_notification", "endpoint": "[REDACTED]"}
 	],
-	"recover_actions": [{"type": "remove_label", "label": "intermittent"}],
+	"recover_actions": [
+		{"type": "remove_label", "label": "intermittent"},
+		{"type": "send_webhook_notification", "endpoint": "[REDACTED]"},
+		{"type": "send_webhook_notification"}
+	],
 	"created_at": null, "updated_at": null, "created_by": null
 }`
 
@@ -58,7 +63,8 @@ func TestListTestWorkflows(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var workflow buildkite.TestWorkflow
-			require.NoError(t, json.Unmarshal([]byte(testWorkflowJSON), &workflow))
+			apiJSON := strings.ReplaceAll(testWorkflowJSON, "[REDACTED]", "https://hooks.example.com/private-token?key=secret")
+			require.NoError(t, json.Unmarshal([]byte(apiJSON), &workflow))
 			link := `<https://api.buildkite.com/v2/analytics/organizations/acme/suites/backend/workflows?page=4&per_page=17>; rel="next"`
 			itemsJSON := "[" + testWorkflowJSON + "]"
 			if tt.empty {
@@ -100,7 +106,8 @@ func TestGetTestWorkflow(t *testing.T) {
 					require.Equal(t, suite, gotSuite)
 					require.Equal(t, "0199e940-7e01-7000-8000-000000000001", workflowID)
 					var workflow buildkite.TestWorkflow
-					require.NoError(t, json.Unmarshal([]byte(testWorkflowJSON), &workflow))
+					apiJSON := strings.ReplaceAll(testWorkflowJSON, "[REDACTED]", "https://hooks.example.com/private-token?key=secret")
+					require.NoError(t, json.Unmarshal([]byte(apiJSON), &workflow))
 					return workflow, &buildkite.Response{Response: &http.Response{StatusCode: http.StatusOK}}, nil
 				},
 			}

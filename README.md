@@ -72,8 +72,8 @@ and an item's `id` as `workflow_id`.
 
 Use the configured labels with `list_tests` to find marked tests; labels alone
 do not rank flakiness. Workflows describe configuration, not proof an action
-ran or event history. Webhook redaction follows the caller's API permissions;
-`--read-only` does not change those permissions.
+ran or event history. Both tools always replace webhook endpoints with
+`[REDACTED]`, regardless of the caller's API permissions.
 
 ---
 
