@@ -134,6 +134,9 @@ if ! jq -e -s --slurpfile rubric "$ROOT_DIR/prompts/rubric.json" '
       all($rubric[0].questions[]; . as $q | $r.questions[$q.key] as $a |
           ($a.reason | type == "string" and test("\\S")) and
           (([$q.levels[].id] + ["n/a", "undetermined"]) | index($a.verdict) != null)) and
+      ($r.struggles | type == "array") and
+      all($r.struggles[]; . as $s | all(["summary", "evidence", "consequence"][];
+          $s[.] | type == "string" and test("\\S"))) and
       ($r.reference_answers | type == "object") and
       all(["root_cause", "fix"][]; $r.reference_answers[.] | . == null or type == "string"))
 ' "$WORK_DIR/result.json" >/dev/null 2>&1; then
@@ -151,6 +154,7 @@ jq -n --slurpfile raw "$WORK_DIR/result.json" --slurpfile rubric "$ROOT_DIR/prom
     | {entry: $entry, run_key: $run, evaluator: "klaren",
        prompt: $prompt, scenario: $scenario, reference_path: $e.reference_path,
        diff_status: $e.diff_status, diff_review_complete: ($r.diff_review_complete == true),
+       struggles: $r.struggles,
        reference_answers_status: "candidate — human review required",
        reference_answers: $r.reference_answers,
        questions: [$rubric[0].questions[] | . as $q
@@ -177,6 +181,15 @@ jq -n --slurpfile raw "$WORK_DIR/result.json" --slurpfile rubric "$ROOT_DIR/prom
                      elif $unreviewed then $unreviewed
                      else $a.reason end)}]}
 ' > "$PREFIX.klaren.json"
+
+jq -r '
+    "**Reviewer-observed struggles** (Klaren assessment; separate from explicitly flagged failures)", "",
+    (if .struggles == null then
+        "_Review unavailable: reviewer failed or returned invalid output; this does not mean no struggles._"
+     elif (.struggles | length) == 0 then "_None identified by the reviewer._"
+     else .struggles[] | "- **\(.summary)**\n  - Evidence: \(.evidence)\n  - Consequence: \(.consequence)"
+     end)
+' "$PREFIX.klaren.json" > "$PREFIX.klaren-struggles.md"
 
 for name in root_cause fix; do
     candidate="$PREFIX.klaren-candidate-$name.md"

@@ -1022,6 +1022,17 @@ run_entry() {
         fi
         KLAREN_ELAPSED=$(fmt_elapsed $(( $(date +%s) - KLAREN_START )))
         echo "*** [$ENTRY_ID] KLAREN ELAPSED: $KLAREN_ELAPSED"
+        # Keep qualitative findings separate from exact tool failure counts.
+        local REVIEWER_STRUGGLES
+        REVIEWER_STRUGGLES="$(jq -c '.struggles' "$PREFIX.klaren.json")" || REVIEWER_STRUGGLES=null
+        MERGED_METRICS="$(mktemp)"
+        jq --argjson s "$REVIEWER_STRUGGLES" '. + {reviewer_struggles: $s}' "$AUDIT_METRICS_FILE" > "$MERGED_METRICS" \
+            && mv "$MERGED_METRICS" "$AUDIT_METRICS_FILE"
+        if [[ -s "$PREFIX.klaren-struggles.md" ]]; then
+            { echo; cat "$PREFIX.klaren-struggles.md"; } >> "$STRUGGLES_MD"
+        else
+            printf '\n**Reviewer-observed struggles:** _unavailable: Klaren review failed._\n' >> "$STRUGGLES_MD"
+        fi
     fi
 
     # --- Write the run bundle to <harness>/runs/<id>/<id>-<datetime>.<ext> ---
@@ -1075,16 +1086,29 @@ run_entry() {
         fi
         if [[ -s "$PREFIX.struggles.md" ]]; then
             local STRUGGLES_META STRUGGLES_STYLE="info"
-            STRUGGLES_META="$(jq -r 'if .implemented then "\(.failed_calls) failed of \(.tool_calls) tool calls · longest streak \(.longest_failure_streak)" else "not implemented for this agent" end' "$STRUGGLES_JSON")"
-            jq -e '.implemented | not' "$STRUGGLES_JSON" >/dev/null 2>&1 && STRUGGLES_STYLE="warning"
+            STRUGGLES_META="$(jq -r 'if .implemented then "\(.failed_calls) explicitly flagged failures of \(.tool_calls) tool calls · longest streak \(.longest_failure_streak)" else "not implemented for this agent" end' "$STRUGGLES_JSON")"
+            if ! jq -e '.implemented and (.failed_calls - .likely_harmless == 0)' "$STRUGGLES_JSON" >/dev/null 2>&1; then
+                STRUGGLES_STYLE="warning"
+            fi
             if [[ -n "$FANOUT_JSON" ]]; then
                 STRUGGLES_META+="$(jq -r '
                     def s(n): if n == 1 then "" else "s" end;
                     (if .errors > 0 then " · \(.errors) API error\(s(.errors))" else "" end)
                     + ((.bk_cli.failed_runs // []) | length | if . > 0 then " · \(.) failed bk run\(s(.))" else "" end)' "$FANOUT_JSON")"
+                jq -e '.errors > 0 or ((.bk_cli.failed_runs // []) | length > 0)' "$FANOUT_JSON" >/dev/null 2>&1 && STRUGGLES_STYLE="warning"
             fi
             if [[ -n "$RETRIES_JSON" ]] && jq -e '(.retries // 0) > 0' "$RETRIES_JSON" >/dev/null 2>&1; then
                 STRUGGLES_META+="$(jq -r '" · \(.retries) model API retries"' "$RETRIES_JSON")"
+                STRUGGLES_STYLE="warning"
+            fi
+            if [[ "$ENTRY_EVALUATOR" == "klaren" ]]; then
+                if [[ "$REVIEWER_STRUGGLES" == null ]]; then
+                    STRUGGLES_META+=" · reviewer findings unavailable"
+                    STRUGGLES_STYLE="warning"
+                elif jq -e 'length > 0' <<<"$REVIEWER_STRUGGLES" >/dev/null; then
+                    STRUGGLES_META+="$(jq -r '" · \(length) reviewer finding\(if length == 1 then "" else "s" end)"' <<<"$REVIEWER_STRUGGLES")"
+                    STRUGGLES_STYLE="warning"
+                fi
             fi
             annotate_markdown "eval-struggles-$ENTRY_ID" ":face_with_spiral_eyes: [$ENTRY_ID] Eval — struggles" \
                 "$PREFIX.struggles.md" "${STRUGGLES_META} · ${RUN_LABEL}" "$STRUGGLES_STYLE"
