@@ -608,12 +608,12 @@ func TestGetBuildFailureSummaryLimitsFinalEscapedJSONPayload(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, callResult.IsError)
 	text := getTextResult(t, callResult).Text
-	require.LessOrEqual(t, len(text), failureSummaryContentByteLimit)
+	require.LessOrEqual(t, len(text), 50_000)
 
 	var summary BuildFailureSummary
 	require.NoError(t, json.Unmarshal([]byte(text), &summary))
 	require.Equal(t, len(text), summary.ContentBytes)
-	require.Equal(t, failureSummaryContentByteLimit, summary.ContentLimitBytes)
+	require.Equal(t, 50_000, summary.ContentLimitBytes)
 	require.True(t, summary.ContentTruncated)
 	require.Less(t, len(summary.Build.Message), len(escapeHeavy))
 	require.Less(t, len(summary.Jobs[0].Command), len(escapeHeavy))
