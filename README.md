@@ -8,6 +8,56 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Diagnosing builds with structured errors
+
+> Job Errors is not yet publicly available. This integration is a draft for
+> internal dogfooding and MCP team review, not for customer use.
+
+`get_build_failure_summary` includes structured Job Errors by default, alongside
+build status, job-state counts, and bounded problem jobs (including soft failures).
+It does not fetch the complete job inventory or any logs by default. Start with:
+
+```json
+{
+  "org_slug": "example-org",
+  "pipeline_slug": "example-pipeline",
+  "build_number": "123"
+}
+```
+
+Annotations and failed Test Engine tests remain enabled by default. Read the
+structured evidence first, then use `tail_logs` only for specific jobs that need
+more evidence. Set `include_logs: true` to include bounded log tails in the
+summary (50 lines per eligible job by default, max 200). `log_tail` adjusts that
+limit but does not enable logs. Missing or unavailable capture does not
+automatically fetch logs.
+
+Each returned failed, timed-out, expired, canceled, or promised-failing job has
+`job_errors.status`: `found`, `none_recorded`, or `unavailable`. Empty capture is
+not evidence of success; use logs when capture is missing or unavailable. Job
+state and `soft_failed` remain independent of capture (`soft_failed` is omitted
+when false). Broken and dependency-failed jobs have no error lookup.
+
+The tool reads one page of at most five records per problem job, with at most four
+concurrent lookups. A record may contain many findings: tool-specific `context`
+is preserved, including file, line, rule, and message fields where captured. It
+retains at most 64 KiB of records per job and stays within the existing overall
+response budget. Whole records are omitted when needed, with `content_truncated`
+and `truncated` set. Read `job_errors.url` to recover omitted records on the first
+page; `next_url` continues after that page, not after the last displayed record.
+`truncated` also indicates more API pages. `jobs_truncated` separately reports
+the existing problem-job limit, not missing error capture. For complete coverage,
+raise `max_jobs` only if the server permits it; `job_limit` reports the applied
+cap. If jobs are still omitted, use `list_jobs` to identify them rather than
+repeatedly requesting a larger summary. Read structured evidence through the
+available tools first, and fetch focused logs only when that evidence is
+unavailable or insufficient.
+
+The token needs `read_job_errors` for this section. HTTP 403/404 and other lookup
+errors leave the job visible with status `unavailable`; HTTP 401 propagates for
+reauthentication. Set `include_job_errors: false` to skip these requests. Existing
+annotation and test defaults are unchanged; disabling errors does not enable logs.
+
 ## Retrying builds with limited permissions
 
 The `retries` toolset supports investigating failures and retrying jobs without

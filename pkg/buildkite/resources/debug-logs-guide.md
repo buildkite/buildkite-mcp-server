@@ -20,11 +20,13 @@ In minimum-access mode, `get_build_failure_summary`, `compare_builds`, `tail_log
 The server provides a composite investigation tool and lower-level log tools:
 
 ### 1. get_build_failure_summary - Start Here
-**Best first step for diagnosing a build failure** — combines build state, failed and canceled jobs, promised failures from still-running jobs, bounded log tails, error/warning annotations, and failed Test Engine tests in one call. Blocking failures fill `max_jobs` first, then canceled jobs, then soft-failed jobs (`soft_failed: true`). Jobs that never ran (`broken`, `waiting_failed`, `blocked_failed`, `unblocked_failed`) fill the remaining `max_jobs` slots unless `include_never_ran_jobs` is false.
+**Best first step for diagnosing a build failure** — combines build state and job-state counts, failed and canceled jobs, promised failures from still-running jobs, structured Job Errors, error/warning annotations, and failed Test Engine tests in one call, without fetching logs by default. Blocking failures fill `max_jobs` first, then canceled jobs, then soft-failed jobs (`soft_failed: true`). Jobs that never ran (`broken`, `waiting_failed`, `blocked_failed`, `unblocked_failed`) fill the remaining `max_jobs` slots unless `include_never_ran_jobs` is false.
 
-The default 50-line tail per failed job is usually enough for an initial diagnosis. Use the lower-level tools only when the summary identifies an area that needs deeper inspection. You can reduce output with `log_tail`, `max_jobs`, `max_annotations`, `max_test_runs`, and `max_failed_tests`, or disable optional sections with `include_logs`, `include_annotations`, and `include_failed_tests`. Failed tests default to at most 50 per build, and failure details (`failure_reason`) are scanned from at most 5 Test Engine runs, choosing the runs that hold the most returned failed tests first. A test whose suite cannot be read from its URL falls back to the build's runs in listed order, and a `warnings` entry says when the cap left candidate runs unscanned.
+Start with the default errors-first response. Each problem job's `job_errors` distinguishes `found`, `none_recorded`, and `unavailable`; missing capture never means success and does not automatically fetch logs. Records preserve grouped findings in tool-specific `context`. If `job_errors.content_truncated` is true, read `job_errors.url` for omitted records on the first page; `next_url` continues after that page. Use `tail_logs` for jobs with missing or insufficient evidence. Set `include_job_errors: false` to skip capture lookups; this does not enable logs.
 
-Failed tests are listed per job: each terminal failed or timed-out job carries `failed_tests` (only tests whose every execution within that job failed) and `failed_tests_status`, one of `found`, `none_recorded`, `ingestion_pending`, or `unavailable`. An empty or absent `failed_tests` list does **not** mean the job's tests passed; follow the job's `failed_tests_hint` and treat its `log_tail` as the authoritative fallback. An entry with `failure_detail_status: "not_retrieved"` had no execution fetched for it. When it carries both `test_suite_slug` and `run_id`, call `get_failed_executions` with them for the detail, paging past the first 100 executions if needed. When `run_id` is absent, the suite lists several runs for this build or none; use `get_build_test_engine_runs` to list them and query each.
+Set `include_logs: true` to include bounded log tails (50 lines per eligible job by default, max 200); `log_tail` adjusts the limit but does not enable logs. Use the lower-level tools only when the summary identifies an area that needs deeper inspection. You can reduce output with `max_jobs`, `max_annotations`, `max_test_runs`, and `max_failed_tests`, or disable optional sections with `include_annotations` and `include_failed_tests`. Failed tests default to at most 50 per build, and failure details (`failure_reason`) are scanned from at most 5 Test Engine runs, choosing the runs that hold the most returned failed tests first. A test whose suite cannot be read from its URL falls back to the build's runs in listed order, and a `warnings` entry says when the cap left candidate runs unscanned.
+
+Failed tests are listed per job: each terminal failed or timed-out job carries `failed_tests` (only tests whose every execution within that job failed) and `failed_tests_status`, one of `found`, `none_recorded`, `ingestion_pending`, or `unavailable`. An empty or absent `failed_tests` list does **not** mean the job's tests passed; follow the job's `failed_tests_hint` and inspect `job_errors` before fetching logs if needed. An entry with `failure_detail_status: "not_retrieved"` had no execution fetched for it. When it carries both `test_suite_slug` and `run_id`, call `get_failed_executions` with them for the detail, paging past the first 100 executions if needed. When `run_id` is absent, the suite lists several runs for this build or none; use `get_build_test_engine_runs` to list them and query each.
 
 ### 2. tail_logs - Focused Follow-up
 Shows the last N entries for one job when the composite summary needs more log context.
@@ -57,6 +59,8 @@ Always set `limit` — logs can be very large.
 ### Step 0: Get the Failure Summary
 Call `get_build_failure_summary` with the organization slug, pipeline slug, and build number. In most cases this is enough to identify the root cause without additional calls.
 
+If `jobs_truncated` is true, the summary does not cover every problem job. Omitted jobs may still have captured errors. If complete coverage is needed, increase `max_jobs` only if the server permits it; `job_limit` reports the applied limit. If the limit still excludes jobs, use `list_jobs` to identify them. Do not repeatedly request a larger summary beyond that limit or assume the omitted jobs lack errors. Use structured errors through available tools first; when they cannot provide enough evidence, use focused logs for those jobs and explain the coverage limit.
+
 Interpret its jobs as follows:
 - **`failed`**, **`timed_out`** and **`expired`** jobs without `soft_failed: true` are blocking failures (an `expired` job never reached an agent). These are the root cause candidates, start here
 - **`soft_failed: true`** jobs (see [Soft Failures](#soft-failures)) ran and failed, but the step's `soft_fail` setting allowed that exit status, so they did not block the build
@@ -64,7 +68,7 @@ Interpret its jobs as follows:
 - **`waiting_failed` / `blocked_failed` / `unblocked_failed`** jobs never ran because a job they depend on failed. They are consequences of that upstream failure, not root causes, and have no logs — investigate the blocking failure instead
 - **`running` with a non-zero `promised_exit_status`** has declared an early failure but may still produce more logs, artifacts, or test results before it finishes
 
-If you need more context, take a blocking failed job's `id` as the `job_id` for the lower-level log tools.
+Read the job errors, annotations, and test results before fetching logs. If that evidence explains the failure, stop; the steps below are optional follow-up, not a checklist to run for every job. When logs are needed, take the blocking failed job's `id` as the `job_id` for the lower-level log tools.
 
 ### Soft Failures
 A soft-failed job is a real, unsuccessful execution whose exit status the pipeline author explicitly allowed through `soft_fail`. Rules for handling them:
@@ -77,11 +81,11 @@ A soft-failed job is a real, unsuccessful execution whose exit status the pipeli
 - `build.job_state_counts` tallies jobs by state only, so a `failed` count can include soft-failed jobs.
 - `retry_failed_jobs` skips soft-failed jobs, and `compare_builds` reports a change in `soft_failed` as `state_changed`, never `newly_failing` or `recovered`.
 
-### Step 1: Quick Assessment
-Use `tail_logs` with `tail: 50-100` to see the most recent output. Most failures surface here.
+### Step 1: Focused Log Follow-up, Only If Needed
+When structured evidence is missing, unavailable, or insufficient, use `tail_logs` with `tail: 50-100` for that job. A tail may contain cleanup rather than the cause; do not fetch tails for every job by default or continue if the evidence already answers the question.
 
 ### Step 2: Error Hunting
-Use `search_logs` with common error patterns:
+If the cause is still unclear, use `search_logs` with a pattern from the available evidence and a bounded `limit`. When there is no more specific clue, common patterns include:
 - `error|failed|exception`
 - `fatal|panic|abort`
 - `timeout|cancelled`
