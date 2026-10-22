@@ -37,6 +37,7 @@ class KlarenTest(unittest.TestCase):
         (self.root / "diff").write_text("")
         self.response = {
             "diff_review_complete": False,
+            "struggles": [],
             "questions": {
                 "conclusion": {"verdict": "sorta", "reason": "Missed a material cause.", "score": 999},
                 "investigation": {"verdict": "sherlock", "reason": "Read the logs."},
@@ -158,6 +159,28 @@ class KlarenTest(unittest.TestCase):
         self.assertEqual((self.root / "run.klaren.md").read_text().strip(), "Prose but no valid scoring block.")
         self.assertFalse((self.root / "run.klaren-candidate-root_cause.md").exists())
         self.assertNotIn("Candidate reference answers — next steps", (self.root / "run.klaren-verdicts.md").read_text())
+        self.assertIsNone(data["struggles"])
+        self.assertIn("unavailable", (self.root / "run.klaren-struggles.md").read_text())
+
+    def test_reviewer_struggles_require_evidence_and_consequence(self):
+        finding = {"summary": "Summary exceeded the harness output limit.",
+                   "evidence": "get_build_failure_summary: Error: result (76,730 characters across 2,723 lines) exceeds maximum allowed tokens.",
+                   "consequence": "Agent repeated the call with logs disabled."}
+        self.response["struggles"] = [finding]
+        data, _ = self.run_review()
+        self.assertEqual(data["struggles"], [finding])
+        report = (self.root / "run.klaren-struggles.md").read_text()
+        for value in finding.values():
+            self.assertIn(value, report)
+        self.response["struggles"] = []
+        data, _ = self.run_review()
+        self.assertEqual(data["struggles"], [])
+        self.assertIn("None identified", (self.root / "run.klaren-struggles.md").read_text())
+        for invalid in (None, {}, [{**finding, "evidence": " "}], [{"summary": "Slow"}]):
+            with self.subTest(invalid=invalid):
+                self.response["struggles"] = invalid
+                data, _ = self.run_review(returncode=1)
+                self.assertIsNone(data["struggles"])
 
     def test_implemented_fix_requires_complete_diff_review(self):
         self.env["DIFF_STATUS"] = "available"
@@ -180,6 +203,10 @@ class KlarenTest(unittest.TestCase):
         self.assertEqual(data["questions"][2]["verdict"], "undetermined")
 
     def test_harness_preserves_large_pushed_diff_as_artifact(self):
+        finding = {"summary": "Summary exceeded the harness output limit.",
+                   "evidence": "get_build_failure_summary returned an output-limit message without is_error.",
+                   "consequence": "Agent requested a compact summary instead."}
+        self.response["struggles"] = [finding]
         self.response["diff_review_complete"] = True
         self.response["questions"]["fix"]["verdict"] = "duct-tape"
         self.run_review()  # Prepare the CLI's final review fixture.
@@ -219,7 +246,7 @@ if [[ "$ANNOTATION_CONTEXT_PREFIX" == eval-* ]]; then
     git add .
     git -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm 'Change and skip test'
     git push origin HEAD
-    printf 'CLAUDE_TRANSCRIPT=%s/transcript.jsonl\nCLAUDE_RESULT_FILE=%s/final.md\n' "$STUB_ROOT" "$STUB_ROOT"
+    printf 'CLAUDE_TRANSCRIPT=%s/transcript.jsonl\nCLAUDE_RESULT_FILE=%s/final.md\nCLAUDE_RAW_LOG=%s/raw.jsonl\n' "$STUB_ROOT" "$STUB_ROOT" "$STUB_ROOT"
 else
     cp "$1" "$STUB_PROMPT"
     printf 'CLAUDE_RESULT_FILE=%s/review.md\n' "$STUB_ROOT"
@@ -228,6 +255,7 @@ fi
         executable(self.scripts / "bk-eval-compare.sh", "exit 0\n")
         executable(self.root / "bin/buildkite-agent", '''
 if [[ "$1" == annotate ]]; then cat >> "$STUB_ROOT/annotations.md"
+    printf '%s\n' "$*" >> "$STUB_ROOT/annotation-args"
 elif [[ "$1" == artifact && "$2" == upload ]]; then
     mkdir -p "$STUB_ROOT/upload"
     for file in $3; do cp "$file" "$STUB_ROOT/upload/"; done
@@ -239,13 +267,14 @@ else exit 1; fi
         }
         (self.root / "evals.yaml").write_text("matrix fixture\n")
         (self.root / "prompts/fixture.md").write_text("Fix case.\n")
-        for index, (evaluator, configured, override) in enumerate((
-            ("klaren", None, ""),
-            ("yilong", "yilong", ""),
-            ("klaren", "yilong", "klaren"),
-            ("yilong", "klaren", "yilong"),
+        for index, (evaluator, configured, override, signal) in enumerate((
+            ("klaren", None, "", "reviewer"),
+            ("yilong", "yilong", "", "flagged"),
+            ("klaren", "yilong", "klaren", "none"),
+            ("yilong", "klaren", "yilong", "retry"),
+            ("klaren", None, "", "unavailable"),
         )):
-            with self.subTest(evaluator=evaluator, configured=configured, override=override):
+            with self.subTest(evaluator=evaluator, configured=configured, override=override, signal=signal):
                 entry = dict(matrix_entry)
                 if configured is not None:
                     entry["evaluator"] = configured
@@ -253,6 +282,25 @@ else exit 1; fi
                 home = self.root / f"home-{index}"
                 home.mkdir()
                 (self.root / "annotations.md").write_text("")
+                (self.root / "annotation-args").write_text("")
+                # An unflagged harness error must not inflate exact failure counts.
+                events = [
+                    {"type": "assistant", "message": {"id": "one", "content": [
+                        {"type": "tool_use", "id": "a", "name": "mcp__buildkite__get_build_failure_summary", "input": {}}]}},
+                    {"type": "user", "message": {"content": [
+                        {"type": "tool_result", "tool_use_id": "a", "content": "Error: result exceeds maximum allowed tokens."}]}},
+                ]
+                if signal == "flagged":
+                    events[1]["message"]["content"][0]["is_error"] = True
+                self.transcript.write_text("\n".join(map(json.dumps, events)) + "\n")
+                self.response["struggles"] = [finding] if signal == "reviewer" else []
+                self.run_review()
+                if signal == "unavailable":
+                    (self.root / "review.md").write_text("Reviewer stopped without structured output.")
+                (self.root / "raw.jsonl").write_text(json.dumps({
+                    "type": "system", "subtype": "api_retry", "error_status": 504,
+                    "retry_delay_ms": 600, "attempt": 1, "max_retries": 10,
+                }) + "\n" if signal == "retry" else "")
                 for directory in ("runs", "upload"):
                     shutil.rmtree(self.root / directory, ignore_errors=True)
                 # Reset the remote branch between independent runs.
@@ -271,14 +319,26 @@ else exit 1; fi
                 meta = json.loads(next((self.root / "upload").glob("*.dd.json")).read_text())
                 self.assertEqual(meta["evaluator"], evaluator)
                 struggles = next((self.root / "upload").glob("*.struggles.md")).read_text()
-                self.assertIn("**Tool calls: 1, failed: 0**", struggles)
+                self.assertIn(f"**Tool calls: 1, explicitly flagged failures: {int(signal == 'flagged')}**", struggles)
                 metrics = json.loads(next((self.root / "upload").glob("*.metrics.json")).read_text())
                 self.assertTrue(metrics["struggles"]["implemented"])
                 annotations = (self.root / "annotations.md").read_text()
                 self.assertIn("Eval — struggles", annotations)
+                args = next(line for line in (self.root / "annotation-args").read_text().splitlines()
+                            if "eval-struggles-case" in line)
+                self.assertIn("--style " + ("info" if signal == "none" else "warning"), args)
                 if evaluator == "klaren":
                     prompt = (self.root / "prompt.md").read_text()
-                    self.assertIn(struggles, prompt)
+                    self.assertIn(struggles.split("**Reviewer-observed struggles**")[0].strip(), prompt)
+                    self.assertEqual(metrics["reviewer_struggles"],
+                                     [finding] if signal == "reviewer" else None if signal == "unavailable" else [])
+                    self.assertIn("Reviewer-observed struggles", annotations)
+                    if signal == "reviewer":
+                        self.assertIn(finding["consequence"], struggles)
+                        self.assertIn("1 reviewer finding", annotations)
+                    if signal == "unavailable":
+                        self.assertIn("reviewer findings unavailable", annotations)
+                        self.assertNotIn("None identified", struggles)
                     self.assertIn("Klaren — session review", annotations)
                     original_patch = next((self.root / "runs/case").glob("*.diff.patch"))
                     self.assertIn(str(original_patch), prompt)
