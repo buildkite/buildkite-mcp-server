@@ -27,7 +27,7 @@ func TestGetBuildFailureSummaryToolDefinition(t *testing.T) {
 	require.True(t, tool.Annotations.ReadOnlyHint)
 	require.Contains(t, tool.Description, "one call")
 	require.Contains(t, tool.Description, "soft-failed jobs (soft_failed true")
-	require.Equal(t, []string{"read_builds", "read_build_logs", "read_suites"}, scopes)
+	require.Equal(t, []string{"read_builds", "read_build_logs", "read_suites", "read_artifacts"}, scopes)
 	require.NotNil(t, handler)
 }
 
