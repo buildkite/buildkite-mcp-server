@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/sanitize"
 	"github.com/buildkite/buildkite-mcp-server/pkg/tokens"
@@ -207,9 +208,22 @@ func marshalLimitedJSON(value map[string]any, stringLimit int) ([]byte, error) {
 	return marshalJSONWithContentBytes(limited)
 }
 
+// isIdentifierKey reports whether a JSON key holds a value that follow-up
+// tool calls pass back verbatim, such as get_artifact's id and job_id or
+// get_failed_executions' test_suite_slug and run_id. A shortened identifier
+// looks valid but fails the lookup, so limitJSONValue never shortens these
+// values. Because the strings-emptied structure floor then keeps them at full
+// length, collection limiters drop whole items instead when they cannot fit.
+func isIdentifierKey(key string) bool {
+	return key == "id" || strings.HasSuffix(key, "_id") || key == "test_suite_slug"
+}
+
 func limitJSONValue(value any, stringLimit int, context string) (any, bool) {
 	switch value := value.(type) {
 	case string:
+		if isIdentifierKey(context) {
+			return value, false
+		}
 		limited, truncated := truncateUTF8Bytes(value, stringLimit)
 		return limited, truncated
 	case []any:
