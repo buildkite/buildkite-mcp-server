@@ -128,7 +128,7 @@ func CreateCacheRegistry() (mcp.Tool, mcp.ToolHandlerFor[CreateCacheRegistryArgs
 			attribute.String("cluster_id", args.ClusterID),
 		)
 
-		rawFields, err := cacheRegistryRawFields(request)
+		rawFields, err := toolRawFields(request)
 		if err != nil {
 			return utils.NewToolResultError(err.Error()), nil, nil
 		}
@@ -176,7 +176,7 @@ func UpdateCacheRegistry() (mcp.Tool, mcp.ToolHandlerFor[UpdateCacheRegistryArgs
 			attribute.String("registry_uuid", args.RegistryUUID),
 		)
 
-		rawFields, err := cacheRegistryRawFields(request)
+		rawFields, err := toolRawFields(request)
 		if err != nil {
 			return utils.NewToolResultError(err.Error()), nil, nil
 		}
@@ -265,7 +265,7 @@ func setCacheRegistryUpdateFields(input *buildkite.CacheRegistryUpdate, args Upd
 	}
 }
 
-func cacheRegistryRawFields(request *mcp.CallToolRequest) (map[string]json.RawMessage, error) {
+func toolRawFields(request *mcp.CallToolRequest) (map[string]json.RawMessage, error) {
 	var arguments map[string]json.RawMessage
 	if request == nil || request.Params == nil {
 		return arguments, nil

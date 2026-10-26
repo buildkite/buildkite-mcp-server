@@ -259,7 +259,7 @@ func TestMinimumAccessRegistration(t *testing.T) {
 	inspection := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job"}
 	all := append(append([]string{}, inspection...),
 		"get_build_test_engine_runs", "list_step_uploads", "get_step_upload",
-		"get_pipeline", "list_pipelines", "validate_pipeline", "list_pipeline_schedules", "get_pipeline_schedule",
+		"get_pipeline", "list_pipelines", "validate_pipeline", "list_pipeline_schedules", "get_pipeline_schedule", "get_pipeline_github_webhook_processing",
 		"list_annotations", "current_user", "access_token", "list_skills", "load_skill")
 	for _, tt := range []struct {
 		name     string

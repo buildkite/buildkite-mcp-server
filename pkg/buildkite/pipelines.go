@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
@@ -22,6 +23,9 @@ type PipelinesClient interface {
 	Create(ctx context.Context, org string, p buildkite.CreatePipeline) (buildkite.Pipeline, *buildkite.Response, error)
 	Update(ctx context.Context, org, pipelineSlug string, p buildkite.UpdatePipeline) (buildkite.Pipeline, *buildkite.Response, error)
 	AddWebhook(ctx context.Context, org, slug string) (*buildkite.Response, error)
+	GetGitHubWebhookProcessing(ctx context.Context, org, slug string) (buildkite.GitHubWebhookProcessing, *buildkite.Response, error)
+	EnableGitHubWebhookProcessing(ctx context.Context, org, slug string) (buildkite.GitHubWebhookProcessing, *buildkite.Response, error)
+	DisableGitHubWebhookProcessing(ctx context.Context, org, slug string) (buildkite.GitHubWebhookProcessing, *buildkite.Response, error)
 }
 
 type ListPipelinesArgs struct {
@@ -275,24 +279,27 @@ func createPaginatedResult[T any](pipelines []buildkite.Pipeline, converter func
 
 type CreatePipelineArgs struct {
 	ToolInput
-	OrgSlug                   string            `json:"org_slug"`
-	Name                      string            `json:"name"`
-	RepositoryURL             string            `json:"repository_url" jsonschema:"The Git repository URL"`
-	ClusterID                 string            `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
-	Description               string            `json:"description,omitempty"`
-	Configuration             string            `json:"configuration" jsonschema:"The pipeline configuration in YAML format"`
-	DefaultBranch             string            `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
-	SkipQueuedBranchBuilds    bool              `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
-	CancelRunningBranchBuilds bool              `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
-	Tags                      []string          `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
-	Teams                     map[string]string `json:"teams,omitempty" jsonschema:"Team UUIDs mapped to their access level on the pipeline: read_only, build_and_read or manage_build_and_read. Organizations with teams enabled require at least one team, unless the user is an organization administrator"`
-	CreateWebhook             bool              `json:"create_webhook" jsonschema:"Create a GitHub webhook after creating a pipeline. Set true when GitHub push or pull-request events should trigger this pipeline; if the repository is not connected through a compatible Buildkite GitHub App, the pipeline is created and setup instructions are returned. Set false for non-GitHub repositories, centralized or manually managed webhooks, or pipelines that must not receive events yet."`
+	OrgSlug                   string                        `json:"org_slug"`
+	Name                      string                        `json:"name"`
+	RepositoryURL             string                        `json:"repository_url" jsonschema:"The Git repository URL"`
+	ClusterID                 string                        `json:"cluster_id" jsonschema:"The cluster ID to assign the pipeline to"`
+	Description               string                        `json:"description,omitempty"`
+	Configuration             string                        `json:"configuration,omitempty" jsonschema:"Nonblank YAML configuration; supply this or pipeline_template_uuid, not both"`
+	PipelineTemplateUUID      string                        `json:"pipeline_template_uuid,omitempty" jsonschema:"Approved template UUID providing the pipeline's steps; supply this or configuration, not both"`
+	DefaultBranch             string                        `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    bool                          `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds bool                          `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Tags                      []string                      `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
+	Teams                     map[string]string             `json:"teams,omitempty" jsonschema:"Team UUIDs mapped to their access level on the pipeline: read_only, build_and_read or manage_build_and_read. Organizations with teams enabled require at least one team, unless the user is an organization administrator"`
+	BranchConfiguration       *string                       `json:"branch_configuration,omitempty" jsonschema:"Branch filter; omission or null uses the API's null default"`
+	ProviderSettings          *PipelineProviderSettingsArgs `json:"provider_settings,omitempty" jsonschema:"GitHub provider settings; omitted keys use API defaults. Does not create a GitHub Actions trigger or webhook"`
+	CreateWebhook             bool                          `json:"create_webhook" jsonschema:"Create a traditional GitHub webhook after creating a pipeline. Set true when GitHub push or pull-request events should trigger this pipeline; if the repository is not connected through a compatible Buildkite GitHub App, the pipeline is created and setup instructions are returned. Set false for GitHub Actions pipeline triggers, non-GitHub repositories, centralized or manually managed webhooks, or pipelines that must not receive events yet."`
 }
 
 func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "create_pipeline",
-			Description: "Set up a new CI/CD pipeline in Buildkite with YAML configuration, repository connection, and cluster assignment",
+			Description: "Set up a new CI/CD pipeline in Buildkite with YAML configuration or an approved pipeline template, repository connection, and cluster assignment",
 			Annotations: &mcp.ToolAnnotations{
 				Title:           "Create Pipeline",
 				DestructiveHint: boolPtr(false),
@@ -308,6 +315,22 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 				attribute.Bool("create_webhook", args.CreateWebhook),
 			)
 
+			raw, err := toolRawFields(request)
+			if err != nil {
+				return utils.NewToolResultError(err.Error()), nil, nil
+			}
+			_, configurationPresent := raw["configuration"]
+			_, templatePresent := raw["pipeline_template_uuid"]
+			if (configurationPresent || args.Configuration != "") && (templatePresent || args.PipelineTemplateUUID != "") {
+				return utils.NewToolResultError("supply configuration or pipeline_template_uuid, not both"), nil, nil
+			}
+			if strings.TrimSpace(args.Configuration) == "" && strings.TrimSpace(args.PipelineTemplateUUID) == "" {
+				return utils.NewToolResultError("supply nonblank configuration or an approved pipeline_template_uuid"), nil, nil
+			}
+			provider, err := pipelineProviderSettings(args.ProviderSettings, raw["provider_settings"])
+			if err != nil {
+				return utils.NewToolResultError(err.Error()), nil, nil
+			}
 			create := buildkite.CreatePipeline{
 				Name:                      args.Name,
 				Repository:                args.RepositoryURL,
@@ -318,8 +341,13 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 				Configuration:             args.Configuration,
 				Tags:                      args.Tags,
 				Teams:                     args.Teams,
+				ProviderSettings:          provider,
+				PipelineTemplateUUID:      args.PipelineTemplateUUID,
 			}
 
+			if args.BranchConfiguration != nil {
+				create.BranchConfiguration = *args.BranchConfiguration
+			}
 			if args.DefaultBranch != "" {
 				create.DefaultBranch = args.DefaultBranch
 			}
@@ -440,19 +468,111 @@ func CreatePipelineWebhook() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineWebhook
 	}, []string{"write_pipelines"}
 }
 
+type PipelineGitHubWebhookProcessingArgs struct {
+	ToolInput
+	OrgSlug      string `json:"org_slug"`
+	PipelineSlug string `json:"pipeline_slug"`
+}
+
+func GetPipelineGitHubWebhookProcessing() (mcp.Tool, mcp.ToolHandlerFor[PipelineGitHubWebhookProcessingArgs, any], []string) {
+	return mcp.Tool{
+		Name:        "get_pipeline_github_webhook_processing",
+		Description: "Get traditional GitHub webhook processing state. Requires Full Access to a GitHub or GitHub Enterprise pipeline and expanded-webhook enrollment; unavailable controls return 404. Does not describe dedicated GitHub Actions triggers",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Pipeline GitHub Webhook Processing",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args PipelineGitHubWebhookProcessingArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetPipelineGitHubWebhookProcessing")
+		defer span.End()
+		span.SetAttributes(attribute.String("org_slug", args.OrgSlug), attribute.String("pipeline_slug", args.PipelineSlug))
+
+		if err := validateBuildkiteSlug("org_slug", args.OrgSlug); err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
+		if err := validateBuildkiteSlug("pipeline_slug", args.PipelineSlug); err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
+		state, _, err := DepsFromContext(ctx).PipelinesClient.GetGitHubWebhookProcessing(ctx, args.OrgSlug, args.PipelineSlug)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+		return mcpTextResult(span, &state)
+	}, []string{"read_pipelines"}
+}
+
+func EnablePipelineGitHubWebhookProcessing() (mcp.Tool, mcp.ToolHandlerFor[PipelineGitHubWebhookProcessingArgs, any], []string) {
+	return mcp.Tool{
+		Name:        "enable_pipeline_github_webhook_processing",
+		Description: "Enable traditional GitHub webhook processing and return its state. Requires Full Access to a GitHub or GitHub Enterprise pipeline and expanded-webhook enrollment; unavailable controls return 404. Does not create repository webhooks or change dedicated GitHub Actions triggers",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Enable Pipeline GitHub Webhook Processing",
+			DestructiveHint: boolPtr(true),
+			IdempotentHint:  true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args PipelineGitHubWebhookProcessingArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.EnablePipelineGitHubWebhookProcessing")
+		defer span.End()
+		span.SetAttributes(attribute.String("org_slug", args.OrgSlug), attribute.String("pipeline_slug", args.PipelineSlug))
+
+		if err := validateBuildkiteSlug("org_slug", args.OrgSlug); err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
+		if err := validateBuildkiteSlug("pipeline_slug", args.PipelineSlug); err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
+		state, _, err := DepsFromContext(ctx).PipelinesClient.EnableGitHubWebhookProcessing(ctx, args.OrgSlug, args.PipelineSlug)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+		return mcpTextResult(span, &state)
+	}, []string{"write_pipelines"}
+}
+
+func DisablePipelineGitHubWebhookProcessing() (mcp.Tool, mcp.ToolHandlerFor[PipelineGitHubWebhookProcessingArgs, any], []string) {
+	return mcp.Tool{
+		Name:        "disable_pipeline_github_webhook_processing",
+		Description: "Disable traditional GitHub webhook processing and return its state to avoid duplicate builds during cutover. Requires Full Access to a GitHub or GitHub Enterprise pipeline and expanded-webhook enrollment; unavailable controls return 404. Does not delete repository webhooks or disable dedicated GitHub Actions triggers",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Disable Pipeline GitHub Webhook Processing",
+			DestructiveHint: boolPtr(true),
+			IdempotentHint:  true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args PipelineGitHubWebhookProcessingArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.DisablePipelineGitHubWebhookProcessing")
+		defer span.End()
+		span.SetAttributes(attribute.String("org_slug", args.OrgSlug), attribute.String("pipeline_slug", args.PipelineSlug))
+
+		if err := validateBuildkiteSlug("org_slug", args.OrgSlug); err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
+		if err := validateBuildkiteSlug("pipeline_slug", args.PipelineSlug); err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
+		state, _, err := DepsFromContext(ctx).PipelinesClient.DisableGitHubWebhookProcessing(ctx, args.OrgSlug, args.PipelineSlug)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+		return mcpTextResult(span, &state)
+	}, []string{"write_pipelines"}
+}
+
 type UpdatePipelineArgs struct {
 	ToolInput
-	OrgSlug                   string   `json:"org_slug"`
-	PipelineSlug              string   `json:"pipeline_slug"`
-	Name                      *string  `json:"name,omitempty"`
-	RepositoryURL             *string  `json:"repository_url,omitempty" jsonschema:"The Git repository URL"`
-	ClusterID                 *string  `json:"cluster_id,omitempty"`
-	Description               *string  `json:"description,omitempty"`
-	Configuration             *string  `json:"configuration,omitempty" jsonschema:"The pipeline configuration in YAML format"`
-	DefaultBranch             *string  `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
-	SkipQueuedBranchBuilds    *bool    `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
-	CancelRunningBranchBuilds *bool    `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
-	Tags                      []string `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
+	OrgSlug                   string                        `json:"org_slug"`
+	PipelineSlug              string                        `json:"pipeline_slug"`
+	Name                      *string                       `json:"name,omitempty"`
+	RepositoryURL             *string                       `json:"repository_url,omitempty" jsonschema:"The Git repository URL"`
+	ClusterID                 *string                       `json:"cluster_id,omitempty"`
+	Description               *string                       `json:"description,omitempty"`
+	Configuration             *string                       `json:"configuration,omitempty" jsonschema:"Replaces the entire YAML configuration; omit when assigning a template. May accompany pipeline_template_uuid: null to replace template steps"`
+	PipelineTemplateUUID      *string                       `json:"pipeline_template_uuid,omitempty" jsonschema:"Approved template UUID; omit to retain assignment, null to remove it. Do not combine assignment with configuration; removal may require replacement configuration and remains subject to organization policy"`
+	DefaultBranch             *string                       `json:"default_branch,omitempty" jsonschema:"The default branch for builds and metrics filtering"`
+	SkipQueuedBranchBuilds    *bool                         `json:"skip_queued_branch_builds,omitempty" jsonschema:"Skip intermediate builds when new builds are created on the same branch"`
+	CancelRunningBranchBuilds *bool                         `json:"cancel_running_branch_builds,omitempty" jsonschema:"Cancel running builds when new builds are created on the same branch"`
+	Tags                      []string                      `json:"tags,omitempty" jsonschema:"Tags to apply to the pipeline for filtering and organization"`
+	BranchConfiguration       *string                       `json:"branch_configuration,omitempty" jsonschema:"Branch filter; null clears it, omission leaves it unchanged"`
+	ProviderSettings          *PipelineProviderSettingsArgs `json:"provider_settings,omitempty" jsonschema:"GitHub provider settings; omitted keys remain unchanged. Does not create a GitHub Actions trigger or webhook"`
 }
 
 func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []string) {
@@ -472,7 +592,37 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 			attribute.String("pipeline_slug", args.PipelineSlug),
 		)
 
+		raw, err := toolRawFields(request)
+		if err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
+		if args.PipelineTemplateUUID != nil {
+			if strings.TrimSpace(*args.PipelineTemplateUUID) == "" {
+				return utils.NewToolResultError("pipeline_template_uuid must be nonblank; use null to remove the template"), nil, nil
+			}
+			_, configurationPresent := raw["configuration"]
+			if args.Configuration != nil || configurationPresent {
+				return utils.NewToolResultError("do not combine pipeline_template_uuid assignment with configuration"), nil, nil
+			}
+		}
+		provider, err := pipelineProviderSettings(args.ProviderSettings, raw["provider_settings"])
+		if err != nil {
+			return utils.NewToolResultError(err.Error()), nil, nil
+		}
 		update := buildkite.UpdatePipeline{}
+		if args.PipelineTemplateUUID != nil {
+			update.PipelineTemplateUUID = buildkite.Some(*args.PipelineTemplateUUID)
+		} else if isJSONNull(raw["pipeline_template_uuid"]) {
+			update.PipelineTemplateUUID = buildkite.Null[string]()
+		}
+		if provider != nil {
+			update.ProviderSettings = buildkite.Some(provider)
+		}
+		if args.BranchConfiguration != nil {
+			update.BranchConfiguration = buildkite.Some(*args.BranchConfiguration)
+		} else if isJSONNull(raw["branch_configuration"]) {
+			update.BranchConfiguration = buildkite.Null[string]()
+		}
 		if args.Name != nil {
 			update.Name = buildkite.Some(*args.Name)
 		}
@@ -510,4 +660,83 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 
 		return mcpTextResult(span, &pipeline)
 	}, []string{"write_pipelines"}
+}
+
+type PipelineProviderSettingsArgs struct {
+	GitHubActionsMode                       *bool   `json:"github_actions_mode,omitempty" jsonschema:"Enables GitHub Actions workflow selection; requires server-side availability. Leave branch-wide cancel/skip disabled for sibling workflow builds"`
+	GitHubWorkflowAccessTokensEnabled       *bool   `json:"github_workflow_access_tokens_enabled,omitempty" jsonschema:"Requires GitHub.com, server-side availability and workflow token permissions"`
+	IgnoreDefaultBranchPullRequests         *bool   `json:"ignore_default_branch_pull_requests,omitempty"`
+	SkipBuildsForClosedPullRequests         *bool   `json:"skip_builds_for_closed_pull_requests,omitempty"`
+	SkipBuildsForExistingCommits            *bool   `json:"skip_builds_for_existing_commits,omitempty"`
+	TriggerMode                             *string `json:"trigger_mode,omitempty" jsonschema:"code, deployment, fork or none; none disables traditional triggering, not GitHub Actions pipeline triggers"`
+	BuildPullRequests                       *bool   `json:"build_pull_requests,omitempty"`
+	BuildBranches                           *bool   `json:"build_branches,omitempty"`
+	PullRequestBranchFilterEnabled          *bool   `json:"pull_request_branch_filter_enabled,omitempty"`
+	PullRequestBranchFilterConfiguration    *string `json:"pull_request_branch_filter_configuration,omitempty" jsonschema:"null clears it; omission leaves the API default on create or the existing value on update"`
+	SkipPullRequestBuildsForExistingCommits *bool   `json:"skip_pull_request_builds_for_existing_commits,omitempty"`
+	BuildPullRequestForks                   *bool   `json:"build_pull_request_forks,omitempty"`
+	PrefixPullRequestForkBranchNames        *bool   `json:"prefix_pull_request_fork_branch_names,omitempty"`
+	BuildTags                               *bool   `json:"build_tags,omitempty"`
+	PublishCommitStatus                     *bool   `json:"publish_commit_status,omitempty"`
+	PublishCommitStatusPerStep              *bool   `json:"publish_commit_status_per_step,omitempty"`
+	FilterEnabled                           *bool   `json:"filter_enabled,omitempty"`
+	FilterCondition                         *string `json:"filter_condition,omitempty" jsonschema:"Build condition; null clears it, omission leaves the API default on create or the existing value on update"`
+	SeparatePullRequestStatuses             *bool   `json:"separate_pull_request_statuses,omitempty"`
+	PublishBlockedAsPending                 *bool   `json:"publish_blocked_as_pending,omitempty"`
+}
+
+func pipelineSetting[T any](value *T) buildkite.Optional[T] {
+	if value == nil {
+		return buildkite.Optional[T]{}
+	}
+	return buildkite.Some(*value)
+}
+
+func pipelineProviderSettings(args *PipelineProviderSettingsArgs, raw json.RawMessage) (buildkite.ProviderSettings, error) {
+	if isJSONNull(raw) {
+		return nil, errors.New("provider_settings must be an object; clear individual nullable settings instead")
+	}
+	if args == nil {
+		return nil, nil
+	}
+	var fields map[string]json.RawMessage
+	if len(raw) != 0 {
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, err
+		}
+	}
+	for key, value := range fields {
+		if isJSONNull(value) && key != "filter_condition" && key != "pull_request_branch_filter_configuration" {
+			return nil, fmt.Errorf("provider_settings.%s does not accept null; omit it to leave it unchanged", key)
+		}
+	}
+	settings := &buildkite.GitHubSettingsInput{
+		GitHubActionsMode:                       pipelineSetting(args.GitHubActionsMode),
+		GitHubWorkflowAccessTokensEnabled:       pipelineSetting(args.GitHubWorkflowAccessTokensEnabled),
+		IgnoreDefaultBranchPullRequests:         pipelineSetting(args.IgnoreDefaultBranchPullRequests),
+		SkipBuildsForClosedPullRequests:         pipelineSetting(args.SkipBuildsForClosedPullRequests),
+		SkipBuildsForExistingCommits:            pipelineSetting(args.SkipBuildsForExistingCommits),
+		TriggerMode:                             pipelineSetting(args.TriggerMode),
+		BuildPullRequests:                       pipelineSetting(args.BuildPullRequests),
+		BuildBranches:                           pipelineSetting(args.BuildBranches),
+		PullRequestBranchFilterEnabled:          pipelineSetting(args.PullRequestBranchFilterEnabled),
+		PullRequestBranchFilterConfiguration:    pipelineSetting(args.PullRequestBranchFilterConfiguration),
+		SkipPullRequestBuildsForExistingCommits: pipelineSetting(args.SkipPullRequestBuildsForExistingCommits),
+		BuildPullRequestForks:                   pipelineSetting(args.BuildPullRequestForks),
+		PrefixPullRequestForkBranchNames:        pipelineSetting(args.PrefixPullRequestForkBranchNames),
+		BuildTags:                               pipelineSetting(args.BuildTags),
+		PublishCommitStatus:                     pipelineSetting(args.PublishCommitStatus),
+		PublishCommitStatusPerStep:              pipelineSetting(args.PublishCommitStatusPerStep),
+		FilterEnabled:                           pipelineSetting(args.FilterEnabled),
+		FilterCondition:                         pipelineSetting(args.FilterCondition),
+		SeparatePullRequestStatuses:             pipelineSetting(args.SeparatePullRequestStatuses),
+		PublishBlockedAsPending:                 pipelineSetting(args.PublishBlockedAsPending),
+	}
+	if isJSONNull(fields["filter_condition"]) {
+		settings.FilterCondition = buildkite.Null[string]()
+	}
+	if isJSONNull(fields["pull_request_branch_filter_configuration"]) {
+		settings.PullRequestBranchFilterConfiguration = buildkite.Null[string]()
+	}
+	return settings, nil
 }
