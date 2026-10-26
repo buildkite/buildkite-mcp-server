@@ -507,7 +507,7 @@ func EnablePipelineGitHubWebhookProcessing() (mcp.Tool, mcp.ToolHandlerFor[Pipel
 		Description: "Enable traditional GitHub webhook processing and return its state. Requires Full Access to a GitHub or GitHub Enterprise pipeline and expanded-webhook enrollment; unavailable controls return 404. Does not create repository webhooks or change dedicated GitHub Actions triggers",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Enable Pipeline GitHub Webhook Processing",
-			DestructiveHint: boolPtr(true),
+			DestructiveHint: new(true),
 			IdempotentHint:  true,
 		},
 	}, func(ctx context.Context, request *mcp.CallToolRequest, args PipelineGitHubWebhookProcessingArgs) (*mcp.CallToolResult, any, error) {
@@ -535,7 +535,7 @@ func DisablePipelineGitHubWebhookProcessing() (mcp.Tool, mcp.ToolHandlerFor[Pipe
 		Description: "Disable traditional GitHub webhook processing and return its state to avoid duplicate builds during cutover. Requires Full Access to a GitHub or GitHub Enterprise pipeline and expanded-webhook enrollment; unavailable controls return 404. Does not delete repository webhooks or disable dedicated GitHub Actions triggers",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Disable Pipeline GitHub Webhook Processing",
-			DestructiveHint: boolPtr(true),
+			DestructiveHint: new(true),
 			IdempotentHint:  true,
 		},
 	}, func(ctx context.Context, request *mcp.CallToolRequest, args PipelineGitHubWebhookProcessingArgs) (*mcp.CallToolResult, any, error) {

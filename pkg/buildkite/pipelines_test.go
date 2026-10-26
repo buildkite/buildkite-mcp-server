@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -328,9 +329,7 @@ func TestPipelineSettingsRejectInvalidInputsThroughMCP(t *testing.T) {
 				}
 				var fields map[string]any
 				require.NoError(t, json.Unmarshal([]byte(input), &fields))
-				for key, value := range fields {
-					args[key] = value
-				}
+				maps.Copy(args, fields)
 				result, err := pipelineMCPClient(t, srv.URL).CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
 				require.True(t, err != nil || result.IsError)
 				require.Zero(t, requests)
@@ -363,9 +362,7 @@ func TestPipelineSettingsPreserveAPIErrorsThroughMCP(t *testing.T) {
 				}
 				var fields map[string]any
 				require.NoError(t, json.Unmarshal([]byte(tt.fields), &fields))
-				for key, value := range fields {
-					args[key] = value
-				}
+				maps.Copy(args, fields)
 				result, err := pipelineMCPClient(t, srv.URL).CallTool(context.Background(), &mcp.CallToolParams{Name: tt.tool, Arguments: args})
 				if status == http.StatusUnauthorized {
 					require.ErrorIs(t, err, ErrUnauthorized)
@@ -414,9 +411,7 @@ func TestPipelineTemplatesThroughMCP(t *testing.T) {
 			}
 			var fields map[string]any
 			require.NoError(t, json.Unmarshal([]byte(tt.fields), &fields))
-			for key, value := range fields {
-				args[key] = value
-			}
+			maps.Copy(args, fields)
 			result, err := pipelineMCPClient(t, srv.URL).CallTool(context.Background(), &mcp.CallToolParams{Name: tt.tool, Arguments: args})
 			require.NoError(t, err)
 			require.False(t, result.IsError, getTextResult(t, result).Text)
@@ -464,9 +459,7 @@ func TestPipelineTemplateValidationThroughMCP(t *testing.T) {
 			}
 			var fields map[string]any
 			require.NoError(t, json.Unmarshal([]byte(tt.fields), &fields))
-			for key, value := range fields {
-				args[key] = value
-			}
+			maps.Copy(args, fields)
 			result, err := pipelineMCPClient(t, srv.URL).CallTool(context.Background(), &mcp.CallToolParams{Name: tt.tool, Arguments: args})
 			require.True(t, err != nil || result.IsError)
 			require.Zero(t, requests)
