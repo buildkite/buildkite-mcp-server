@@ -40,6 +40,56 @@ disabling `retries` removes its inspection and retry tools from other groups.
 
 ---
 
+## Configuring GitHub Actions pipelines
+
+`create_pipeline` and `update_pipeline` accept GitHub `provider_settings`
+and `branch_configuration`. Omit provider keys to use API defaults on create
+or leave them unchanged on update. Explicit `false` is preserved. Set
+`filter_condition` or `pull_request_branch_filter_configuration` to `null`
+to clear them; an empty string is sent as an empty string. Set
+`branch_configuration: null` on update to clear an existing branch filter.
+On create, an omitted, null or empty branch filter uses the API's null default.
+Full `get_pipeline` and `list_pipelines` responses preserve the supported
+GitHub settings. go-buildkite response strings do not distinguish null from
+empty, so do not reconstruct partial updates from readback.
+
+Follow the [manual GitHub Actions setup](https://buildkite.com/docs/pipelines/migration/run-github-actions-workflows#add-a-github-actions-workflow-to-a-pipeline-configure-an-equivalent-pipeline-manually).
+Keep branch-wide `skip_queued_branch_builds` and `cancel_running_branch_builds`
+false to avoid skipping or cancelling sibling workflow builds. Use
+`create_webhook: false`: provider settings do not provision a dedicated GitHub
+Actions trigger or its webhook, and the existing webhook tools create
+traditional repository webhooks. Server-side feature availability and token
+permissions still apply; accepting settings does not prove workflow execution.
+
+On create, supply nonblank `configuration` **or** an approved
+`pipeline_template_uuid`, not both. On update, omit `pipeline_template_uuid`
+to retain the assignment, supply a UUID to assign a template without
+`configuration`, or send `null` to remove it. Removal can include replacement
+`configuration`; the API enforces configuration requirements and organization
+template policy. Full pipeline responses retain assigned UUIDs; go-buildkite
+omits the field when the response assignment is null or absent.
+
+Use `get_pipeline_github_webhook_processing`,
+`enable_pipeline_github_webhook_processing`, and
+`disable_pipeline_github_webhook_processing` to inspect or change traditional
+GitHub webhook processing. These use GET/PUT/DELETE `github-webhooks`, not the
+POST `webhook` creation endpoint. They do not delete repository webhooks or
+change dedicated GitHub Actions triggers. Responses preserve `enabled` and
+nullable `disabled_at` and `disabled_by` metadata; `disabled_by` is a user name.
+All three require Full Access, a GitHub or GitHub Enterprise pipeline, and
+organization enrollment in expanded webhook triggers. GET requires
+`read_pipelines`; enable/disable require `write_pipelines` and are excluded in
+read-only mode. A 404 can mean the controls are unavailable, not that the
+pipeline is missing. API errors are returned without treating failure as a
+disabled state.
+
+These contracts are covered with local synthetic HTTP fixtures. Hosted
+availability, permissions, persistence, and workflow execution require separate
+verification; local success is not proof of deployed support. Dedicated GitHub
+Actions trigger management is not included.
+
+---
+
 ## Comparing builds
 
 The read-only `compare_builds` tool in the `investigations` toolset answers questions such as “What changed since this build last worked on main?” Supply `org_slug`, `pipeline_slug`, and the target `build_number`. It selects the most recently created earlier build that is currently passed on the same pipeline and exact branch. It does not require that the baseline had already passed when the target started. Supply `baseline_build_number` to compare against a specific build in that pipeline instead, including a failed build or one on another branch.

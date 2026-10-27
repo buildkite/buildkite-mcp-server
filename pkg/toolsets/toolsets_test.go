@@ -2,10 +2,17 @@ package toolsets
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
+	"github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	buildkiteapi "github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -856,7 +863,7 @@ func TestToolsetExclusions(t *testing.T) {
 	}
 }
 
-func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
+func TestBuiltinToolSchemas(t *testing.T) {
 	const contextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
@@ -881,6 +888,7 @@ func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Tools)
 
+	pipelineSchemas := 0
 	for _, tool := range result.Tools {
 		inputSchema, ok := tool.InputSchema.(map[string]any)
 		require.True(t, ok, "%s input schema has type %T", tool.Name, tool.InputSchema)
@@ -893,6 +901,14 @@ func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
 
 		properties, ok := inputSchema["properties"].(map[string]any)
 		require.True(t, ok, "%s input schema has no properties", tool.Name)
+		if tool.Name == "create_pipeline" || tool.Name == "update_pipeline" {
+			provider := properties["provider_settings"].(map[string]any)
+			settings := provider["properties"].(map[string]any)
+			triggerMode := settings["trigger_mode"].(map[string]any)
+			require.IsType(t, []any{}, triggerMode["enum"], "%s trigger mode enum", tool.Name)
+			require.ElementsMatch(t, []any{"code", "deployment", "fork", "none"}, triggerMode["enum"], "%s trigger modes", tool.Name)
+			pipelineSchemas++
+		}
 		telemetry, ok := properties["telemetry"].(map[string]any)
 		require.True(t, ok, "%s has no telemetry property", tool.Name)
 
@@ -907,6 +923,7 @@ func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
 		require.Equal(t, contextDescription, contextProperty["description"], "%s has the wrong telemetry.context description", tool.Name)
 		require.InDelta(t, float64(trace.TelemetryContextMaxLength), contextProperty["maxLength"], 0, "%s has the wrong telemetry.context maxLength", tool.Name)
 	}
+	require.Equal(t, 2, pipelineSchemas)
 }
 
 func TestClusterSecretsToolset(t *testing.T) {
@@ -996,4 +1013,200 @@ func TestRepositoryConnectionsToolset(t *testing.T) {
 	require.Equal(t, "list_repository_connections", readOnlyTools[0].Tool.Name)
 	require.Equal(t, "get_repository_connection", readOnlyTools[1].Tool.Name)
 	require.Equal(t, []string{"read_organization_repository_connections"}, registry.GetRequiredScopes([]string{ToolsetRepositoryConnections}, true))
+}
+
+// Register the selected builtins, rather than individual handlers, so these
+// fixtures exercise the public names, schemas, and dependency middleware too.
+func githubWebhookProcessingMCPClient(t *testing.T, baseURL string, tools []ToolDefinition) *mcp.ClientSession {
+	t.Helper()
+	api, err := buildkiteapi.NewOpts(buildkiteapi.WithBaseURL(baseURL + "/"))
+	require.NoError(t, err)
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	server.AddReceivingMiddleware(buildkite.InjectDepsMiddleware(buildkite.ToolDependencies{PipelinesClient: api.Pipelines}))
+	for _, tool := range tools {
+		tool.Register(server)
+	}
+	ctx := context.Background()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil).Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
+func TestPipelineGitHubWebhookProcessingThroughMCP(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	for _, operation := range []struct{ name, method string }{
+		{"get_pipeline_github_webhook_processing", http.MethodGet},
+		{"enable_pipeline_github_webhook_processing", http.MethodPut},
+		{"disable_pipeline_github_webhook_processing", http.MethodDelete},
+	} {
+		for _, state := range []struct{ name, response string }{
+			{"enabled", `{"url":"https://hooks.buildkite.com/synthetic","enabled":true,"disabled_at":null,"disabled_by":null}`},
+			{"disabled by user", `{"url":"https://hooks.buildkite.com/synthetic","enabled":false,"disabled_at":"2026-10-26T12:34:56Z","disabled_by":"Synthetic Operator"}`},
+			{"disabled without user", `{"url":"https://hooks.buildkite.com/synthetic","enabled":false,"disabled_at":"2026-10-26T12:34:56Z","disabled_by":null}`},
+			{"user without timestamp", `{"url":"https://hooks.buildkite.com/synthetic","enabled":false,"disabled_at":null,"disabled_by":"Synthetic Operator"}`},
+		} {
+			t.Run(operation.name+"/"+state.name, func(t *testing.T) {
+				var requests atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					assert.Equal(t, operation.method, r.Method)
+					assert.Equal(t, "/v2/organizations/acme/pipelines/synthetic/github-webhooks", r.URL.Path)
+					assert.Empty(t, r.URL.RawQuery)
+					body, err := io.ReadAll(r.Body)
+					assert.NoError(t, err)
+					assert.Empty(t, body, "processing operations must not send a request body")
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, state.response)
+				}))
+				t.Cleanup(srv.Close)
+				client := githubWebhookProcessingMCPClient(t, srv.URL, registry.GetEnabledTools([]string{ToolsetPipelines}, false))
+				args := map[string]any{"org_slug": "acme", "pipeline_slug": "synthetic"}
+				// Telemetry is optional, and must never become an API parameter.
+				if state.name == "disabled by user" {
+					args["telemetry"] = map[string]any{"context": "The user is checking traditional GitHub webhook processing for a synthetic pipeline before changing its build trigger configuration."}
+				}
+				result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: operation.name, Arguments: args})
+				require.NoError(t, err)
+				require.False(t, result.IsError)
+				require.Equal(t, int32(1), requests.Load())
+				require.Len(t, result.Content, 1)
+				text, ok := result.Content[0].(*mcp.TextContent)
+				require.True(t, ok)
+				var output, expected map[string]any
+				require.NoError(t, json.Unmarshal([]byte(text.Text), &output))
+				require.NoError(t, json.Unmarshal([]byte(state.response), &expected))
+				require.Equal(t, expected, output, "preserve state, timestamp, user name, and explicit null metadata")
+			})
+		}
+	}
+}
+
+func TestPipelineGitHubWebhookProcessingAPIErrorsThroughMCP(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	for _, name := range []string{"get_pipeline_github_webhook_processing", "enable_pipeline_github_webhook_processing", "disable_pipeline_github_webhook_processing"} {
+		for _, failure := range []struct {
+			status int
+			body   string
+		}{
+			{http.StatusUnauthorized, `{"message":"Synthetic token expired"}`},
+			{http.StatusForbidden, `{"message":"Full Access is required to manage GitHub webhook processing","errors":["Synthetic access restriction"]}`},
+			{http.StatusNotFound, `{"message":"Traditional GitHub webhook processing is unavailable for this pipeline"}`},
+		} {
+			t.Run(fmt.Sprintf("%s/%d", name, failure.status), func(t *testing.T) {
+				var requests atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					assert.Equal(t, "/v2/organizations/acme/pipelines/synthetic/github-webhooks", r.URL.Path)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(failure.status)
+					_, _ = io.WriteString(w, failure.body)
+				}))
+				t.Cleanup(srv.Close)
+				client := githubWebhookProcessingMCPClient(t, srv.URL, registry.GetEnabledTools([]string{ToolsetPipelines}, false))
+				result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+					Name: name, Arguments: map[string]any{"org_slug": "acme", "pipeline_slug": "synthetic"},
+				})
+				require.Equal(t, int32(1), requests.Load(), "access must be checked by the API, not a client flag")
+				if failure.status == http.StatusUnauthorized {
+					require.ErrorIs(t, err, buildkite.ErrUnauthorized, "401 must reach the client as a reauthentication error")
+				} else {
+					require.NoError(t, err)
+					require.True(t, result.IsError)
+					require.Len(t, result.Content, 1)
+					text, ok := result.Content[0].(*mcp.TextContent)
+					require.True(t, ok)
+					require.JSONEq(t, failure.body, text.Text, "preserve the raw API message and details")
+				}
+			})
+		}
+	}
+}
+
+func TestPipelineGitHubWebhookProcessingSelectionAndSchemas(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	names := []string{"get_pipeline_github_webhook_processing", "enable_pipeline_github_webhook_processing", "disable_pipeline_github_webhook_processing"}
+	pipelines := registry.GetEnabledTools([]string{ToolsetPipelines}, false)
+	var minimumAccess []ToolDefinition
+	for _, tool := range pipelines {
+		if tool.IsMinimumAccess() {
+			minimumAccess = append(minimumAccess, tool)
+		}
+		for _, name := range names {
+			if tool.Tool.Name == name {
+				scope := "write_pipelines"
+				if name == names[0] {
+					scope = "read_pipelines"
+				}
+				require.Equal(t, []string{scope}, tool.RequiredScopes)
+			}
+		}
+	}
+	for _, selection := range []struct {
+		name  string
+		tools []ToolDefinition
+		want  []string
+	}{
+		{"pipelines", pipelines, names},
+		{"read only", registry.GetEnabledTools([]string{ToolsetPipelines}, true), names[:1]},
+		{"minimum access", minimumAccess, names[:1]},
+		{"pipelines disabled", registry.GetEnabledToolsWithExclusions([]string{ToolsetAll}, false, []string{ToolsetPipelines}), nil},
+	} {
+		t.Run(selection.name, func(t *testing.T) {
+			var requests atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				w.WriteHeader(http.StatusInternalServerError)
+			}))
+			t.Cleanup(srv.Close)
+			client := githubWebhookProcessingMCPClient(t, srv.URL, selection.tools)
+			listed, err := client.ListTools(context.Background(), nil)
+			require.NoError(t, err)
+			byName := make(map[string]*mcp.Tool)
+			for _, tool := range listed.Tools {
+				byName[tool.Name] = tool
+			}
+			for _, name := range names {
+				wanted := false
+				for _, expected := range selection.want {
+					wanted = wanted || name == expected
+				}
+				if !wanted {
+					require.NotContains(t, byName, name)
+					result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: map[string]any{"org_slug": "acme", "pipeline_slug": "synthetic"}})
+					require.True(t, err != nil || (result != nil && result.IsError), "excluded tool must not be callable")
+					continue
+				}
+				require.Contains(t, byName, name)
+				tool := byName[name]
+				require.NotNil(t, tool.Annotations)
+				require.Equal(t, name == names[0], tool.Annotations.ReadOnlyHint)
+				if name != names[0] {
+					require.NotNil(t, tool.Annotations.DestructiveHint)
+					require.True(t, *tool.Annotations.DestructiveHint)
+					require.True(t, tool.Annotations.IdempotentHint)
+				}
+				schema, ok := tool.InputSchema.(map[string]any)
+				require.True(t, ok)
+				properties, ok := schema["properties"].(map[string]any)
+				require.True(t, ok)
+				require.Len(t, properties, 3, "only slug arguments and optional telemetry; no Full Access client flag")
+				for _, slug := range []string{"org_slug", "pipeline_slug"} {
+					property, ok := properties[slug].(map[string]any)
+					require.True(t, ok)
+					require.Equal(t, "string", property["type"])
+				}
+				require.Contains(t, properties, "telemetry")
+				require.ElementsMatch(t, []any{"org_slug", "pipeline_slug"}, schema["required"])
+			}
+			require.Zero(t, requests.Load(), "listing and rejecting excluded tools must not contact the API")
+		})
+	}
 }

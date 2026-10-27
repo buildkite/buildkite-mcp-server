@@ -119,13 +119,16 @@ func TestGetPipelineArgsSchema(t *testing.T) {
 
 func TestCreatePipelineArgsSchema(t *testing.T) {
 	s := schemaFor[CreatePipelineArgs](t)
-	// Required: org_slug, name, repository_url, cluster_id, configuration, create_webhook
-	require.Equal(t, []string{"cluster_id", "configuration", "create_webhook", "name", "org_slug", "repository_url"}, sortedToolRequired(t, s))
+	require.Equal(t, []string{"cluster_id", "create_webhook", "name", "org_slug", "repository_url"}, sortedToolRequired(t, s))
 
 	description := s.Properties["create_webhook"].Description
 	require.Contains(t, description, "Set true when GitHub push or pull-request events should trigger this pipeline")
 	require.Contains(t, description, "the pipeline is created and setup instructions are returned")
-	require.Contains(t, description, "Set false for non-GitHub repositories, centralized or manually managed webhooks")
+	require.Contains(t, description, "Set false for GitHub Actions pipeline triggers")
+	for _, key := range []string{"branch_configuration", "provider_settings", "configuration", "pipeline_template_uuid"} {
+		require.Contains(t, s.Properties, key)
+		require.NotContains(t, s.Required, key)
+	}
 }
 
 func TestCreatePipelineWebhookArgsSchema(t *testing.T) {
@@ -136,6 +139,10 @@ func TestCreatePipelineWebhookArgsSchema(t *testing.T) {
 func TestUpdatePipelineArgsSchema(t *testing.T) {
 	req := sortedRequired[UpdatePipelineArgs](t)
 	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
+	s := schemaFor[UpdatePipelineArgs](t)
+	require.Contains(t, s.Properties["branch_configuration"].Description, "null clears it")
+	require.Contains(t, s.Properties["provider_settings"].Description, "omitted keys remain unchanged")
+	require.Contains(t, s.Properties["pipeline_template_uuid"].Description, "null to remove it")
 }
 
 func TestListPipelineSchedulesArgsSchema(t *testing.T) {
