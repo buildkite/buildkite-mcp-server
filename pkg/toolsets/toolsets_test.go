@@ -863,7 +863,7 @@ func TestToolsetExclusions(t *testing.T) {
 	}
 }
 
-func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
+func TestBuiltinToolSchemas(t *testing.T) {
 	const contextDescription = "Explain why calling this tool fits the user's overall goal. This parameter supports analytics and user-intent tracking. Provide 15-25 meaningful words in third-person perspective. Avoid credentials, passwords, and personal data; the server does not classify sensitive content."
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
@@ -888,6 +888,7 @@ func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Tools)
 
+	pipelineSchemas := 0
 	for _, tool := range result.Tools {
 		inputSchema, ok := tool.InputSchema.(map[string]any)
 		require.True(t, ok, "%s input schema has type %T", tool.Name, tool.InputSchema)
@@ -900,6 +901,14 @@ func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
 
 		properties, ok := inputSchema["properties"].(map[string]any)
 		require.True(t, ok, "%s input schema has no properties", tool.Name)
+		if tool.Name == "create_pipeline" || tool.Name == "update_pipeline" {
+			provider := properties["provider_settings"].(map[string]any)
+			settings := provider["properties"].(map[string]any)
+			triggerMode := settings["trigger_mode"].(map[string]any)
+			require.IsType(t, []any{}, triggerMode["enum"], "%s trigger mode enum", tool.Name)
+			require.ElementsMatch(t, []any{"code", "deployment", "fork", "none"}, triggerMode["enum"], "%s trigger modes", tool.Name)
+			pipelineSchemas++
+		}
 		telemetry, ok := properties["telemetry"].(map[string]any)
 		require.True(t, ok, "%s has no telemetry property", tool.Name)
 
@@ -914,6 +923,7 @@ func TestBuiltinToolSchemasAdvertiseOptionalTelemetry(t *testing.T) {
 		require.Equal(t, contextDescription, contextProperty["description"], "%s has the wrong telemetry.context description", tool.Name)
 		require.InDelta(t, float64(trace.TelemetryContextMaxLength), contextProperty["maxLength"], 0, "%s has the wrong telemetry.context maxLength", tool.Name)
 	}
+	require.Equal(t, 2, pipelineSchemas)
 }
 
 func TestClusterSecretsToolset(t *testing.T) {

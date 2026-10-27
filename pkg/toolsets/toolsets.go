@@ -309,9 +309,15 @@ func ValidateToolsets(names []string) error {
 // The generic parameters In and Out match the typed handler signature.
 func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, Out], []string)) ToolDefinition {
 	tool, handler, scopes := toolFunc()
-	inputSchema, err := jsonschema.For[In](nil)
-	if err != nil {
-		panic(fmt.Sprintf("generate input schema for tool %q: %v", tool.Name, err))
+	var inputSchema *jsonschema.Schema
+	if tool.InputSchema != nil {
+		inputSchema = tool.InputSchema.(*jsonschema.Schema)
+	} else {
+		var err error
+		inputSchema, err = jsonschema.For[In](nil)
+		if err != nil {
+			panic(fmt.Sprintf("generate input schema for tool %q: %v", tool.Name, err))
+		}
 	}
 	telemetrySchema, ok := inputSchema.Properties["telemetry"]
 	if !ok {

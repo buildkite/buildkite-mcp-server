@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -300,6 +302,7 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 	return mcp.Tool{
 			Name:        "create_pipeline",
 			Description: "Set up a new CI/CD pipeline in Buildkite with YAML configuration or an approved pipeline template, repository connection, and cluster assignment",
+			InputSchema: pipelineInputSchema[CreatePipelineArgs](),
 			Annotations: &mcp.ToolAnnotations{
 				Title:           "Create Pipeline",
 				DestructiveHint: boolPtr(false),
@@ -322,7 +325,7 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 			_, configurationPresent := raw["configuration"]
 			_, templatePresent := raw["pipeline_template_uuid"]
 			if (configurationPresent || args.Configuration != "") && (templatePresent || args.PipelineTemplateUUID != "") {
-				return utils.NewToolResultError("supply configuration or pipeline_template_uuid, not both"), nil, nil
+				return utils.NewToolResultError("supply configuration or pipeline_template_uuid, not both; omit the unused field entirely, even when empty"), nil, nil
 			}
 			if strings.TrimSpace(args.Configuration) == "" && strings.TrimSpace(args.PipelineTemplateUUID) == "" {
 				return utils.NewToolResultError("supply nonblank configuration or an approved pipeline_template_uuid"), nil, nil
@@ -330,6 +333,9 @@ func CreatePipeline() (mcp.Tool, mcp.ToolHandlerFor[CreatePipelineArgs, any], []
 			provider, err := pipelineProviderSettings(args.ProviderSettings, raw["provider_settings"])
 			if err != nil {
 				return utils.NewToolResultError(err.Error()), nil, nil
+			}
+			if args.CreateWebhook && args.ProviderSettings != nil && args.ProviderSettings.GitHubActionsMode != nil && *args.ProviderSettings.GitHubActionsMode {
+				return utils.NewToolResultError("a traditional webhook with github_actions_mode can create duplicate builds; set create_webhook: false and use a dedicated GitHub Actions pipeline trigger instead"), nil, nil
 			}
 			create := buildkite.CreatePipeline{
 				Name:                      args.Name,
@@ -579,6 +585,7 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 	return mcp.Tool{
 		Name:        "update_pipeline",
 		Description: "Modify an existing Buildkite pipeline's configuration, repository, settings, or metadata",
+		InputSchema: pipelineInputSchema[UpdatePipelineArgs](),
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Update Pipeline",
 			DestructiveHint: boolPtr(true),
@@ -602,7 +609,7 @@ func UpdatePipeline() (mcp.Tool, mcp.ToolHandlerFor[UpdatePipelineArgs, any], []
 			}
 			_, configurationPresent := raw["configuration"]
 			if args.Configuration != nil || configurationPresent {
-				return utils.NewToolResultError("do not combine pipeline_template_uuid assignment with configuration"), nil, nil
+				return utils.NewToolResultError("do not combine pipeline_template_uuid assignment with configuration; omit configuration entirely, even when empty"), nil, nil
 			}
 		}
 		provider, err := pipelineProviderSettings(args.ProviderSettings, raw["provider_settings"])
@@ -685,6 +692,17 @@ type PipelineProviderSettingsArgs struct {
 	PublishBlockedAsPending                 *bool   `json:"publish_blocked_as_pending,omitempty"`
 }
 
+var pipelineTriggerModes = []any{"code", "deployment", "fork", "none"}
+
+func pipelineInputSchema[T any]() *jsonschema.Schema {
+	schema, err := jsonschema.For[T](nil)
+	if err != nil {
+		panic(fmt.Sprintf("generate pipeline input schema: %v", err))
+	}
+	schema.Properties["provider_settings"].Properties["trigger_mode"].Enum = pipelineTriggerModes
+	return schema
+}
+
 func pipelineSetting[T any](value *T) buildkite.Optional[T] {
 	if value == nil {
 		return buildkite.Optional[T]{}
@@ -698,6 +716,9 @@ func pipelineProviderSettings(args *PipelineProviderSettingsArgs, raw json.RawMe
 	}
 	if args == nil {
 		return nil, nil
+	}
+	if args.TriggerMode != nil && !slices.Contains(pipelineTriggerModes, any(*args.TriggerMode)) {
+		return nil, errors.New("provider_settings.trigger_mode must be one of code, deployment, fork, none")
 	}
 	var fields map[string]json.RawMessage
 	if len(raw) != 0 {

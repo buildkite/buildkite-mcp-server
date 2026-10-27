@@ -243,6 +243,10 @@ func pipelineMCPClient(t *testing.T, baseURL string) *mcp.ClientSession {
 func TestPipelineSettingsWritesThroughMCP(t *testing.T) {
 	for _, tt := range []struct{ name, fields string }{
 		{"asymmetric", `{"branch_configuration":"main release/*","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider_settings":{"github_actions_mode":true,"github_workflow_access_tokens_enabled":false,"ignore_default_branch_pull_requests":true,"skip_builds_for_closed_pull_requests":false,"skip_builds_for_existing_commits":true,"trigger_mode":"none","build_pull_requests":false,"build_branches":true,"pull_request_branch_filter_enabled":false,"pull_request_branch_filter_configuration":"main","skip_pull_request_builds_for_existing_commits":true,"build_pull_request_forks":false,"prefix_pull_request_fork_branch_names":true,"build_tags":false,"publish_commit_status":true,"publish_commit_status_per_step":false,"filter_enabled":true,"filter_condition":"build.branch != 'release'","separate_pull_request_statuses":false,"publish_blocked_as_pending":true}}`},
+		{"code trigger", `{"provider_settings":{"trigger_mode":"code"}}`},
+		{"deployment trigger", `{"provider_settings":{"trigger_mode":"deployment"}}`},
+		{"fork trigger", `{"provider_settings":{"trigger_mode":"fork"}}`},
+		{"no traditional trigger", `{"provider_settings":{"trigger_mode":"none"}}`},
 		{"partial false", `{"provider_settings":{"github_actions_mode":false,"publish_commit_status":false}}`},
 		{"clear filters", `{"branch_configuration":null,"skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider_settings":{"filter_condition":null,"pull_request_branch_filter_configuration":null}}`},
 		{"empty filters", `{"branch_configuration":"","provider_settings":{"filter_condition":"","pull_request_branch_filter_configuration":""}}`},
@@ -313,6 +317,8 @@ func TestPipelineSettingsRejectInvalidInputsThroughMCP(t *testing.T) {
 	for _, input := range []string{
 		`{"provider_settings":null}`, `{"provider_settings":{"github_actions_mode":null}}`,
 		`{"provider_settings":{"trigger_mode":null}}`, `{"provider_settings":{"publish_commit_status":"false"}}`,
+		`{"provider_settings":{"trigger_mode":"push"}}`, `{"provider_settings":{"trigger_mode":""}}`,
+		`{"provider_settings":{"trigger_mode":"CODE"}}`, `{"provider_settings":{"trigger_mode":"code "}}`,
 		`{"provider_settings":{"unknown_setting":true}}`, `{"branch_configuration":false}`,
 	} {
 		for _, name := range []string{"create_pipeline", "update_pipeline"} {
@@ -431,18 +437,19 @@ func TestPipelineTemplatesThroughMCP(t *testing.T) {
 }
 
 func TestPipelineTemplateValidationThroughMCP(t *testing.T) {
-	for _, tt := range []struct{ name, tool, fields string }{
-		{"missing alternatives", "create_pipeline", `{}`},
-		{"blank configuration", "create_pipeline", `{"configuration":"  "}`},
-		{"blank template", "create_pipeline", `{"pipeline_template_uuid":""}`},
-		{"null template on create", "create_pipeline", `{"pipeline_template_uuid":null}`},
-		{"conflicting alternatives", "create_pipeline", `{"configuration":"steps: []","pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`},
-		{"template with empty configuration", "create_pipeline", `{"configuration":"","pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`},
-		{"configuration with empty template", "create_pipeline", `{"configuration":"steps: []","pipeline_template_uuid":""}`},
-		{"empty update is not removal", "update_pipeline", `{"pipeline_template_uuid":""}`},
-		{"blank update is not removal", "update_pipeline", `{"pipeline_template_uuid":"  "}`},
-		{"update conflicts", "update_pipeline", `{"configuration":"steps: []","pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`},
-		{"null configuration conflicts", "update_pipeline", `{"configuration":null,"pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`},
+	for _, tt := range []struct{ name, tool, fields, wantError string }{
+		{"missing alternatives", "create_pipeline", `{}`, ""},
+		{"blank configuration", "create_pipeline", `{"configuration":"  "}`, ""},
+		{"blank template", "create_pipeline", `{"pipeline_template_uuid":""}`, ""},
+		{"null template on create", "create_pipeline", `{"pipeline_template_uuid":null}`, ""},
+		{"conflicting alternatives", "create_pipeline", `{"configuration":"steps: []","pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`, "omit the unused field entirely, even when empty"},
+		{"template with empty configuration", "create_pipeline", `{"configuration":"","pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`, "omit the unused field entirely, even when empty"},
+		{"configuration with empty template", "create_pipeline", `{"configuration":"steps: []","pipeline_template_uuid":""}`, "omit the unused field entirely, even when empty"},
+		{"empty update is not removal", "update_pipeline", `{"pipeline_template_uuid":""}`, ""},
+		{"blank update is not removal", "update_pipeline", `{"pipeline_template_uuid":"  "}`, ""},
+		{"update conflicts", "update_pipeline", `{"configuration":"steps: []","pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`, "omit configuration entirely, even when empty"},
+		{"empty configuration conflicts", "update_pipeline", `{"configuration":"","pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`, "omit configuration entirely, even when empty"},
+		{"null configuration conflicts", "update_pipeline", `{"configuration":null,"pipeline_template_uuid":"00000000-0000-4000-8000-000000000001"}`, "omit configuration entirely, even when empty"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			requests := 0
@@ -463,6 +470,69 @@ func TestPipelineTemplateValidationThroughMCP(t *testing.T) {
 			result, err := pipelineMCPClient(t, srv.URL).CallTool(context.Background(), &mcp.CallToolParams{Name: tt.tool, Arguments: args})
 			require.True(t, err != nil || result.IsError)
 			require.Zero(t, requests)
+			if tt.wantError != "" {
+				require.NoError(t, err)
+				require.Contains(t, getTextResult(t, result).Text, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestPipelineTriggerModeTypedValidation(t *testing.T) {
+	settings := &PipelineProviderSettingsArgs{TriggerMode: new("push")}
+	_, create, _ := CreatePipeline()
+	result, _, err := create(context.Background(), createMCPRequest(t, map[string]any{}), CreatePipelineArgs{Configuration: "steps: []", ProviderSettings: settings})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, getTextResult(t, result).Text, "trigger_mode must be one of code, deployment, fork, none")
+	_, update, _ := UpdatePipeline()
+	result, _, err = update(context.Background(), createMCPRequest(t, map[string]any{}), UpdatePipelineArgs{ProviderSettings: settings})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Contains(t, getTextResult(t, result).Text, "trigger_mode must be one of code, deployment, fork, none")
+}
+
+func TestPipelineWebhookModeThroughMCP(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		actionsMode   *bool
+		createWebhook bool
+		wantPaths     []string
+	}{
+		{"conflicting webhook", new(true), true, nil},
+		{"actions without traditional webhook", new(true), false, []string{"/v2/organizations/acme/pipelines"}},
+		{"traditional webhook", new(false), true, []string{"/v2/organizations/acme/pipelines", "/v2/organizations/acme/pipelines/synthetic/webhook"}},
+		{"default mode with webhook", nil, true, []string{"/v2/organizations/acme/pipelines", "/v2/organizations/acme/pipelines/synthetic/webhook"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var paths []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.URL.Path)
+				assert.Equal(t, http.MethodPost, r.Method)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = w.Write([]byte(`{"slug":"synthetic"}`))
+			}))
+			t.Cleanup(srv.Close)
+			args := map[string]any{"org_slug": "acme", "name": "Synthetic", "repository_url": "https://github.com/acme/example.git", "cluster_id": "cluster-uuid", "configuration": "steps: []", "create_webhook": tt.createWebhook}
+			if tt.actionsMode != nil {
+				args["provider_settings"] = map[string]any{"github_actions_mode": *tt.actionsMode}
+			}
+			result, err := pipelineMCPClient(t, srv.URL).CallTool(context.Background(), &mcp.CallToolParams{Name: "create_pipeline", Arguments: args})
+			require.NoError(t, err)
+			require.Equal(t, tt.wantPaths, paths)
+			if tt.wantPaths == nil {
+				require.True(t, result.IsError)
+				message := getTextResult(t, result).Text
+				require.Contains(t, message, "duplicate builds")
+				require.Contains(t, message, "create_webhook: false")
+				require.Contains(t, message, "dedicated GitHub Actions pipeline trigger")
+			} else {
+				require.False(t, result.IsError, getTextResult(t, result).Text)
+				if tt.createWebhook {
+					requireJSONPathEqual(t, getTextResult(t, result).Text, true, "webhook", "created")
+				}
+			}
 		})
 	}
 }
