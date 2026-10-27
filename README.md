@@ -127,6 +127,33 @@ ran or event history. Both tools always replace webhook endpoints with
 
 ---
 
+## Organization usage
+
+The read-only `get_active_users_usage` tool in the `usage` toolset reports
+distinct active users across an organization and any billing children, matching
+the Usage page. It requires `read_organizations` and the `usage-breakdowns`
+feature, which is disabled by default; a disabled feature returns 404. The tool
+is available with `--read-only` but excluded by `--minimum-access`.
+Invalid dates return 400, and query failures return 503 rather than zero usage.
+
+Supply `org_slug` (slug or UUID), `from`, and `to`. Dates are inclusive UTC `YYYY-MM-DD`:
+`from` cannot be earlier than today minus three calendar months, and `to` must
+be between `from` and today. `interval` accepts `day` (default) or `month`.
+Month buckets are dated on the calendar first, but only events within the exact
+requested dates contribute. The complete series is returned without pagination.
+The original `/usage` summary endpoint and its custom-range cap are unchanged.
+
+The response preserves zero-count buckets, cumulative counts, the whole-range
+distinct-user count, and the Usage-page average monthly active users. Do not sum
+daily or child-organization counts to derive distinct users. The monthly average
+can differ from whole-range distinct users. `scope` is `organization` without
+billing children, otherwise `organization_and_billing_children`. Reports are
+cached for five minutes and retain `generated_at`, the UTC calculation time,
+not an ingestion watermark. Late events can revise results on refresh. These
+are usage reports, not invoice reconciliation or per-user cost attribution.
+
+---
+
 ## Library Usage
 
 The exported Go API of this module should be considered unstable, and subject to breaking changes as we evolve this project.

@@ -256,6 +256,7 @@ const (
 	ToolsetAnnotations           = "annotations"
 	ToolsetInvestigations        = "investigations"
 	ToolsetUser                  = "user"
+	ToolsetUsage                 = "usage"
 	ToolsetRepositoryConnections = "repository_connections"
 	ToolsetSkills                = "skills"
 )
@@ -275,6 +276,7 @@ var ValidToolsets = []string{
 	ToolsetAnnotations,
 	ToolsetInvestigations,
 	ToolsetUser,
+	ToolsetUsage,
 	ToolsetRepositoryConnections,
 	ToolsetSkills,
 }
@@ -502,6 +504,13 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CurrentUser),
 				newToolDef(buildkite.UserTokenOrganization),
 				newToolDef(buildkite.AccessToken),
+			},
+		},
+		ToolsetUsage: {
+			Name:        "Organization Usage",
+			Description: "Read-only resource usage reports matching the organization's Usage pages",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.GetActiveUsersUsage),
 			},
 		},
 		ToolsetRepositoryConnections: {

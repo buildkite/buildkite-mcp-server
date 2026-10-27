@@ -33,6 +33,7 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 		ArtifactsClient:             &buildkite.BuildkiteClientAdapter{Client: globals.Client, HTTPClient: globals.HTTPClient},
 		AnnotationsClient:           globals.Client.Annotations,
 		OrganizationsClient:         globals.Client.Organizations,
+		OrganizationUsageClient:     globals.Client.Organizations,
 		RepositoryConnectionsClient: globals.Client.RepositoryConnections,
 		UserClient:                  globals.Client.User,
 		AccessTokensClient:          globals.Client.AccessTokens,
