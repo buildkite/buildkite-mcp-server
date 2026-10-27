@@ -511,6 +511,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Description: "Read-only resource usage reports matching the organization's Usage pages",
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.GetActiveUsersUsage),
+				newToolDef(buildkite.GetConcurrentAgentsUsage),
 			},
 		},
 		ToolsetRepositoryConnections: {

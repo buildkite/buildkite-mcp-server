@@ -152,6 +152,19 @@ cached for five minutes and retain `generated_at`, the UTC calculation time,
 not an ingestion watermark. Late events can revise results on refresh. These
 are usage reports, not invoice reconciliation or per-user cost attribution.
 
+`get_concurrent_agents_usage` reports recorded concurrent-agent usage with the
+same dates, intervals, scope, cache, and permissions. `agent_type` accepts
+`self_hosted` (default) or `hosted`; `percentile` accepts integers 1–100
+(default 95).
+
+The percentile is discrete across the zero-filled **daily sums of each
+organization's peak**. It is not an intraday percentile such as P80, simultaneous
+cross-organization concurrency, or plan-specific billable usage. With
+`interval: "month"`, each bar is the maximum daily sum within that month, but
+the percentile still uses the underlying daily values, not the monthly bars.
+Use `interval: "day"` to retrieve the inputs for reproducing the statistic.
+MCP returns the server's report without recalculating it or paginating it.
+
 ---
 
 ## Library Usage

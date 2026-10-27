@@ -101,40 +101,130 @@ func TestActiveUsersUsageThroughMCP(t *testing.T) {
 	}
 }
 
-func TestActiveUsersUsageErrorsThroughMCP(t *testing.T) {
+func TestConcurrentAgentsUsageThroughMCP(t *testing.T) {
 	for _, tt := range []struct {
-		status  int
-		message string
+		name, org, from, to, interval, agentType, scope string
+		percentile, wantPercentile                      int
+		maximum, percentileValue                        int64
+		items                                           string
 	}{
-		{http.StatusUnauthorized, "Token expired"},
-		{http.StatusForbidden, "Missing read_organizations or organization access"},
-		{http.StatusNotFound, "Usage breakdowns are not enabled"},
-		{http.StatusBadRequest, "from must be on or before to"},
-		{http.StatusServiceUnavailable, "Usage query unavailable"},
+		{
+			name: "server defaults and zero-filled daily inputs", org: "acme", from: "2026-08-29", to: "2026-09-03",
+			scope: "organization_and_billing_children", wantPercentile: 95, maximum: 11, percentileValue: 11,
+			items: `[{"date":"2026-08-29","max_concurrent_agents":0},{"date":"2026-08-30","max_concurrent_agents":0},
+				{"date":"2026-08-31","max_concurrent_agents":1},{"date":"2026-09-01","max_concurrent_agents":3},
+				{"date":"2026-09-02","max_concurrent_agents":7},{"date":"2026-09-03","max_concurrent_agents":11}]`,
+		},
+		{
+			name: "hosted monthly bars retain percentile over daily inputs", org: "0199e940-7e01-7000-8000-000000000002",
+			from: "2026-08-29", to: "2026-09-03", interval: "month", agentType: "hosted", scope: "organization",
+			percentile: 80, wantPercentile: 80, maximum: 11, percentileValue: 7,
+			items: `[{"date":"2026-08-01","max_concurrent_agents":1},{"date":"2026-09-01","max_concurrent_agents":11}]`,
+		},
+		{
+			name: "minimum percentile and explicit zero counts", org: "acme", from: "2026-10-01", to: "2026-10-01",
+			interval: "day", scope: "organization", percentile: 1, wantPercentile: 1,
+			items: `[{"date":"2026-10-01","max_concurrent_agents":0}]`,
+		},
+		{
+			name: "maximum percentile and explicit self-hosted filter", org: "acme", from: "2026-10-01", to: "2026-10-04",
+			agentType: "self_hosted", scope: "organization_and_billing_children", percentile: 100, wantPercentile: 100,
+			maximum: 11, percentileValue: 11,
+			items: `[{"date":"2026-10-01","max_concurrent_agents":0},{"date":"2026-10-02","max_concurrent_agents":3},
+				{"date":"2026-10-03","max_concurrent_agents":7},{"date":"2026-10-04","max_concurrent_agents":11}]`,
+		},
 	} {
-		t.Run(fmt.Sprint(tt.status), func(t *testing.T) {
-			body := fmt.Sprintf(`{"message":%q,"errors":["Synthetic usage failure"]}`, tt.message)
-			client := organizationUsageSession(t, func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "/v2/organizations/acme/usage/active-users", r.URL.Path)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tt.status)
-				_, _ = io.WriteString(w, body)
-			}, WithToolsets(toolsets.ToolsetUsage))
-			result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-				Name: "get_active_users_usage", Arguments: map[string]any{"org_slug": "acme", "from": "2026-10-03", "to": "2026-10-01"},
-			})
-			if tt.status == http.StatusUnauthorized {
-				require.ErrorIs(t, err, buildkite.ErrUnauthorized)
-			} else {
-				require.NoError(t, err)
-				require.True(t, result.IsError)
-				require.JSONEq(t, body, result.Content[0].(*mcp.TextContent).Text, "API validation and availability errors must not look like zero usage")
+		t.Run(tt.name, func(t *testing.T) {
+			interval, agentType := tt.interval, tt.agentType
+			if interval == "" {
+				interval = "day"
 			}
+			if agentType == "" {
+				agentType = "self_hosted"
+			}
+			report := fmt.Sprintf(`{"description":"Recorded agent concurrency","reporting_period":{"from":%q,"to":%q},
+				"generated_at":"2026-10-27T11:00:00Z","scope":%q,"interval":%q,"unit":"agents",
+				"definition":"Discrete percentile over zero-filled daily sums of organization peaks",
+				"agent_type":%q,"percentile":%d,"summary":{"max_concurrent_agents":%d,"percentile_concurrent_agents":%d},
+				"items":%s}`, tt.from, tt.to, tt.scope, interval, agentType, tt.wantPercentile, tt.maximum, tt.percentileValue, tt.items)
+			var requests atomic.Int32
+			client := organizationUsageSession(t, func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/v2/organizations/"+tt.org+"/usage/concurrent-agents", r.URL.Path)
+				query := url.Values{"from": {tt.from}, "to": {tt.to}}
+				if tt.interval != "" {
+					query.Set("interval", tt.interval)
+				}
+				if tt.agentType != "" {
+					query.Set("filter[agent_type]", tt.agentType)
+				}
+				if tt.percentile != 0 {
+					query.Set("percentile", fmt.Sprint(tt.percentile))
+				}
+				assert.Equal(t, query, r.URL.Query(), "preserve exact bounds, omit server defaults, and use the SDK's nested agent filter")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, report)
+			}, WithToolsets(toolsets.ToolsetUsage), WithReadOnly(true))
+			args := map[string]any{"org_slug": tt.org, "from": tt.from, "to": tt.to}
+			if tt.interval != "" {
+				args["interval"] = tt.interval
+			}
+			if tt.agentType != "" {
+				args["agent_type"] = tt.agentType
+			}
+			if tt.percentile != 0 {
+				args["percentile"] = tt.percentile
+			}
+			result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_concurrent_agents_usage", Arguments: args})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			require.Equal(t, int32(1), requests.Load())
+			require.Len(t, result.Content, 1)
+			require.JSONEq(t, report, result.Content[0].(*mcp.TextContent).Text, "do not recompute the percentile from the monthly bars or change zero counts")
 		})
 	}
 }
 
-func TestActiveUsersUsageDiscoveryAndSchema(t *testing.T) {
+func TestOrganizationUsageErrorsThroughMCP(t *testing.T) {
+	for _, resource := range []struct{ tool, path string }{
+		{"get_active_users_usage", "active-users"},
+		{"get_concurrent_agents_usage", "concurrent-agents"},
+	} {
+		for _, tt := range []struct {
+			status  int
+			message string
+		}{
+			{http.StatusUnauthorized, "Token expired"},
+			{http.StatusForbidden, "Missing read_organizations or organization access"},
+			{http.StatusNotFound, "Usage breakdowns are not enabled"},
+			{http.StatusBadRequest, "from must be on or before to"},
+			{http.StatusServiceUnavailable, "Usage query unavailable"},
+		} {
+			t.Run(resource.tool+"/"+fmt.Sprint(tt.status), func(t *testing.T) {
+				body := fmt.Sprintf(`{"message":%q,"errors":["Synthetic usage failure"]}`, tt.message)
+				client := organizationUsageSession(t, func(w http.ResponseWriter, r *http.Request) {
+					assert.Equal(t, "/v2/organizations/acme/usage/"+resource.path, r.URL.Path)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tt.status)
+					_, _ = io.WriteString(w, body)
+				}, WithToolsets(toolsets.ToolsetUsage))
+				result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+					Name: resource.tool, Arguments: map[string]any{"org_slug": "acme", "from": "2026-10-03", "to": "2026-10-01"},
+				})
+				if tt.status == http.StatusUnauthorized {
+					require.ErrorIs(t, err, buildkite.ErrUnauthorized)
+				} else {
+					require.NoError(t, err)
+					require.True(t, result.IsError)
+					require.JSONEq(t, body, result.Content[0].(*mcp.TextContent).Text, "API validation and availability errors must not look like zero usage")
+				}
+			})
+		}
+	}
+}
+
+func TestOrganizationUsageDiscoveryAndSchema(t *testing.T) {
 	registry := toolsets.NewToolsetRegistry()
 	registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
 	require.NoError(t, toolsets.ValidateToolsets([]string{toolsets.ToolsetUsage}))
@@ -158,39 +248,58 @@ func TestActiveUsersUsageDiscoveryAndSchema(t *testing.T) {
 			}, tt.opts...)
 			listed, err := client.ListTools(context.Background(), nil)
 			require.NoError(t, err)
-			var found *mcp.Tool
-			for _, tool := range listed.Tools {
-				if tool.Name == "get_active_users_usage" {
-					found = tool
+			for _, name := range []string{"get_active_users_usage", "get_concurrent_agents_usage"} {
+				var found *mcp.Tool
+				for _, tool := range listed.Tools {
+					if tool.Name == name {
+						found = tool
+					}
 				}
-			}
-			if !tt.want {
-				require.Nil(t, found)
-				result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_active_users_usage",
-					Arguments: map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03"}})
-				require.True(t, err != nil || result.IsError)
-			} else {
-				require.NotNil(t, found)
-				require.True(t, found.Annotations.ReadOnlyHint)
-				schema := found.InputSchema.(map[string]any)
-				require.ElementsMatch(t, []any{"org_slug", "from", "to"}, schema["required"])
-				properties := schema["properties"].(map[string]any)
-				require.ElementsMatch(t, []any{"day", "month"}, properties["interval"].(map[string]any)["enum"])
-				require.NotContains(t, properties, "page")
-				require.NotContains(t, properties, "per_page")
-				for _, missing := range []string{"org_slug", "from", "to"} {
-					args := map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03"}
-					delete(args, missing)
-					result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: found.Name, Arguments: args})
+				if !tt.want {
+					require.Nil(t, found)
+					result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: name,
+						Arguments: map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03"}})
+					require.True(t, err != nil || result.IsError)
+				} else {
+					require.NotNil(t, found)
+					require.True(t, found.Annotations.ReadOnlyHint)
+					schema := found.InputSchema.(map[string]any)
+					require.ElementsMatch(t, []any{"org_slug", "from", "to"}, schema["required"])
+					properties := schema["properties"].(map[string]any)
+					require.ElementsMatch(t, []any{"day", "month"}, properties["interval"].(map[string]any)["enum"])
+					require.NotContains(t, properties, "page")
+					require.NotContains(t, properties, "per_page")
+					for _, missing := range []string{"org_slug", "from", "to"} {
+						args := map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03"}
+						delete(args, missing)
+						result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: found.Name, Arguments: args})
+						require.NoError(t, err)
+						require.True(t, result.IsError, "missing %s must be rejected by the published schema", missing)
+						require.Contains(t, result.Content[0].(*mcp.TextContent).Text, missing)
+					}
+					result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: found.Name,
+						Arguments: map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03", "interval": "week"}})
 					require.NoError(t, err)
-					require.True(t, result.IsError, "missing %s must be rejected by the published schema", missing)
-					require.Contains(t, result.Content[0].(*mcp.TextContent).Text, missing)
+					require.True(t, result.IsError)
+					require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "interval")
+					if name == "get_concurrent_agents_usage" {
+						require.InDelta(t, 1, properties["percentile"].(map[string]any)["minimum"], 0)
+						require.InDelta(t, 100, properties["percentile"].(map[string]any)["maximum"], 0)
+						require.ElementsMatch(t, []any{"self_hosted", "hosted"}, properties["agent_type"].(map[string]any)["enum"])
+						for _, invalid := range []struct {
+							field string
+							value any
+						}{
+							{"percentile", 0}, {"percentile", 101}, {"percentile", 80.5}, {"agent_type", "all"},
+						} {
+							args := map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03", invalid.field: invalid.value}
+							result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: args})
+							require.NoError(t, err)
+							require.True(t, result.IsError)
+							require.Contains(t, result.Content[0].(*mcp.TextContent).Text, invalid.field)
+						}
+					}
 				}
-				result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: found.Name,
-					Arguments: map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03", "interval": "week"}})
-				require.NoError(t, err)
-				require.True(t, result.IsError)
-				require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "interval")
 			}
 			require.Zero(t, requests.Load(), "discovery, exclusions, and schema rejections must not query usage")
 		})
