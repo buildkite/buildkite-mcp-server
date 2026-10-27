@@ -207,6 +207,14 @@ divided by the requested day or month bucket count, including zero buckets.
 Execution counts are not the distinct managed-test billing metric. This
 complete series is not paginated; suite detail is a separate report.
 
+`list_test_executions_usage_by_suite` returns sparse, additive corrected
+execution counts grouped by clipped interval, organization, and suite, ordered
+by date, organization UUID, and suite UUID. Fully corrected zero groups are
+omitted, not zero-filled. Suite slug/name can be null when unavailable or not
+caller-visible; rows remain. It returns one page without a summary or
+accumulation, using the same cursor pagination rules as the other breakdowns.
+`per_page` counts grouped rows, not suites.
+
 ---
 
 ## Library Usage

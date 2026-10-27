@@ -439,6 +439,28 @@ func TestOrganizationUsageDetailPagesThroughMCP(t *testing.T) {
 			org: "acme", from: "2026-10-01", to: "2026-10-03", interval: "day", scope: "organization_and_billing_children",
 			unit: "vCPU-minutes", perPage: 100, after: "next+cursor=", items: `[]`, next: `null`,
 		},
+		{
+			name: "suite defaults preserve sparse additive execution rows", tool: "list_test_executions_usage_by_suite", path: "test-executions/suites",
+			org: "acme", from: "2026-10-01", to: "2026-10-03", scope: "organization_and_billing_children", unit: "executions",
+			items: `[{"date":"2026-10-01","organization_uuid":"00000000-0000-0000-0000-000000000001",
+				"suite_uuid":"00000000-0000-0000-0000-000000000021","suite_slug":"backend","suite_name":"Backend","test_executions":2147483655},
+				{"date":"2026-10-03","organization_uuid":"00000000-0000-0000-0000-000000000001",
+				"suite_uuid":"00000000-0000-0000-0000-000000000021","suite_slug":"backend","suite_name":"Backend","test_executions":3}]`,
+			next: `"https://api.buildkite.com/v2/organizations/acme/usage/test-executions/suites?after=next%2Bsuite%3D"`,
+		},
+		{
+			name: "suite partial month retains unavailable names", tool: "list_test_executions_usage_by_suite", path: "test-executions/suites",
+			org: "0199e940-7e01-7000-8000-000000000007", from: "2026-08-18", to: "2026-09-04", interval: "month", scope: "organization",
+			unit: "executions", perPage: 1, after: "opaque+suite=/&?",
+			items: `[{"date":"2026-08-01","organization_uuid":"00000000-0000-0000-0000-000000000001",
+				"suite_uuid":"00000000-0000-0000-0000-000000000022","suite_slug":null,"suite_name":null,"test_executions":9}]`,
+			next: `null`,
+		},
+		{
+			name: "suite empty terminal page does not invent zero groups", tool: "list_test_executions_usage_by_suite", path: "test-executions/suites",
+			org: "acme", from: "2026-10-01", to: "2026-10-03", interval: "day", scope: "organization_and_billing_children",
+			unit: "executions", perPage: 100, after: "next+suite=", items: `[]`, next: `null`,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			interval := tt.interval
@@ -504,6 +526,7 @@ func TestOrganizationUsageErrorsThroughMCP(t *testing.T) {
 		{"get_hosted_agents_usage", "hosted-agents"},
 		{"list_hosted_agents_usage_by_pipeline", "hosted-agents/pipelines"},
 		{"get_test_executions_usage", "test-executions"},
+		{"list_test_executions_usage_by_suite", "test-executions/suites"},
 	} {
 		for _, tt := range []struct {
 			status  int
@@ -565,6 +588,7 @@ func TestOrganizationUsageDiscoveryAndSchema(t *testing.T) {
 			for _, name := range []string{
 				"get_active_users_usage", "get_concurrent_agents_usage", "list_concurrent_agents_usage_by_organization",
 				"get_hosted_agents_usage", "list_hosted_agents_usage_by_pipeline", "get_test_executions_usage",
+				"list_test_executions_usage_by_suite",
 			} {
 				var found *mcp.Tool
 				for _, tool := range listed.Tools {
@@ -587,7 +611,7 @@ func TestOrganizationUsageDiscoveryAndSchema(t *testing.T) {
 					require.NotContains(t, properties, "page")
 					require.NotContains(t, properties, "before")
 					switch name {
-					case "list_concurrent_agents_usage_by_organization", "list_hosted_agents_usage_by_pipeline":
+					case "list_concurrent_agents_usage_by_organization", "list_hosted_agents_usage_by_pipeline", "list_test_executions_usage_by_suite":
 						require.Contains(t, properties, "after")
 						require.InDelta(t, 1, properties["per_page"].(map[string]any)["minimum"], 0)
 						require.InDelta(t, 100, properties["per_page"].(map[string]any)["maximum"], 0)
