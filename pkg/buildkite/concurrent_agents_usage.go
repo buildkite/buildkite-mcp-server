@@ -16,7 +16,7 @@ type GetConcurrentAgentsUsageArgs struct {
 	OrgSlug    string `json:"org_slug" jsonschema:"Organization slug or UUID"`
 	From       string `json:"from" jsonschema:"Inclusive UTC date in YYYY-MM-DD; earliest is today minus three calendar months"`
 	To         string `json:"to" jsonschema:"Inclusive UTC date in YYYY-MM-DD; must be on or after from and no later than today"`
-	Interval   string `json:"interval,omitempty" jsonschema:"Defaults to day. Month buckets use the calendar first while source data still respects the exact from/to dates"`
+	Interval   string `json:"interval,omitempty" jsonschema:"Defaults to day; month date labels use the calendar first"`
 	Percentile int    `json:"percentile,omitempty" jsonschema:"Defaults to 95; discrete percentile across daily values even when interval is month"`
 	AgentType  string `json:"agent_type,omitempty" jsonschema:"Defaults to self_hosted"`
 }
@@ -33,7 +33,7 @@ func GetConcurrentAgentsUsage() (mcp.Tool, mcp.ToolHandlerFor[GetConcurrentAgent
 
 	return mcp.Tool{
 		Name:        "get_concurrent_agents_usage",
-		Description: "Report recorded concurrent-agent usage for an organization and any billing children. Percentiles are discrete across zero-filled DAILY sums of each organization's peak, not intraday P80, simultaneous cross-organization concurrency, or plan-specific billable usage. Monthly items are maximum daily sums within each month; the percentile still uses underlying daily values, not monthly bars. Use interval=day to retrieve the statistic's inputs. Preserves Usage-page scope, aggregation and rounding; complete series without pagination. Five-minute server cache retains generated_at (UTC calculation time, not ingestion watermark); late events can revise results on refresh. Requires read_organizations. The default-off usage-breakdowns feature returns 404 when disabled; query failures return 503.",
+		Description: "Report recorded concurrent-agent usage for an organization and any billing children. Percentiles are discrete across zero-filled DAILY sums of each organization's peak, not intraday P80, simultaneous cross-organization concurrency, or plan-specific billable usage. Monthly items are maximum daily sums within each month; the percentile still uses underlying daily values, not monthly bars. Dated items use date as a label; period.from/to give actual inclusive UTC bounds clipped to the request. Use interval=day to retrieve the statistic's inputs. Preserves Usage-page scope, aggregation and rounding; complete series without pagination. Five-minute server cache retains generated_at (UTC calculation time, not ingestion watermark); late events can revise results on refresh. Requires read_organizations. The default-off usage-breakdowns feature returns 404 when disabled; query failures return 503.",
 		InputSchema: schema,
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Concurrent Agents Usage",
