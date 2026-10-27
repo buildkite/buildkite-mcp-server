@@ -46,22 +46,30 @@ func TestActiveUsersUsageThroughMCP(t *testing.T) {
 			name: "daily distinct users and cumulative carry", from: "2026-08-28", to: "2026-08-30",
 			org: "acme", scope: "organization_and_billing_children",
 			summary: `{"active_users":3,"average_monthly_active_users":3}`,
-			items: `[{"date":"2026-08-28","active_users":2,"cumulative_active_users":2},
-				{"date":"2026-08-29","active_users":2,"cumulative_active_users":3},
-				{"date":"2026-08-30","active_users":0,"cumulative_active_users":3}]`,
+			items: `[{"date":"2026-08-28","period":{"from":"2026-08-28","to":"2026-08-28"},"active_users":2,"cumulative_active_users":2},
+				{"date":"2026-08-29","period":{"from":"2026-08-29","to":"2026-08-29"},"active_users":2,"cumulative_active_users":3},
+				{"date":"2026-08-30","period":{"from":"2026-08-30","to":"2026-08-30"},"active_users":0,"cumulative_active_users":3}]`,
 		},
 		{
-			name: "partial calendar months and non-additive summary", from: "2026-08-18", to: "2026-09-04", interval: "month",
+			name: "clipped edge months and full middle month with non-additive summary", from: "2026-08-18", to: "2026-10-04", interval: "month",
 			org: "acme", scope: "organization_and_billing_children",
-			summary: `{"active_users":4,"average_monthly_active_users":3}`,
-			items: `[{"date":"2026-08-01","active_users":2,"cumulative_active_users":2},
-				{"date":"2026-09-01","active_users":4,"cumulative_active_users":4}]`,
+			summary: `{"active_users":5,"average_monthly_active_users":3}`,
+			items: `[{"date":"2026-08-01","period":{"from":"2026-08-18","to":"2026-08-31"},"active_users":2,"cumulative_active_users":2},
+				{"date":"2026-09-01","period":{"from":"2026-09-01","to":"2026-09-30"},"active_users":4,"cumulative_active_users":4},
+				{"date":"2026-10-01","period":{"from":"2026-10-01","to":"2026-10-04"},"active_users":3,"cumulative_active_users":5}]`,
+		},
+		{
+			name: "short crossing-month range uses period distinct users for headline average", from: "2026-09-30", to: "2026-10-03", interval: "month",
+			org: "acme", scope: "organization_and_billing_children",
+			summary: `{"active_users":2,"average_monthly_active_users":2}`,
+			items: `[{"date":"2026-09-01","period":{"from":"2026-09-30","to":"2026-09-30"},"active_users":1,"cumulative_active_users":1},
+				{"date":"2026-10-01","period":{"from":"2026-10-01","to":"2026-10-03"},"active_users":2,"cumulative_active_users":2}]`,
 		},
 		{
 			name: "explicit day and zero usage", from: "2026-10-01", to: "2026-10-01", interval: "day",
 			org: "0199e940-7e01-7000-8000-000000000001", scope: "organization",
 			summary: `{"active_users":0,"average_monthly_active_users":0}`,
-			items:   `[{"date":"2026-10-01","active_users":0,"cumulative_active_users":0}]`,
+			items:   `[{"date":"2026-10-01","period":{"from":"2026-10-01","to":"2026-10-01"},"active_users":0,"cumulative_active_users":0}]`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,7 +79,7 @@ func TestActiveUsersUsageThroughMCP(t *testing.T) {
 			}
 			report := fmt.Sprintf(`{"description":"Active users","reporting_period":{"from":%q,"to":%q},
 				"generated_at":"2026-10-27T11:00:00Z","scope":%q,
-				"interval":%q,"unit":"users","definition":"Distinct users; late events may revise results",
+				"interval":%q,"unit":"users","definition":"Ranges up to one inclusive billing month use period distinct users; longer ranges floor the average of clipped calendar-month distinct counts. Late events may revise results.",
 				"summary":%s,"items":%s}`, tt.from, tt.to, tt.scope, interval, tt.summary, tt.items)
 			var requests atomic.Int32
 			client := organizationUsageSession(t, func(w http.ResponseWriter, r *http.Request) {

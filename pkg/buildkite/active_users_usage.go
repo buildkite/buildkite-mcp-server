@@ -26,7 +26,7 @@ type GetActiveUsersUsageArgs struct {
 	OrgSlug  string `json:"org_slug" jsonschema:"Organization slug or UUID"`
 	From     string `json:"from" jsonschema:"Inclusive UTC date in YYYY-MM-DD; earliest is today minus three calendar months"`
 	To       string `json:"to" jsonschema:"Inclusive UTC date in YYYY-MM-DD; must be on or after from and no later than today"`
-	Interval string `json:"interval,omitempty" jsonschema:"Defaults to day. Month buckets use the calendar first while source data still respects the exact from/to dates"`
+	Interval string `json:"interval,omitempty" jsonschema:"Defaults to day; month date labels use the calendar first"`
 }
 
 func GetActiveUsersUsage() (mcp.Tool, mcp.ToolHandlerFor[GetActiveUsersUsageArgs, any], []string) {
@@ -38,7 +38,7 @@ func GetActiveUsersUsage() (mcp.Tool, mcp.ToolHandlerFor[GetActiveUsersUsageArgs
 
 	return mcp.Tool{
 		Name:        "get_active_users_usage",
-		Description: "Report distinct active users for an organization and any billing children, matching the Usage page. Returns day or month buckets with zero counts and cumulative carry, plus whole-range distinct users and the Usage-page average monthly active users. Do not sum daily or child counts to calculate distinct users; the monthly average can differ from whole-range users. Returns the complete date range without pagination. Reports are cached for five minutes; generated_at retains UTC calculation time, not an ingestion watermark. Late events can revise results on refresh. Requires read_organizations. The default-off usage-breakdowns feature returns 404 when disabled; query failures return 503. Not invoice reconciliation or per-user cost attribution.",
+		Description: "Report distinct active users for an organization and any billing children, matching the Usage page. Returns day or month buckets with zero counts and cumulative carry, plus whole-range distinct users and average monthly active users. The monthly average equals period distinct users for ranges up to one inclusive billing month, even across calendar months; longer ranges floor the average of clipped calendar-month distinct counts. Dated items use date as a label; period.from/to give actual inclusive UTC bounds clipped to the request. Do not sum daily or child counts to calculate distinct users. Returns the complete date range without pagination. Reports are cached for five minutes; generated_at retains UTC calculation time, not an ingestion watermark. Late events can revise results on refresh. Requires read_organizations. The default-off usage-breakdowns feature returns 404 when disabled; query failures return 503. Not invoice reconciliation or per-user cost attribution.",
 		InputSchema: schema,
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Active Users Usage",

@@ -139,18 +139,26 @@ Invalid dates return 400, and query failures return 503 rather than zero usage.
 Supply `org_slug` (slug or UUID), `from`, and `to`. Dates are inclusive UTC `YYYY-MM-DD`:
 `from` cannot be earlier than today minus three calendar months, and `to` must
 be between `from` and today. `interval` accepts `day` (default) or `month`.
-Month buckets are dated on the calendar first, but only events within the exact
-requested dates contribute. The complete series is returned without pagination.
+Each dated item's `date` is a label: monthly labels use the calendar first.
+`period.from` and `period.to` give its actual inclusive UTC bounds, clipped to
+the request. For example, September 30–October 3 gives a September 1 label with
+period September 30–30 and an October 1 label with period October 1–3. Daily
+items have `period.from = period.to = date`. The complete series is returned
+without pagination.
 The original `/usage` summary endpoint and its custom-range cap are unchanged.
 
 The response preserves zero-count buckets, cumulative counts, the whole-range
 distinct-user count, and the Usage-page average monthly active users. Do not sum
-daily or child-organization counts to derive distinct users. The monthly average
-can differ from whole-range distinct users. `scope` is `organization` without
-billing children, otherwise `organization_and_billing_children`. Reports are
-cached for five minutes and retain `generated_at`, the UTC calculation time,
-not an ingestion watermark. Late events can revise results on refresh. These
-are usage reports, not invoice reconciliation or per-user cost attribution.
+daily or child-organization counts to derive distinct users. For ranges up to
+one inclusive billing month, the monthly average equals whole-range distinct
+users, even across calendar months. Longer ranges floor the average of distinct
+counts in clipped calendar months. For example, September 30–October 3 can have
+monthly counts `[1, 2]` and a headline average of `2`, not `1`.
+`scope` is `organization` without billing children, otherwise
+`organization_and_billing_children`. Reports are cached for five minutes and
+retain `generated_at`, the UTC calculation time, not an ingestion watermark.
+Late events can revise results on refresh. These are usage reports, not invoice
+reconciliation or per-user cost attribution.
 
 `get_concurrent_agents_usage` reports recorded concurrent-agent usage with the
 same dates, intervals, scope, cache, and permissions. `agent_type` accepts
