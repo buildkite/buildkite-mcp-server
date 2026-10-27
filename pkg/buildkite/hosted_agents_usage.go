@@ -16,7 +16,7 @@ type GetHostedAgentsUsageArgs struct {
 	OrgSlug  string `json:"org_slug" jsonschema:"Organization slug or UUID"`
 	From     string `json:"from" jsonschema:"Inclusive UTC date in YYYY-MM-DD; earliest is today minus three calendar months"`
 	To       string `json:"to" jsonschema:"Inclusive UTC date in YYYY-MM-DD; must be on or after from and no later than today"`
-	Interval string `json:"interval,omitempty" jsonschema:"Defaults to day. Month buckets use the calendar first while source data still respects the exact from/to dates"`
+	Interval string `json:"interval,omitempty" jsonschema:"Defaults to day; month date labels use the calendar first"`
 }
 
 func GetHostedAgentsUsage() (mcp.Tool, mcp.ToolHandlerFor[GetHostedAgentsUsageArgs, any], []string) {
@@ -28,7 +28,7 @@ func GetHostedAgentsUsage() (mcp.Tool, mcp.ToolHandlerFor[GetHostedAgentsUsageAr
 
 	return mcp.Tool{
 		Name:        "get_hosted_agents_usage",
-		Description: "Report hosted compute vCPU-minutes for an organization and any billing children, matching the Usage table and chart. Returns period totals and day or month resource buckets for Linux amd64, Linux arm64, macOS M4 and Windows amd64; all four resource keys include zeros. CPU-weighted shapes combine per resource before flooring; unknown shapes are excluded. Period totals and interval buckets round independently, so summing rounded buckets can differ from the summary. Returns the complete series without pagination or MCP recalculation. Five-minute server cache retains generated_at (UTC calculation time, not ingestion watermark); late events can revise results on refresh. Requires read_organizations. The default-off usage-breakdowns feature returns 404 when disabled; query failures return 503. Not invoice reconciliation or per-job cost attribution.",
+		Description: "Report hosted compute vCPU-minutes for an organization and any billing children, matching the Usage table and chart. Returns period totals and day or month resource buckets for Linux amd64, Linux arm64, macOS M4 and Windows amd64; all four resource keys include zeros. Dated items use date as a label; period.from/to give actual inclusive UTC bounds clipped to the request. CPU-weighted shapes combine per resource before flooring; unknown shapes are excluded. Period totals and interval buckets round independently, so summing rounded buckets can differ from the summary. Returns the complete series without pagination or MCP recalculation. Five-minute server cache retains generated_at (UTC calculation time, not ingestion watermark); late events can revise results on refresh. Requires read_organizations. The default-off usage-breakdowns feature returns 404 when disabled; query failures return 503. Not invoice reconciliation or per-job cost attribution.",
 		InputSchema: schema,
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Hosted Agents Usage",
