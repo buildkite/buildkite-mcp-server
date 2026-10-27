@@ -176,6 +176,14 @@ table and chart; summing rounded daily buckets can differ from the summary.
 MCP preserves these values without recalculation. This complete series is not
 paginated; pipeline detail is a separate report.
 
+`get_test_executions_usage` reports test executions with the same dates,
+intervals, scope, cache, and permissions. It preserves zero-filled buckets,
+additive cumulative execution counts, total executions, active suites, and
+the server's average executions. The average is the floor of total executions
+divided by the requested day or month bucket count, including zero buckets.
+Execution counts are not the distinct managed-test billing metric. This
+complete series is not paginated; suite detail is a separate report.
+
 ---
 
 ## Library Usage
