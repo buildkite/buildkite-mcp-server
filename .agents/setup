@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v mise >/dev/null 2>&1; then
+  curl -fsSL https://mise.run | sh
+  sudo install -m 0755 "$HOME/.local/bin/mise" /usr/local/bin/mise
+fi
+
+mise trust
+time mise install --locked
+time mise run setup
