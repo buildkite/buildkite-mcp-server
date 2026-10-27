@@ -173,17 +173,6 @@ the percentile still uses the underlying daily values, not the monthly bars.
 Use `interval: "day"` to retrieve the inputs for reproducing the statistic.
 MCP returns the server's report without recalculating it or paginating it.
 
-`list_concurrent_agents_usage_by_organization` returns the organization table
-breakdown in UUID order, using the same concurrency filters and date bounds.
-Each organization has a whole-range summary and zero-filled interval buckets;
-each bucket's discrete percentile uses daily peaks within its clipped dates,
-so a daily bucket's percentile equals its maximum. These percentiles are
-nonadditive; use `get_concurrent_agents_usage` for the aggregate report.
-Pagination is forward-only: `per_page` accepts 1–100 (default 30); pass the
-opaque `after` value from the returned `links.next` URL unchanged. Body links
-always include `self` and `next`, which is null on the final page. Late events
-can change reports between pages; there is no cross-page snapshot guarantee.
-
 `get_hosted_agents_usage` reports hosted compute in vCPU-minutes with the same
 dates, intervals, scope, cache, and permissions. Resource maps always include
 `hosted_agents_linux_amd64_vcpu_minutes`, `hosted_agents_linux_arm64_vcpu_minutes`,
@@ -193,19 +182,7 @@ resource before flooring and excludes unknown shapes from weighted metrics.
 Period totals and interval buckets round independently, matching the Usage
 table and chart; summing rounded daily buckets can differ from the summary.
 MCP preserves these values without recalculation. This complete series is not
-paginated; pipeline detail is a separate report.
-
-`list_hosted_agents_usage_by_pipeline` returns sparse CSV-detail rows grouped
-by interval, organization, pipeline, and instance shape, ordered by date,
-legacy organization ID, pipeline ID, and shape. Each row preserves raw duration
-in microseconds, job counts, and per-row CPU-weighted floored vCPU-minutes.
-These values need not sum to the overview totals. Unknown nonempty shapes
-retain raw counts with zero weighted minutes; empty self-hosted shapes are
-excluded. Pipeline UUID/slug can be null when unavailable, deleted or not
-caller-visible; the rows remain. It returns one page without a summary or
-accumulation. `per_page` counts grouped rows, not pipelines; the same strict
-1–100 limits, default 30, opaque `after`, nullable next link, and no-snapshot
-pagination rules apply as for the organization breakdown.
+paginated.
 
 `get_test_executions_usage` reports test executions with the same dates,
 intervals, scope, cache, and permissions. It preserves zero-filled buckets,
@@ -213,15 +190,10 @@ additive cumulative execution counts, total executions, active suites, and
 the server's average executions. The average is the floor of total executions
 divided by the requested day or month bucket count, including zero buckets.
 Execution counts are not the distinct managed-test billing metric. This
-complete series is not paginated; suite detail is a separate report.
+complete series is not paginated.
 
-`list_test_executions_usage_by_suite` returns sparse, additive corrected
-execution counts grouped by clipped interval, organization, and suite, ordered
-by date, organization UUID, and suite UUID. Fully corrected zero groups are
-omitted, not zero-filled. Suite slug/name can be null when unavailable or not
-caller-visible; rows remain. It returns one page without a summary or
-accumulation, using the same cursor pagination rules as the other breakdowns.
-`per_page` counts grouped rows, not suites.
+This MVP contains only these four aggregate tools. Organization, pipeline,
+and suite drill-downs are follow-ons, not part of the current API or toolset.
 
 ---
 

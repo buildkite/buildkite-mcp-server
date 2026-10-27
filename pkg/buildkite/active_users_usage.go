@@ -14,11 +14,8 @@ import (
 type OrganizationUsageClient interface {
 	GetActiveUsersUsage(ctx context.Context, org string, opt *buildkite.ActiveUsersUsageOptions) (buildkite.ActiveUsersUsage, *buildkite.Response, error)
 	GetConcurrentAgentsUsage(ctx context.Context, org string, opt *buildkite.ConcurrentAgentsUsageOptions) (buildkite.ConcurrentAgentsUsage, *buildkite.Response, error)
-	GetConcurrentAgentsUsageByOrganization(ctx context.Context, org string, opt *buildkite.ConcurrentAgentsUsageByOrganizationOptions) (buildkite.ConcurrentAgentsUsageByOrganization, *buildkite.Response, error)
 	GetHostedAgentsUsage(ctx context.Context, org string, opt *buildkite.HostedAgentsUsageOptions) (buildkite.HostedAgentsUsage, *buildkite.Response, error)
-	GetHostedAgentsUsageByPipeline(ctx context.Context, org string, opt *buildkite.HostedAgentsUsageByPipelineOptions) (buildkite.HostedAgentsUsageByPipeline, *buildkite.Response, error)
 	GetTestExecutionsUsage(ctx context.Context, org string, opt *buildkite.TestExecutionsUsageOptions) (buildkite.TestExecutionsUsage, *buildkite.Response, error)
-	GetTestExecutionsUsageBySuite(ctx context.Context, org string, opt *buildkite.TestExecutionsUsageBySuiteOptions) (buildkite.TestExecutionsUsageBySuite, *buildkite.Response, error)
 }
 
 type GetActiveUsersUsageArgs struct {

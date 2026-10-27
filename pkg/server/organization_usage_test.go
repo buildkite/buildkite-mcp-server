@@ -2,13 +2,11 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -327,214 +325,12 @@ func TestTestExecutionsUsageThroughMCP(t *testing.T) {
 	}
 }
 
-func TestConcurrentAgentsUsageByOrganizationThroughMCP(t *testing.T) {
-	for _, tt := range []struct {
-		name, org, from, to, interval, agentType, scope, after string
-		percentile, wantPercentile, perPage                    int
-		items, next                                            string
-	}{
-		{
-			name: "defaults preserve daily peaks and zero-count organization", org: "acme",
-			from: "2026-10-01", to: "2026-10-01", scope: "organization_and_billing_children", wantPercentile: 95,
-			items: `[{"organization_uuid":"00000000-0000-0000-0000-000000000001","organization_slug":"child-a","organization_name":"Child A",
-				"summary":{"max_concurrent_agents":3,"percentile_concurrent_agents":3},
-				"items":[{"date":"2026-10-01","max_concurrent_agents":3,"percentile_concurrent_agents":3}]},
-				{"organization_uuid":"00000000-0000-0000-0000-000000000002","organization_slug":"child-b","organization_name":"Child B",
-				"summary":{"max_concurrent_agents":0,"percentile_concurrent_agents":0},
-				"items":[{"date":"2026-10-01","max_concurrent_agents":0,"percentile_concurrent_agents":0}]}]`,
-			next: `"https://api.buildkite.com/v2/organizations/acme/usage/concurrent-agents/organizations?after=opaque%2Bnext%3D"`,
-		},
-		{
-			name: "hosted month bucket percentiles differ from full-range summary", org: "0199e940-7e01-7000-8000-000000000005",
-			from: "2026-08-29", to: "2026-09-03", interval: "month", agentType: "hosted", scope: "organization",
-			percentile: 80, wantPercentile: 80, perPage: 1, after: "opaque+cursor=/&?",
-			items: `[{"organization_uuid":"00000000-0000-0000-0000-000000000003","organization_slug":"acme","organization_name":"Acme",
-				"summary":{"max_concurrent_agents":11,"percentile_concurrent_agents":7},
-				"items":[{"date":"2026-08-01","max_concurrent_agents":1,"percentile_concurrent_agents":1},
-				{"date":"2026-09-01","max_concurrent_agents":11,"percentile_concurrent_agents":11}]}]`,
-			next: `null`,
-		},
-		{
-			name: "empty terminal page retains links next null", org: "acme", from: "2026-10-01", to: "2026-10-01",
-			interval: "day", agentType: "self_hosted", scope: "organization_and_billing_children",
-			percentile: 100, wantPercentile: 100, perPage: 100, after: "opaque+next=", items: `[]`, next: `null`,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			interval, agentType := tt.interval, tt.agentType
-			if interval == "" {
-				interval = "day"
-			}
-			if agentType == "" {
-				agentType = "self_hosted"
-			}
-			report := fmt.Sprintf(`{"description":"Concurrency by organization","reporting_period":{"from":%q,"to":%q},
-				"generated_at":"2026-10-27T11:00:00Z","scope":%q,"interval":%q,"unit":"agents",
-				"definition":"Discrete percentiles of daily peaks within the requested range or clipped bucket; nonadditive",
-				"agent_type":%q,"percentile":%d,"items":%s,
-				"links":{"self":"https://api.buildkite.com/v2/organizations/acme/usage/concurrent-agents/organizations","next":%s}}`,
-				tt.from, tt.to, tt.scope, interval, agentType, tt.wantPercentile, tt.items, tt.next)
-			var requests atomic.Int32
-			client := organizationUsageSession(t, func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
-				assert.Equal(t, http.MethodGet, r.Method)
-				assert.Equal(t, "/v2/organizations/"+tt.org+"/usage/concurrent-agents/organizations", r.URL.Path)
-				query := url.Values{"from": {tt.from}, "to": {tt.to}}
-				for key, value := range map[string]string{"interval": tt.interval, "filter[agent_type]": tt.agentType, "after": tt.after} {
-					if value != "" {
-						query.Set(key, value)
-					}
-				}
-				if tt.percentile != 0 {
-					query.Set("percentile", fmt.Sprint(tt.percentile))
-				}
-				if tt.perPage != 0 {
-					query.Set("per_page", fmt.Sprint(tt.perPage))
-				}
-				assert.Equal(t, query, r.URL.Query(), "preserve opaque cursors and use the SDK's embedded filter options")
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, report)
-			}, WithToolsets(toolsets.ToolsetUsage), WithReadOnly(true))
-			args := map[string]any{"org_slug": tt.org, "from": tt.from, "to": tt.to}
-			for key, value := range map[string]string{"interval": tt.interval, "agent_type": tt.agentType, "after": tt.after} {
-				if value != "" {
-					args[key] = value
-				}
-			}
-			if tt.percentile != 0 {
-				args["percentile"] = tt.percentile
-			}
-			if tt.perPage != 0 {
-				args["per_page"] = tt.perPage
-			}
-			result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: "list_concurrent_agents_usage_by_organization", Arguments: args})
-			require.NoError(t, err)
-			require.False(t, result.IsError)
-			require.Equal(t, int32(1), requests.Load(), "return one page without auto-following links")
-			require.Len(t, result.Content, 1)
-			require.JSONEq(t, report, result.Content[0].(*mcp.TextContent).Text, "preserve per-organization/bucket statistics, zero counts, ordering, and nullable links without inventing a top-level summary")
-		})
-	}
-}
-
-func TestOrganizationUsageDetailPagesThroughMCP(t *testing.T) {
-	for _, tt := range []struct {
-		name, tool, path, org, from, to, interval, scope, unit, after, items, next string
-		perPage                                                                    int
-	}{
-		{
-			name: "hosted pipeline defaults preserve sparse shape rows", tool: "list_hosted_agents_usage_by_pipeline", path: "hosted-agents/pipelines",
-			org: "acme", from: "2026-10-01", to: "2026-10-03", scope: "organization_and_billing_children", unit: "vCPU-minutes",
-			items: `[{"date":"2026-10-01","organization_uuid":"00000000-0000-0000-0000-000000000001",
-				"pipeline_id":2147483650,"pipeline_uuid":"00000000-0000-0000-0000-000000000011","pipeline_slug":"build",
-				"instance_shape":"linux_amd64_2xlarge","duration_microseconds":90000001,"job_count":2,"vcpu_minutes":12},
-				{"date":"2026-10-03","organization_uuid":"00000000-0000-0000-0000-000000000001",
-				"pipeline_id":2147483650,"pipeline_uuid":"00000000-0000-0000-0000-000000000011","pipeline_slug":"build",
-				"instance_shape":"unknown_future_shape","duration_microseconds":9007199254740993,"job_count":2147483651,"vcpu_minutes":0}]`,
-			next: `"https://api.buildkite.com/v2/organizations/acme/usage/hosted-agents/pipelines?after=next%2Bcursor%3D"`,
-		},
-		{
-			name: "hosted pipeline partial month retains unavailable metadata", tool: "list_hosted_agents_usage_by_pipeline", path: "hosted-agents/pipelines",
-			org: "0199e940-7e01-7000-8000-000000000006", from: "2026-08-18", to: "2026-09-04", interval: "month", scope: "organization",
-			unit: "vCPU-minutes", perPage: 1, after: "opaque+pipeline=/&?",
-			items: `[{"date":"2026-08-01","organization_uuid":"00000000-0000-0000-0000-000000000001",
-				"pipeline_id":2147483652,"pipeline_uuid":null,"pipeline_slug":null,
-				"instance_shape":"unknown_future_shape","duration_microseconds":2147483653,"job_count":3,"vcpu_minutes":0}]`,
-			next: `null`,
-		},
-		{
-			name: "hosted pipeline empty terminal page", tool: "list_hosted_agents_usage_by_pipeline", path: "hosted-agents/pipelines",
-			org: "acme", from: "2026-10-01", to: "2026-10-03", interval: "day", scope: "organization_and_billing_children",
-			unit: "vCPU-minutes", perPage: 100, after: "next+cursor=", items: `[]`, next: `null`,
-		},
-		{
-			name: "suite defaults preserve sparse additive execution rows", tool: "list_test_executions_usage_by_suite", path: "test-executions/suites",
-			org: "acme", from: "2026-10-01", to: "2026-10-03", scope: "organization_and_billing_children", unit: "executions",
-			items: `[{"date":"2026-10-01","organization_uuid":"00000000-0000-0000-0000-000000000001",
-				"suite_uuid":"00000000-0000-0000-0000-000000000021","suite_slug":"backend","suite_name":"Backend","test_executions":2147483655},
-				{"date":"2026-10-03","organization_uuid":"00000000-0000-0000-0000-000000000001",
-				"suite_uuid":"00000000-0000-0000-0000-000000000021","suite_slug":"backend","suite_name":"Backend","test_executions":3}]`,
-			next: `"https://api.buildkite.com/v2/organizations/acme/usage/test-executions/suites?after=next%2Bsuite%3D"`,
-		},
-		{
-			name: "suite partial month retains unavailable names", tool: "list_test_executions_usage_by_suite", path: "test-executions/suites",
-			org: "0199e940-7e01-7000-8000-000000000007", from: "2026-08-18", to: "2026-09-04", interval: "month", scope: "organization",
-			unit: "executions", perPage: 1, after: "opaque+suite=/&?",
-			items: `[{"date":"2026-08-01","organization_uuid":"00000000-0000-0000-0000-000000000001",
-				"suite_uuid":"00000000-0000-0000-0000-000000000022","suite_slug":null,"suite_name":null,"test_executions":9}]`,
-			next: `null`,
-		},
-		{
-			name: "suite empty terminal page does not invent zero groups", tool: "list_test_executions_usage_by_suite", path: "test-executions/suites",
-			org: "acme", from: "2026-10-01", to: "2026-10-03", interval: "day", scope: "organization_and_billing_children",
-			unit: "executions", perPage: 100, after: "next+suite=", items: `[]`, next: `null`,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			interval := tt.interval
-			if interval == "" {
-				interval = "day"
-			}
-			report := fmt.Sprintf(`{"description":"Recorded usage detail","reporting_period":{"from":%q,"to":%q},
-				"generated_at":"2026-10-27T11:00:00Z","scope":%q,"interval":%q,"unit":%q,
-				"definition":"Sparse grouped usage rows; late events can revise results","items":%s,
-				"links":{"self":"https://api.buildkite.com/v2/organizations/acme/usage/%s","next":%s}}`,
-				tt.from, tt.to, tt.scope, interval, tt.unit, tt.items, tt.path, tt.next)
-			var requests atomic.Int32
-			client := organizationUsageSession(t, func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
-				assert.Equal(t, http.MethodGet, r.Method)
-				assert.Equal(t, "/v2/organizations/"+tt.org+"/usage/"+tt.path, r.URL.Path)
-				query := url.Values{"from": {tt.from}, "to": {tt.to}}
-				if tt.interval != "" {
-					query.Set("interval", tt.interval)
-				}
-				if tt.perPage != 0 {
-					query.Set("per_page", fmt.Sprint(tt.perPage))
-				}
-				if tt.after != "" {
-					query.Set("after", tt.after)
-				}
-				assert.Equal(t, query, r.URL.Query(), "forward embedded report options and preserve opaque cursors")
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, report)
-			}, WithToolsets(toolsets.ToolsetUsage), WithReadOnly(true))
-			args := map[string]any{"org_slug": tt.org, "from": tt.from, "to": tt.to}
-			if tt.interval != "" {
-				args["interval"] = tt.interval
-			}
-			if tt.perPage != 0 {
-				args["per_page"] = tt.perPage
-			}
-			if tt.after != "" {
-				args["after"] = tt.after
-			}
-			result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.tool, Arguments: args})
-			require.NoError(t, err)
-			require.False(t, result.IsError)
-			require.Equal(t, int32(1), requests.Load(), "return one page without fetching or accumulating subsequent pages")
-			require.Len(t, result.Content, 1)
-			var want, got any
-			decoder := json.NewDecoder(strings.NewReader(report))
-			decoder.UseNumber()
-			require.NoError(t, decoder.Decode(&want))
-			decoder = json.NewDecoder(strings.NewReader(result.Content[0].(*mcp.TextContent).Text))
-			decoder.UseNumber()
-			require.NoError(t, decoder.Decode(&got))
-			require.Equal(t, want, got, "preserve sparse rows, integer precision above 2^53, null metadata/links, and server ordering without a summary")
-		})
-	}
-}
-
 func TestOrganizationUsageErrorsThroughMCP(t *testing.T) {
 	for _, resource := range []struct{ tool, path string }{
 		{"get_active_users_usage", "active-users"},
 		{"get_concurrent_agents_usage", "concurrent-agents"},
-		{"list_concurrent_agents_usage_by_organization", "concurrent-agents/organizations"},
 		{"get_hosted_agents_usage", "hosted-agents"},
-		{"list_hosted_agents_usage_by_pipeline", "hosted-agents/pipelines"},
 		{"get_test_executions_usage", "test-executions"},
-		{"list_test_executions_usage_by_suite", "test-executions/suites"},
 	} {
 		for _, tt := range []struct {
 			status  int
@@ -593,10 +389,11 @@ func TestOrganizationUsageDiscoveryAndSchema(t *testing.T) {
 			}, tt.opts...)
 			listed, err := client.ListTools(context.Background(), nil)
 			require.NoError(t, err)
+			if tt.name == "read-only usage" {
+				require.Len(t, listed.Tools, 4, "the MVP exposes only aggregate reports")
+			}
 			for _, name := range []string{
-				"get_active_users_usage", "get_concurrent_agents_usage", "list_concurrent_agents_usage_by_organization",
-				"get_hosted_agents_usage", "list_hosted_agents_usage_by_pipeline", "get_test_executions_usage",
-				"list_test_executions_usage_by_suite",
+				"get_active_users_usage", "get_concurrent_agents_usage", "get_hosted_agents_usage", "get_test_executions_usage",
 			} {
 				var found *mcp.Tool
 				for _, tool := range listed.Tools {
@@ -618,22 +415,8 @@ func TestOrganizationUsageDiscoveryAndSchema(t *testing.T) {
 					require.ElementsMatch(t, []any{"day", "month"}, properties["interval"].(map[string]any)["enum"])
 					require.NotContains(t, properties, "page")
 					require.NotContains(t, properties, "before")
-					switch name {
-					case "list_concurrent_agents_usage_by_organization", "list_hosted_agents_usage_by_pipeline", "list_test_executions_usage_by_suite":
-						require.Contains(t, properties, "after")
-						require.InDelta(t, 1, properties["per_page"].(map[string]any)["minimum"], 0)
-						require.InDelta(t, 100, properties["per_page"].(map[string]any)["maximum"], 0)
-						for _, invalid := range []any{0, 101, 1.5} {
-							result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: name,
-								Arguments: map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03", "per_page": invalid}})
-							require.NoError(t, err)
-							require.True(t, result.IsError)
-							require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "per_page")
-						}
-					default:
-						require.NotContains(t, properties, "per_page")
-						require.NotContains(t, properties, "after")
-					}
+					require.NotContains(t, properties, "per_page")
+					require.NotContains(t, properties, "after")
 					for _, missing := range []string{"org_slug", "from", "to"} {
 						args := map[string]any{"org_slug": "acme", "from": "2026-10-01", "to": "2026-10-03"}
 						delete(args, missing)
@@ -647,7 +430,7 @@ func TestOrganizationUsageDiscoveryAndSchema(t *testing.T) {
 					require.NoError(t, err)
 					require.True(t, result.IsError)
 					require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "interval")
-					if name == "get_concurrent_agents_usage" || name == "list_concurrent_agents_usage_by_organization" {
+					if name == "get_concurrent_agents_usage" {
 						require.InDelta(t, 1, properties["percentile"].(map[string]any)["minimum"], 0)
 						require.InDelta(t, 100, properties["percentile"].(map[string]any)["maximum"], 0)
 						require.ElementsMatch(t, []any{"self_hosted", "hosted"}, properties["agent_type"].(map[string]any)["enum"])
