@@ -165,6 +165,17 @@ the percentile still uses the underlying daily values, not the monthly bars.
 Use `interval: "day"` to retrieve the inputs for reproducing the statistic.
 MCP returns the server's report without recalculating it or paginating it.
 
+`get_hosted_agents_usage` reports hosted compute in vCPU-minutes with the same
+dates, intervals, scope, cache, and permissions. Resource maps always include
+`hosted_agents_linux_amd64_vcpu_minutes`, `hosted_agents_linux_arm64_vcpu_minutes`,
+`hosted_agents_macos_m4_vcpu_minutes`, and `hosted_agents_windows_amd64_vcpu_minutes`,
+including zero values. The server combines CPU-weighted instance shapes per
+resource before flooring and excludes unknown shapes from weighted metrics.
+Period totals and interval buckets round independently, matching the Usage
+table and chart; summing rounded daily buckets can differ from the summary.
+MCP preserves these values without recalculation. This complete series is not
+paginated; pipeline detail is a separate report.
+
 ---
 
 ## Library Usage

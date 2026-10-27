@@ -14,6 +14,7 @@ import (
 type OrganizationUsageClient interface {
 	GetActiveUsersUsage(ctx context.Context, org string, opt *buildkite.ActiveUsersUsageOptions) (buildkite.ActiveUsersUsage, *buildkite.Response, error)
 	GetConcurrentAgentsUsage(ctx context.Context, org string, opt *buildkite.ConcurrentAgentsUsageOptions) (buildkite.ConcurrentAgentsUsage, *buildkite.Response, error)
+	GetHostedAgentsUsage(ctx context.Context, org string, opt *buildkite.HostedAgentsUsageOptions) (buildkite.HostedAgentsUsage, *buildkite.Response, error)
 }
 
 type GetActiveUsersUsageArgs struct {

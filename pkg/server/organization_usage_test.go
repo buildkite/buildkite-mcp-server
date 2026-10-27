@@ -186,10 +186,80 @@ func TestConcurrentAgentsUsageThroughMCP(t *testing.T) {
 	}
 }
 
+func TestHostedAgentsUsageThroughMCP(t *testing.T) {
+	for _, tt := range []struct {
+		name, org, from, to, interval, scope, summary, items string
+	}{
+		{
+			name: "daily resource buckets retain independently rounded period totals", org: "acme",
+			from: "2026-10-01", to: "2026-10-02", scope: "organization_and_billing_children",
+			summary: `{"vcpu_minutes":13,"vcpu_minutes_by_resource":{"hosted_agents_linux_amd64_vcpu_minutes":7,
+				"hosted_agents_linux_arm64_vcpu_minutes":4,"hosted_agents_macos_m4_vcpu_minutes":2,"hosted_agents_windows_amd64_vcpu_minutes":0}}`,
+			items: `[{"date":"2026-10-01","vcpu_minutes_by_resource":{"hosted_agents_linux_amd64_vcpu_minutes":3,
+				"hosted_agents_linux_arm64_vcpu_minutes":2,"hosted_agents_macos_m4_vcpu_minutes":1,"hosted_agents_windows_amd64_vcpu_minutes":0}},
+				{"date":"2026-10-02","vcpu_minutes_by_resource":{"hosted_agents_linux_amd64_vcpu_minutes":3,
+				"hosted_agents_linux_arm64_vcpu_minutes":2,"hosted_agents_macos_m4_vcpu_minutes":1,"hosted_agents_windows_amd64_vcpu_minutes":0}}]`,
+		},
+		{
+			name: "partial months preserve exact dates and all resource categories", org: "0199e940-7e01-7000-8000-000000000003",
+			from: "2026-08-18", to: "2026-09-04", interval: "month", scope: "organization",
+			summary: `{"vcpu_minutes":19,"vcpu_minutes_by_resource":{"hosted_agents_linux_amd64_vcpu_minutes":2,
+				"hosted_agents_linux_arm64_vcpu_minutes":4,"hosted_agents_macos_m4_vcpu_minutes":5,"hosted_agents_windows_amd64_vcpu_minutes":8}}`,
+			items: `[{"date":"2026-08-01","vcpu_minutes_by_resource":{"hosted_agents_linux_amd64_vcpu_minutes":1,
+				"hosted_agents_linux_arm64_vcpu_minutes":2,"hosted_agents_macos_m4_vcpu_minutes":3,"hosted_agents_windows_amd64_vcpu_minutes":5}},
+				{"date":"2026-09-01","vcpu_minutes_by_resource":{"hosted_agents_linux_amd64_vcpu_minutes":1,
+				"hosted_agents_linux_arm64_vcpu_minutes":2,"hosted_agents_macos_m4_vcpu_minutes":2,"hosted_agents_windows_amd64_vcpu_minutes":3}}]`,
+		},
+		{
+			name: "explicit day retains every zero resource", org: "acme", from: "2026-10-01", to: "2026-10-01",
+			interval: "day", scope: "organization",
+			summary: `{"vcpu_minutes":0,"vcpu_minutes_by_resource":{"hosted_agents_linux_amd64_vcpu_minutes":0,
+				"hosted_agents_linux_arm64_vcpu_minutes":0,"hosted_agents_macos_m4_vcpu_minutes":0,"hosted_agents_windows_amd64_vcpu_minutes":0}}`,
+			items: `[{"date":"2026-10-01","vcpu_minutes_by_resource":{"hosted_agents_linux_amd64_vcpu_minutes":0,
+				"hosted_agents_linux_arm64_vcpu_minutes":0,"hosted_agents_macos_m4_vcpu_minutes":0,"hosted_agents_windows_amd64_vcpu_minutes":0}}]`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			interval := tt.interval
+			if interval == "" {
+				interval = "day"
+			}
+			report := fmt.Sprintf(`{"description":"Recorded hosted compute usage","reporting_period":{"from":%q,"to":%q},
+				"generated_at":"2026-10-27T11:00:00Z","scope":%q,"interval":%q,"unit":"vCPU-minutes",
+				"definition":"CPU-weighted shapes combined per resource before floor; period and buckets round independently; unknown shapes excluded",
+				"summary":%s,"items":%s}`, tt.from, tt.to, tt.scope, interval, tt.summary, tt.items)
+			var requests atomic.Int32
+			client := organizationUsageSession(t, func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/v2/organizations/"+tt.org+"/usage/hosted-agents", r.URL.Path)
+				query := url.Values{"from": {tt.from}, "to": {tt.to}}
+				if tt.interval != "" {
+					query.Set("interval", tt.interval)
+				}
+				assert.Equal(t, query, r.URL.Query(), "preserve bounds and omit server defaults and pagination")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, report)
+			}, WithToolsets(toolsets.ToolsetUsage), WithReadOnly(true))
+			args := map[string]any{"org_slug": tt.org, "from": tt.from, "to": tt.to}
+			if tt.interval != "" {
+				args["interval"] = tt.interval
+			}
+			result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_hosted_agents_usage", Arguments: args})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			require.Equal(t, int32(1), requests.Load())
+			require.Len(t, result.Content, 1)
+			require.JSONEq(t, report, result.Content[0].(*mcp.TextContent).Text, "preserve independent rounding, four resource keys, zeros, and metadata")
+		})
+	}
+}
+
 func TestOrganizationUsageErrorsThroughMCP(t *testing.T) {
 	for _, resource := range []struct{ tool, path string }{
 		{"get_active_users_usage", "active-users"},
 		{"get_concurrent_agents_usage", "concurrent-agents"},
+		{"get_hosted_agents_usage", "hosted-agents"},
 	} {
 		for _, tt := range []struct {
 			status  int
@@ -248,7 +318,7 @@ func TestOrganizationUsageDiscoveryAndSchema(t *testing.T) {
 			}, tt.opts...)
 			listed, err := client.ListTools(context.Background(), nil)
 			require.NoError(t, err)
-			for _, name := range []string{"get_active_users_usage", "get_concurrent_agents_usage"} {
+			for _, name := range []string{"get_active_users_usage", "get_concurrent_agents_usage", "get_hosted_agents_usage"} {
 				var found *mcp.Tool
 				for _, tool := range listed.Tools {
 					if tool.Name == name {

@@ -512,6 +512,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.GetActiveUsersUsage),
 				newToolDef(buildkite.GetConcurrentAgentsUsage),
+				newToolDef(buildkite.GetHostedAgentsUsage),
 			},
 		},
 		ToolsetRepositoryConnections: {
