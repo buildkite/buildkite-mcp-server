@@ -187,6 +187,18 @@ table and chart; summing rounded daily buckets can differ from the summary.
 MCP preserves these values without recalculation. This complete series is not
 paginated; pipeline detail is a separate report.
 
+`list_hosted_agents_usage_by_pipeline` returns sparse CSV-detail rows grouped
+by interval, organization, pipeline, and instance shape, ordered by date,
+legacy organization ID, pipeline ID, and shape. Each row preserves raw duration
+in microseconds, job counts, and per-row CPU-weighted floored vCPU-minutes.
+These values need not sum to the overview totals. Unknown nonempty shapes
+retain raw counts with zero weighted minutes; empty self-hosted shapes are
+excluded. Pipeline UUID/slug can be null when unavailable, deleted or not
+caller-visible; the rows remain. It returns one page without a summary or
+accumulation. `per_page` counts grouped rows, not pipelines; the same strict
+1–100 limits, default 30, opaque `after`, nullable next link, and no-snapshot
+pagination rules apply as for the organization breakdown.
+
 `get_test_executions_usage` reports test executions with the same dates,
 intervals, scope, cache, and permissions. It preserves zero-filled buckets,
 additive cumulative execution counts, total executions, active suites, and

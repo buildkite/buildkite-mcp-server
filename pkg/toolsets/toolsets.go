@@ -514,6 +514,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.GetConcurrentAgentsUsage),
 				newToolDef(buildkite.ListConcurrentAgentsUsageByOrganization),
 				newToolDef(buildkite.GetHostedAgentsUsage),
+				newToolDef(buildkite.ListHostedAgentsUsageByPipeline),
 				newToolDef(buildkite.GetTestExecutionsUsage),
 			},
 		},
