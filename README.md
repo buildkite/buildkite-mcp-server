@@ -165,6 +165,17 @@ the percentile still uses the underlying daily values, not the monthly bars.
 Use `interval: "day"` to retrieve the inputs for reproducing the statistic.
 MCP returns the server's report without recalculating it or paginating it.
 
+`list_concurrent_agents_usage_by_organization` returns the organization table
+breakdown in UUID order, using the same concurrency filters and date bounds.
+Each organization has a whole-range summary and zero-filled interval buckets;
+each bucket's discrete percentile uses daily peaks within its clipped dates,
+so a daily bucket's percentile equals its maximum. These percentiles are
+nonadditive; use `get_concurrent_agents_usage` for the aggregate report.
+Pagination is forward-only: `per_page` accepts 1–100 (default 30); pass the
+opaque `after` value from the returned `links.next` URL unchanged. Body links
+always include `self` and `next`, which is null on the final page. Late events
+can change reports between pages; there is no cross-page snapshot guarantee.
+
 `get_hosted_agents_usage` reports hosted compute in vCPU-minutes with the same
 dates, intervals, scope, cache, and permissions. Resource maps always include
 `hosted_agents_linux_amd64_vcpu_minutes`, `hosted_agents_linux_arm64_vcpu_minutes`,
