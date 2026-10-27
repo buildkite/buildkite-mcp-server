@@ -280,22 +280,23 @@ func TestTestExecutionsUsageThroughMCP(t *testing.T) {
 			name: "daily executions include zero buckets in floored average", org: "acme",
 			from: "2026-10-01", to: "2026-10-03", scope: "organization_and_billing_children",
 			summary: `{"test_executions":7,"active_suites":2,"average_test_executions":2}`,
-			items: `[{"date":"2026-10-01","test_executions":5,"cumulative_test_executions":5},
-				{"date":"2026-10-02","test_executions":0,"cumulative_test_executions":5},
-				{"date":"2026-10-03","test_executions":2,"cumulative_test_executions":7}]`,
+			items: `[{"date":"2026-10-01","period":{"from":"2026-10-01","to":"2026-10-01"},"test_executions":5,"cumulative_test_executions":5},
+				{"date":"2026-10-02","period":{"from":"2026-10-02","to":"2026-10-02"},"test_executions":0,"cumulative_test_executions":5},
+				{"date":"2026-10-03","period":{"from":"2026-10-03","to":"2026-10-03"},"test_executions":2,"cumulative_test_executions":7}]`,
 		},
 		{
 			name: "partial months use requested month bucket count for average", org: "0199e940-7e01-7000-8000-000000000004",
-			from: "2026-08-18", to: "2026-09-04", interval: "month", scope: "organization",
-			summary: `{"test_executions":11,"active_suites":3,"average_test_executions":5}`,
-			items: `[{"date":"2026-08-01","test_executions":4,"cumulative_test_executions":4},
-				{"date":"2026-09-01","test_executions":7,"cumulative_test_executions":11}]`,
+			from: "2026-08-18", to: "2026-10-04", interval: "month", scope: "organization",
+			summary: `{"test_executions":13,"active_suites":3,"average_test_executions":4}`,
+			items: `[{"date":"2026-08-01","period":{"from":"2026-08-18","to":"2026-08-31"},"test_executions":4,"cumulative_test_executions":4},
+				{"date":"2026-09-01","period":{"from":"2026-09-01","to":"2026-09-30"},"test_executions":7,"cumulative_test_executions":11},
+				{"date":"2026-10-01","period":{"from":"2026-10-01","to":"2026-10-04"},"test_executions":2,"cumulative_test_executions":13}]`,
 		},
 		{
 			name: "explicit day and zero execution counts", org: "acme", from: "2026-10-01", to: "2026-10-01",
 			interval: "day", scope: "organization",
 			summary: `{"test_executions":0,"active_suites":0,"average_test_executions":0}`,
-			items:   `[{"date":"2026-10-01","test_executions":0,"cumulative_test_executions":0}]`,
+			items:   `[{"date":"2026-10-01","period":{"from":"2026-10-01","to":"2026-10-01"},"test_executions":0,"cumulative_test_executions":0}]`,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -418,6 +419,9 @@ func TestOrganizationUsageDiscoveryAndSchema(t *testing.T) {
 				} else {
 					require.NotNil(t, found)
 					require.True(t, found.Annotations.ReadOnlyHint)
+					require.Contains(t, found.Description, "date as a label")
+					require.Contains(t, found.Description, "period.from/to")
+					require.Contains(t, found.Description, "inclusive UTC bounds clipped to the request")
 					schema := found.InputSchema.(map[string]any)
 					require.ElementsMatch(t, []any{"org_slug", "from", "to"}, schema["required"])
 					properties := schema["properties"].(map[string]any)
