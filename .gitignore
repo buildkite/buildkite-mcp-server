@@ -7,6 +7,8 @@ vendor/
 *.zip
 .bk.yaml
 /buildkite-mcp-server
+/tool-token-report
+/tool-tokens.md
 /coverage.*
 /checkstyle.xml
 /cover-tree.svg

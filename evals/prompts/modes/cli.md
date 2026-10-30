@@ -1,0 +1,1 @@
+The Buildkite CLI, `bk` (version {{.BK_CLI_VERSION}}), is installed on PATH and already authenticated through the `BUILDKITE_API_TOKEN` environment variable. {{.BK_CLI_ORG_NOTE}} Run `bk --help` to see what it can do.

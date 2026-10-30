@@ -4,7 +4,8 @@
             "command": "./buildkite-mcp-server",
             "args": ["stdio", "--read-only"],
             "env": {
-                "BUILDKITE_API_TOKEN": "${BUILDKITE_API_TOKEN}"
+                "BUILDKITE_API_TOKEN": "${BUILDKITE_API_TOKEN}",
+                "BUILDKITE_REQUEST_LOG": "${BUILDKITE_REQUEST_LOG:-}"
             }
         }
     }

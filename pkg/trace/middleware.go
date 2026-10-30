@@ -41,6 +41,7 @@ func NewMiddleware() mcp.Middleware {
 
 			if params, ok := req.GetParams().(*mcp.CallToolParamsRaw); ok && params != nil {
 				attrs = append(attrs, attribute.String("mcp.tool_name", params.Name))
+				ctx = WithToolCall(ctx, newToolCall(params.Name))
 			}
 
 			var clientName, clientVersion string

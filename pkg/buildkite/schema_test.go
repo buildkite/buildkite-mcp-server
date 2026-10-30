@@ -61,7 +61,7 @@ func TestListBuildsArgsSchema(t *testing.T) {
 	require.Contains(t, s.Properties, "per_page")
 
 	// Optional fields must NOT be in required
-	for _, opt := range []string{"pipeline_slug", "branch", "state", "commit", "creator", "page", "per_page"} {
+	for _, opt := range []string{"pipeline_slug", "branch", "state", "commit", "creator", "created_from", "created_to", "finished_from", "page", "per_page"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
 
@@ -97,6 +97,11 @@ func TestWaitForBuildArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
 }
 
+func TestRetryFailedJobsArgsSchema(t *testing.T) {
+	req := sortedRequired[RetryFailedJobsArgs](t)
+	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)
+}
+
 func TestGetBuildFailureSummaryArgsSchema(t *testing.T) {
 	s := schemaFor[GetBuildFailureSummaryArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, sortedRequired[GetBuildFailureSummaryArgs](t))
@@ -114,13 +119,16 @@ func TestGetPipelineArgsSchema(t *testing.T) {
 
 func TestCreatePipelineArgsSchema(t *testing.T) {
 	s := schemaFor[CreatePipelineArgs](t)
-	// Required: org_slug, name, repository_url, cluster_id, configuration, create_webhook
-	require.Equal(t, []string{"cluster_id", "configuration", "create_webhook", "name", "org_slug", "repository_url"}, sortedToolRequired(t, s))
+	require.Equal(t, []string{"cluster_id", "create_webhook", "name", "org_slug", "repository_url"}, sortedToolRequired(t, s))
 
 	description := s.Properties["create_webhook"].Description
 	require.Contains(t, description, "Set true when GitHub push or pull-request events should trigger this pipeline")
 	require.Contains(t, description, "the pipeline is created and setup instructions are returned")
-	require.Contains(t, description, "Set false for non-GitHub repositories, centralized or manually managed webhooks")
+	require.Contains(t, description, "Set false for GitHub Actions pipeline triggers")
+	for _, key := range []string{"branch_configuration", "provider_settings", "configuration", "pipeline_template_uuid"} {
+		require.Contains(t, s.Properties, key)
+		require.NotContains(t, s.Required, key)
+	}
 }
 
 func TestCreatePipelineWebhookArgsSchema(t *testing.T) {
@@ -131,6 +139,10 @@ func TestCreatePipelineWebhookArgsSchema(t *testing.T) {
 func TestUpdatePipelineArgsSchema(t *testing.T) {
 	req := sortedRequired[UpdatePipelineArgs](t)
 	require.Equal(t, []string{"org_slug", "pipeline_slug"}, req)
+	s := schemaFor[UpdatePipelineArgs](t)
+	require.Contains(t, s.Properties["branch_configuration"].Description, "null clears it")
+	require.Contains(t, s.Properties["provider_settings"].Description, "omitted keys remain unchanged")
+	require.Contains(t, s.Properties["pipeline_template_uuid"].Description, "null to remove it")
 }
 
 func TestListPipelineSchedulesArgsSchema(t *testing.T) {
@@ -186,6 +198,11 @@ func TestCacheRegistryArgsSchemas(t *testing.T) {
 	updateSchema := schemaFor[UpdateCacheRegistryArgs](t)
 	require.Equal(t, "string", updateSchema.Properties["name"].Type)
 	require.Empty(t, updateSchema.Properties["name"].Types)
+}
+
+func TestRepositoryConnectionArgsSchemas(t *testing.T) {
+	require.Equal(t, []string{"org_slug"}, sortedRequired[ListRepositoryConnectionsArgs](t))
+	require.Equal(t, []string{"connection_id", "org_slug"}, sortedRequired[GetRepositoryConnectionArgs](t))
 }
 
 func TestCreateBuildArgsSchema(t *testing.T) {
@@ -369,6 +386,20 @@ func TestGetTestRunArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"org_slug", "run_id", "test_suite_slug"}, req)
 }
 
+func TestTestWorkflowArgsSchema(t *testing.T) {
+	list := schemaFor[ListTestWorkflowsArgs](t)
+	require.Equal(t, []string{"org_slug", "test_suite_slug"}, sortedRequired[ListTestWorkflowsArgs](t))
+	for _, property := range []string{"page", "per_page"} {
+		require.Contains(t, list.Properties, property)
+		require.NotContains(t, list.Required, property)
+	}
+	require.Contains(t, list.Properties["test_suite_slug"].Description, "UUID")
+	require.Equal(t, []string{"org_slug", "test_suite_slug", "workflow_id"}, sortedRequired[GetTestWorkflowArgs](t))
+	get := schemaFor[GetTestWorkflowArgs](t)
+	require.Contains(t, get.Properties["test_suite_slug"].Description, "UUID")
+	require.Contains(t, get.Properties["workflow_id"].Description, "list_test_workflows")
+}
+
 func TestListPipelinesArgsSchema(t *testing.T) {
 	s := schemaFor[ListPipelinesArgs](t)
 	req := sortedToolRequired(t, s)
@@ -400,6 +431,10 @@ func TestUnblockJobArgsSchema(t *testing.T) {
 	for _, opt := range []string{"fields"} {
 		require.NotContains(t, s.Required, opt, "%s should be optional", opt)
 	}
+}
+
+func TestCancelJobArgsSchema(t *testing.T) {
+	require.Equal(t, []string{"job_id", "org_slug"}, sortedRequired[CancelJobArgs](t))
 }
 
 func TestListJobsArgsSchemaOptionalFields(t *testing.T) {

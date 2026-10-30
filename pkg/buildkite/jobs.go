@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
@@ -18,6 +19,8 @@ type JobsClient interface {
 	UnblockJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string, opt *buildkite.JobUnblockOptions) (buildkite.Job, *buildkite.Response, error)
 	RetryJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobEnvironmentVariables(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.JobEnvs, *buildkite.Response, error)
+	CancelJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
+	CancelJobByOrg(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error)
 }
 
 func redactUnusedJobFields(job *buildkite.Job) {
@@ -143,7 +146,7 @@ func createJobListResult[T any](jobs buildkite.JobsList, converter func(buildkit
 func ListJobs() (mcp.Tool, mcp.ToolHandlerFor[ListJobsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_jobs",
-			Description: "List jobs for a Buildkite build, returning an actionable summary by default. For CI failure diagnosis, use state='failed,broken' to avoid returning successful jobs. Use detail_level='detailed' for execution metadata or 'full' for the existing full MCP job response. Returns 'items' and cursor pagination 'links'",
+			Description: "List jobs for a Buildkite build, returning an actionable summary by default. For CI failure diagnosis, use state='failed,timed_out,expired' to avoid returning successful jobs, and investigate jobs without soft_failed first: soft_failed true means the job ran and failed but soft_fail allowed its exit status, so it did not block the build. Broken jobs never ran because pipeline configuration excluded them; they are not failures. Use detail_level='detailed' for execution metadata or 'full' for the existing full MCP job response. Returns 'items' and cursor pagination 'links'",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Jobs",
 				ReadOnlyHint: true,
@@ -376,6 +379,73 @@ func RetryJob() (mcp.Tool, mcp.ToolHandlerFor[RetryJobArgs, any], []string) {
 			if err != nil {
 				return handleBuildkiteError(err)
 			}
+
+			return mcpTextResult(span, &job)
+		}, []string{"retry_builds"}
+}
+
+var cancelJobIdentifierPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// CancelJobArgs struct for typed parameters
+type CancelJobArgs struct {
+	ToolInput
+	OrgSlug      string `json:"org_slug"`
+	JobID        string `json:"job_id"`
+	PipelineSlug string `json:"pipeline_slug,omitempty" jsonschema:"Pipeline slug. Provide together with 'build_number' to cancel through the build-scoped endpoint. Omit both to cancel by organization and job ID alone"`
+	BuildNumber  string `json:"build_number,omitempty" jsonschema:"Build number. Provide together with 'pipeline_slug' to cancel through the build-scoped endpoint. Omit both to cancel by organization and job ID alone"`
+}
+
+func CancelJob() (mcp.Tool, mcp.ToolHandlerFor[CancelJobArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "cancel_job",
+			Description: "Cancel a single command job without canceling the rest of its build; use cancel_build to cancel a whole build. Only command jobs that are scheduled, reserved, assigned, accepted, or running can be canceled. A job that has not started becomes 'canceled'; a running job becomes 'canceling' until its agent stops it. Returns the updated job",
+			Annotations: &mcp.ToolAnnotations{
+				Title:           "Cancel Job",
+				DestructiveHint: boolPtr(true),
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args CancelJobArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.CancelJob")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("pipeline_slug", args.PipelineSlug),
+				attribute.String("build_number", args.BuildNumber),
+				attribute.String("job_id", args.JobID),
+			)
+
+			if (args.PipelineSlug == "") != (args.BuildNumber == "") {
+				return utils.NewToolResultError("provide both 'pipeline_slug' and 'build_number' for a build-scoped cancel, or omit both"), nil, nil
+			}
+			// go-buildkite parses the formatted path as a URL, so '/', '%', '?', '#'
+			// or a dot segment in an identifier could turn a job cancel into a
+			// request for another resource, such as a whole-build cancel. Allow
+			// only characters that cannot change the path.
+			identifiers := []string{args.OrgSlug, args.JobID}
+			if args.PipelineSlug != "" {
+				identifiers = append(identifiers, args.PipelineSlug, args.BuildNumber)
+			}
+			for _, identifier := range identifiers {
+				if !cancelJobIdentifierPattern.MatchString(identifier) || identifier == "." || identifier == ".." {
+					return utils.NewToolResultError("'org_slug', 'pipeline_slug', 'build_number', and 'job_id' may contain only letters, digits, '-', '_' and '.', and must not be '.' or '..'"), nil, nil
+				}
+			}
+
+			deps := DepsFromContext(ctx)
+			var job buildkite.Job
+			var err error
+			if args.PipelineSlug != "" {
+				job, _, err = deps.JobsClient.CancelJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, args.JobID)
+			} else {
+				job, _, err = deps.JobsClient.CancelJobByOrg(ctx, args.OrgSlug, args.JobID)
+			}
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			redactUnusedJobFields(&job)
+			job.Agent = buildkite.Agent{ID: job.Agent.ID}
 
 			return mcpTextResult(span, &job)
 		}, []string{"write_builds"}

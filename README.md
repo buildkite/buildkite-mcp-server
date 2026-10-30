@@ -8,6 +8,88 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Retrying builds with limited permissions
+
+The `retries` toolset supports investigating failures and retrying jobs without
+broader build-write access. It includes `list_builds`, `get_build`,
+`wait_for_build`, `list_jobs`, `get_job`, `search_logs`, `tail_logs`, `read_logs`,
+`retry_job`, and `retry_failed_jobs`. It requires `read_builds`,
+`read_build_logs`, and `retry_builds` scopes, not `write_builds`.
+
+```bash
+buildkite-mcp-server stdio --enabled-toolsets retries
+```
+
+`retry_failed_jobs` retries only infrastructure failures; use its `dry_run`
+option to inspect the proposed retries without executing them. `retry_job`
+retries a specific job. Both are mutating tools and are excluded by
+`--read-only`. The toolset does not expose create, rebuild, cancel, or unblock
+operations. Existing retry tools remain available in `builds`; selecting
+`builds` or `all` still requires `write_builds` for the other mutations.
+
+The Buildkite API must have the `RetryBuildsScope` feature enabled for the token
+owner to accept `retry_builds`; existing `write_builds` tokens remain accepted.
+Hosted MCP OAuth can select this toolset using `/mcp/x/retries` once the hosted
+server adopts a release containing it. Selecting toolsets through request
+headers does not change an existing token's OAuth scopes.
+
+For library consumers, `WithDisabledToolsets` and the HTTP factory's disabled
+toolsets exclude all members of those toolsets, even through overlapping
+groups. For example, disabling `logs` also removes log tools from `retries`;
+disabling `retries` removes its inspection and retry tools from other groups.
+
+---
+
+## Configuring GitHub Actions pipelines
+
+`create_pipeline` and `update_pipeline` accept GitHub `provider_settings`
+and `branch_configuration`. Omit provider keys to use API defaults on create
+or leave them unchanged on update. Explicit `false` is preserved. Set
+`filter_condition` or `pull_request_branch_filter_configuration` to `null`
+to clear them; an empty string is sent as an empty string. Set
+`branch_configuration: null` on update to clear an existing branch filter.
+On create, an omitted, null or empty branch filter uses the API's null default.
+Full `get_pipeline` and `list_pipelines` responses preserve the supported
+GitHub settings. go-buildkite response strings do not distinguish null from
+empty, so do not reconstruct partial updates from readback.
+
+Follow the [manual GitHub Actions setup](https://buildkite.com/docs/pipelines/migration/run-github-actions-workflows#add-a-github-actions-workflow-to-a-pipeline-configure-an-equivalent-pipeline-manually).
+Keep branch-wide `skip_queued_branch_builds` and `cancel_running_branch_builds`
+false to avoid skipping or cancelling sibling workflow builds. Use
+`create_webhook: false`: provider settings do not provision a dedicated GitHub
+Actions trigger or its webhook, and the existing webhook tools create
+traditional repository webhooks. Server-side feature availability and token
+permissions still apply; accepting settings does not prove workflow execution.
+
+On create, supply nonblank `configuration` **or** an approved
+`pipeline_template_uuid`, not both. On update, omit `pipeline_template_uuid`
+to retain the assignment, supply a UUID to assign a template without
+`configuration`, or send `null` to remove it. Removal can include replacement
+`configuration`; the API enforces configuration requirements and organization
+template policy. Full pipeline responses retain assigned UUIDs; go-buildkite
+omits the field when the response assignment is null or absent.
+
+Use `get_pipeline_github_webhook_processing`,
+`enable_pipeline_github_webhook_processing`, and
+`disable_pipeline_github_webhook_processing` to inspect or change traditional
+GitHub webhook processing. These use GET/PUT/DELETE `github-webhooks`, not the
+POST `webhook` creation endpoint. They do not delete repository webhooks or
+change dedicated GitHub Actions triggers. Responses preserve `enabled` and
+nullable `disabled_at` and `disabled_by` metadata; `disabled_by` is a user name.
+All three require Full Access, a GitHub or GitHub Enterprise pipeline, and
+organization enrollment in expanded webhook triggers. GET requires
+`read_pipelines`; enable/disable require `write_pipelines` and are excluded in
+read-only mode. A 404 can mean the controls are unavailable, not that the
+pipeline is missing. API errors are returned without treating failure as a
+disabled state.
+
+These contracts are covered with local synthetic HTTP fixtures. Hosted
+availability, permissions, persistence, and workflow execution require separate
+verification; local success is not proof of deployed support. Dedicated GitHub
+Actions trigger management is not included.
+
+---
+
 ## Comparing builds
 
 The read-only `compare_builds` tool in the `investigations` toolset answers questions such as “What changed since this build last worked on main?” Supply `org_slug`, `pipeline_slug`, and the target `build_number`. It selects the most recently created earlier build that is currently passed on the same pipeline and exact branch. It does not require that the baseline had already passed when the target started. Supply `baseline_build_number` to compare against a specific build in that pipeline instead, including a failed build or one on another branch.
@@ -16,11 +98,32 @@ The response identifies the baseline and selection rule, counts outcomes across 
 
 Execution times and deltas cover final attempts only. Scheduling time is `scheduled_at` to `started_at`, not dependency or manual waiting. These are not build wall-clock comparisons or total retry costs. Missing or inconsistent timestamps omit the corresponding timing. Unfinished builds are explicitly identified as changing snapshots.
 
-Transitions between soft and hard failures are reported as `state_changed`, even when both jobs have state `failed`. A passed baseline build can contain soft-failed jobs.
+Any change in `soft_failed` is reported as `state_changed`: transitions between soft and hard failures, even when both jobs have state `failed`, and between passed and soft-failed jobs, which are never reported as `newly_failing` or `recovered` because a soft failure does not block the build. A passed baseline build can contain soft-failed jobs.
 
-By default, up to three newly failing jobs include their last 20 log entries, bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison, except HTTP 401 authentication errors, which propagate through the server's reauthentication path. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
+By default, up to three newly blocking failures include their last 20 log entries: `newly_failing` jobs first, then `state_changed` jobs that are now hard failures, such as a job that soft-failed in the baseline. Logs are bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison, except HTTP 401 authentication errors, which propagate through the server's reauthentication path. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
 
 Baseline discovery searches at most 500 candidates. If none is found, the response says no comparison was performed and asks for an explicit baseline. Job inventories are limited to 1,000 jobs per build; larger inventories return an error instead of misleading partial added/removed results. Output omissions are reported separately from the complete outcome counts.
+
+---
+
+## Inspecting Test Engine workflows
+
+The read-only `list_test_workflows` and `get_test_workflow` tools in the `tests`
+toolset expose a suite's configured monitors, filters, alarm/recovery actions,
+and links. Both require `read_suites` and suite access. Supply `org_slug` and
+`test_suite_slug` (a slug or UUID) to list workflows:
+
+```json
+{"org_slug": "acme", "test_suite_slug": "backend"}
+```
+
+To inspect one, call `get_test_workflow` with the same organization and suite
+and an item's `id` as `workflow_id`.
+
+Use the configured labels with `list_tests` to find marked tests; labels alone
+do not rank flakiness. Workflows describe configuration, not proof an action
+ran or event history. Both tools always replace webhook endpoints with
+`[REDACTED]`, regardless of the caller's API permissions.
 
 ---
 

@@ -13,12 +13,18 @@
 #   ./bk-tool-audit.sh <session.jsonl>       # a specific transcript
 #   ./bk-tool-audit.sh list                  # list this project's sessions (newest first)
 #   ./bk-tool-audit.sh diff <a.jsonl> <b.jsonl>   # diff tool/param calls between two sessions
-#   ./bk-tool-audit.sh metrics [session.jsonl]    # token totals, cost, tool counts, duration
+#   ./bk-tool-audit.sh metrics [session.jsonl]    # token totals, cost, tool counts, bk CLI counts, duration
+#   ./bk-tool-audit.sh struggles [session.jsonl]  # failed tool calls by type + struggle patterns (JSON)
+#   ./bk-tool-audit.sh struggles-markdown <struggles.json>   # render it
+#   ./bk-tool-audit.sh model-retries <raw-stream.jsonl>      # model API retries by status (JSON; claude only)
+#   ./bk-tool-audit.sh model-retries-markdown <retries.json> # render it
 #
 # Options (before the positional args):
 #   --all        Include all tools, not just mcp__buildkite-mcp-server__*
 #   --names      Print only "<count> <tool>" summary instead of full params
 #   --results    Also show each call's tool_result (matched by tool_use_id)
+#   --full-results Keep complete captured results instead of the default first
+#                  300 characters on one line (requires --results)
 #   --project P  Use project dir for path P instead of the current directory
 #   --agent A    Transcript dialect: 'claude' (default; Claude Code session
 #                jsonl / stream-json — tool calls are tool_use content blocks),
@@ -48,6 +54,7 @@ BK_PRICE_CACHE_READ="${BK_PRICE_CACHE_READ:-0.5}"
 TOOL_FILTER=''
 NAMES_ONLY=0
 WITH_RESULTS=0
+FULL_RESULTS=false
 PROJECT_PATH="$PWD"
 AGENT="claude"
 
@@ -57,6 +64,7 @@ while [[ "${1:-}" == -* ]]; do
     --all)     TOOL_FILTER='true'; shift ;;
     --names)   NAMES_ONLY=1; shift ;;
     --results) WITH_RESULTS=1; shift ;;
+    --full-results) FULL_RESULTS=true; shift ;;
     --project) PROJECT_PATH="${2:?--project needs a path}"; shift 2 ;;
     --agent)   AGENT="${2:?--agent needs claude, cursor or cursor-cloud}"; shift 2 ;;
     -h|--help) sed -n '2,44p' "$0"; exit 0 ;;
@@ -167,6 +175,29 @@ CURSOR_CLOUD_CALLS_JQ='
          and (($a.toolName // $a.name // null) != null)
       then "mcp__\($a.server // $a.serverIdentifier // $a.providerIdentifier // "mcp")__\($a.toolName // $a.name)"
       else $n end;'
+# bk CLI usage (mode: cli entries — and any mcp run that shells out to bk).
+# bk_cli_invocations turns one shell command string into its bk invocations,
+# named by up to two subcommand words ("bk build view", "bk api", "bk").
+# bk_shell_lookup parses shell syntax once per distinct command, shared by
+# metrics and struggle labels. bk_cli_summary($per_call) takes one invocation list
+# per shell tool call and reports how many calls ran bk, plus a per-command
+# count list shaped like tool_calls_by_name.
+BK_CLI_JQ='
+  def bk_cli_invocations: if . == "" then [] else $bk_commands[0][.] end;
+  def bk_cli_summary($per_call):
+    if ($per_call | any(. == null)) then
+      {tool_calls_bk_cli: null, bk_cli_commands_by_name: null}
+    else
+      { tool_calls_bk_cli: ($per_call | map(select(length > 0)) | length),
+        bk_cli_commands_by_name: ($per_call | add // [] | group_by(.) | map("\(length) \(.[0])") | sort | reverse) }
+    end;'
+
+bk_shell_lookup() {
+  local TOOL_FILTER=true NAMES_ONLY=0
+  extract "$1" | jq -c '.input.command? | select(type == "string")' \
+    | node "$(dirname "${BASH_SOURCE[0]}")/bk-shell-commands.mjs"
+}
+
 extract() {
   local f="$1"
   if [[ "$AGENT" == "cursor-cloud" ]]; then
@@ -215,7 +246,11 @@ print_session() {
   fi
 
   if [[ "$WITH_RESULTS" == 1 ]]; then
-    # Map call id -> truncated result text (claude: tool_use_id on tool_result
+    # Capture full outputs first so yilong's --full-results can judge the actual
+    # evidence. Applying the 300-character display cutoff here would discard
+    # evidence before that option takes effect; the default excerpt is applied
+    # below, after all transcript dialects have been normalized.
+    # Map call id -> result text (claude: tool_use_id on tool_result
     # blocks; cursor: call_id on tool_call completed events, result under the
     # tool key's .result — .success on success, the whole object otherwise;
     # cursor-cloud: data.callId on completed tool_call events, result at
@@ -228,14 +263,14 @@ print_session() {
           | .data
           | select((.status // "") == "completed" and ((.callId // "") | tostring) != "")
           | {((.callId | tostring)): ((.result.success // .result // "(no result)")
-               | tostring | gsub("\n";" ") | .[0:300])} ]
+               | tostring)} ]
         | add // {}' "$f")"
     elif [[ "$AGENT" == "cursor" ]]; then
       map="$(jq -cn '
         [ inputs
           | select(.type=="tool_call" and .subtype=="completed" and .call_id and (.tool_call|type=="object"))
           | (.tool_call | to_entries[0].value.result // {}) as $r
-          | {(.call_id): (($r.success // $r) | tostring | gsub("\n";" ") | .[0:300])} ]
+          | {(.call_id): (($r.success // $r) | tostring)} ]
         | add // {}' "$f")"
     else
       map="$(jq -cn '
@@ -243,11 +278,14 @@ print_session() {
           | select(.type=="tool_result")
           | {(.tool_use_id): ((.content // "")
                | if type=="array" then (map(.text // "") | join("")) else tostring end
-               | gsub("\n";" ") | .[0:300])} ]
+               )} ]
         | add // {}' "$f")"
     fi
-    extract "$f" | jq -c --argjson map "$map" \
-      '. + {result: ($map[.id] // "(no result captured)")} | del(.id)'
+    map="$(jq -c --argjson full "$FULL_RESULTS" '
+      with_entries(.value |= (if $full then . else gsub("\n"; " ") | .[:300] end))
+    ' <<<"$map")"
+    extract "$f" | jq -c --slurpfile map <(printf '%s\n' "$map") \
+      '. + {result: ($map[0][.id] // "(no result captured)")} | del(.id)'
   else
     extract "$f" | jq -c 'del(.id)'
   fi
@@ -267,8 +305,10 @@ metrics() {
   [[ -f "$f" ]] || { echo "no such transcript: $f" >&2; exit 1; }
 
   local snap; snap="$(mktemp -t bk-audit.XXXXXX)"
-  trap 'rm -f "$snap"' RETURN
+  local bk_lookup="$snap.bk-commands.json"
+  trap 'rm -f "$snap" "$bk_lookup"' RETURN
   cp "$f" "$snap"
+  bk_shell_lookup "$snap" > "$bk_lookup" || return 1
 
   # cursor-cloud: the SSE capture's assistant events are TEXT DELTAS with no
   # message boundaries, so user/assistant counts would be meaningless and stay
@@ -280,7 +320,7 @@ metrics() {
   # Anthropic pricing and does not model Cursor's.
   if [[ "$AGENT" == "cursor-cloud" ]]; then
     echo "# session: $f" >&2
-    jq -nr "$CURSOR_CLOUD_CALLS_JQ"'
+    jq -nr --slurpfile bk_commands "$bk_lookup" "$CURSOR_CLOUD_CALLS_JQ$BK_CLI_JQ"'
       [inputs | select(type=="object")] as $all
       | ($all | cloud_tool_events | dedupe_calls) as $tools
       | ($all | map(select(.type=="result")) | last | .data // {}) as $res
@@ -305,6 +345,7 @@ metrics() {
           wait: null,
           est_cost_usd: null
         }
+        + bk_cli_summary($tools | map((.args.command? // "") | if type == "string" then bk_cli_invocations else [] end))
     ' "$snap"
     return
   fi
@@ -319,10 +360,13 @@ metrics() {
     echo "# session: $f" >&2
     # Tool names use the same normalization as extract() (mcpToolCall ->
     # mcp__<server>__<tool>), so metrics and tool listings agree.
-    jq -nr "$CURSOR_TOOL_NAME_JQ"'
+    jq -nr --slurpfile bk_commands "$bk_lookup" "$CURSOR_TOOL_NAME_JQ$BK_CLI_JQ"'
       [inputs | select(type=="object")] as $all
       | ($all | cursor_calls
               | map((.tool_call | to_entries[0]) as $t | cursor_tool_name($t))) as $tools
+      | ($all | cursor_calls
+              | map(.tool_call | to_entries[0] | select(.key == "shellToolCall")
+                    | (.value.args.command // "") | if type == "string" then bk_cli_invocations else [] end)) as $bk
       | ($all | map(select(.type=="result")) | last) as $res
       | ($all | map(select(.type=="system" and .subtype=="init")) | first) as $init
       | {
@@ -341,6 +385,7 @@ metrics() {
           wait: null,
           est_cost_usd: null
         }
+        + bk_cli_summary($bk)
     ' "$snap"
     return
   fi
@@ -354,7 +399,7 @@ metrics() {
       c1h: ($c1h|tonumber), cread: ($cr|tonumber)}')"
 
   echo "# session: $f" >&2
-  jq -nr --argjson p "$prices" '
+  jq -nr --argjson p "$prices" --slurpfile bk_commands "$bk_lookup" "$BK_CLI_JQ"'
     def n: . // 0;
     def tsec: sub("\\.[0-9]+";"") | fromdateiso8601;
     [inputs] as $all
@@ -408,11 +453,292 @@ metrics() {
         },
         est_cost_usd: (($cost*100|round)/100)
       }
+      + bk_cli_summary($tools | map(select(.name == "Bash") | (.input.command? // "") | if type == "string" then bk_cli_invocations else [] end))
   ' "$snap"
+}
+
+# --- struggles -------------------------------------------------------------
+# Failed tool calls and the patterns around them — signs the agent was
+# struggling. Each call is normalized to {label, input, failed, type, text,
+# harmless} and summarized by STRUGGLES_JQ:
+#   errors_by_type   failure type -> tool label -> count, where type is
+#                    "exit N" (shell exit code), "timeout", "interrupted",
+#                    "blocked" (permission / harness refusal), "MCP tool
+#                    error" or "tool error"; shell calls are labelled by
+#                    their first real program, skipping cd / export / plain
+#                    VAR=value parts ("Bash: git", "Bash: bk build view")
+#   likely harmless  exit 1 with no output from grep/rg/test/diff/... ("no
+#                    match" / "false", not a struggle) — counted under
+#                    "exit 1 (likely harmless)" and left out of the patterns
+#   longest_failure_streak  most failed calls in a row
+#   repeated_failures       the same call (tool + exact input) failing 2+ times
+#   retries_after_failure   a failed call followed straight away by another
+#                           call with the same label, made after the failure's
+#                           result came back (calls sent together in one turn
+#                           are not retries); recovered_after_retry = how many
+#                           of those retries succeeded. Each call carries pos
+#                           (when it was made) and result_pos (when the agent
+#                           could see its result): claude uses the model
+#                           response (message.id) order for both, cursor the
+#                           stream position of its first and completed events
+# Dialects: claude (tool_result is_error; "Exit code N" text; toolUseResult
+# interrupted) and cursor (completed tool_call events: a `failure` result,
+# shell failure.exitCode / aborted / stderr, MCP success.isError) — both
+# checked against real transcripts. cursor-cloud is not implemented yet: it
+# reports {"implemented": false}.
+STRUGGLES_JQ='
+  def first_line: tostring | split("\n") | map(select(test("\\S"))) | (.[0] // "") | .[0:160];
+  # The first real program in the command, across all lines: skips comment
+  # lines and cd/export/VAR= setup (e.g. "cd /tmp\n# note\nsed ..." -> "sed").
+  # Always a string, even for a command that is only setup.
+  def shell_program:
+    ([(bk_cli_invocations // [])[]] | first) // (
+      split("\n")
+      | map(select(test("^\\s*#") | not))
+      | map([splits("\\s*(?:&&|\\|\\||;|\\|)\\s*")]) | add // []
+      | map(sub("^\\s+"; "") | sub("^(?:[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+)+"; ""))
+      | map(select(. != ""
+                    and (test("^(?:cd|export|set|source|\\.)(?:\\s|$)") | not)
+                    and (test("^[A-Za-z_][A-Za-z0-9_]*=\\S*$") | not)))
+      | (.[0] // "") | (split(" ")[0] // "") | sub(".*/"; ""));
+  # Without parsing shell syntax, only exempt simple commands. A chain,
+  # pipeline, redirection or substitution can fail outside the named program.
+  # Conservatively reject these characters even inside quoted arguments.
+  def harmless_command:
+    . as $cmd
+    | (test("[;&|\n\r<>`$(){}\\\\]") | not)
+      and ((shell_program as $p
+            | ["grep", "egrep", "fgrep", "rg", "test", "[", "[[", "diff", "cmp", "false", "pgrep", "which"] | index($p) != null)
+           or ($cmd | test("^\\s*command\\s+-[vV]\\s+")));
+  def struggle_summary:
+    . as $calls
+    | ($calls | map(select(.failed))) as $failed
+    | ($failed | map(select(.harmless | not))) as $real
+    # longest run of real failures (a harmless failure neither extends nor breaks it)
+    | (reduce ($calls[] | select((.failed and .harmless) | not)) as $c ({cur: 0, max: 0};
+         if $c.failed then .cur += 1 | .max = ([.max, .cur] | max) else .cur = 0 end) | .max) as $streak
+    | ([range(0; ($calls | length) - 1) as $i
+         | select($calls[$i].failed and ($calls[$i].harmless | not) and $calls[$i + 1].label == $calls[$i].label
+                  and $calls[$i].result_pos != null and $calls[$i + 1].pos != null
+                  and $calls[$i].result_pos < $calls[$i + 1].pos)
+         | $calls[$i + 1] | .result_pos != null and .failed == false]) as $retries
+    | {
+        implemented: true,
+        tool_calls: ($calls | length),
+        failed_calls: ($failed | length),
+        likely_harmless: ($failed | map(select(.harmless)) | length),
+        errors_by_type: ($failed
+          | map(. + {type: (if .harmless then "exit 1 (likely harmless)" else .type end)})
+          | group_by(.type)
+          | map({key: .[0].type,
+                 value: (group_by(.label) | sort_by(-length, .[0].label) | map({key: .[0].label, value: length}) | from_entries)})
+          | from_entries),
+        longest_failure_streak: $streak,
+        repeated_failures: ($real | group_by([.label, (.input | tojson)]) | map(select(length > 1))
+          | map({label: .[0].label, count: length,
+                 call: ((.[0].input.command? // (.[0].input | tojson)) | tostring | .[0:160])})
+          | sort_by(-.count)),
+        retries_after_failure: ($retries | length),
+        recovered_after_retry: ($retries | map(select(.)) | length),
+        examples: ($real | group_by(.type)
+          | map({key: .[0].type, value: (map("\(.label): \(.text | first_line)") | unique | .[0:3])})
+          | from_entries)
+      };'
+
+struggles() {
+  local f="$1"
+  [[ -f "$f" ]] || { echo "no such transcript: $f" >&2; exit 1; }
+  if [[ "$AGENT" == "cursor-cloud" ]]; then
+    echo "WARNING: struggles are not implemented for cursor-cloud yet (its failed-call format is unverified)." >&2
+    jq -n '{implemented: false, reason: "not implemented for cursor-cloud yet"}'
+    return
+  fi
+  local bk_lookup; bk_lookup="$(mktemp -t bk-audit.XXXXXX)"
+  trap 'rm -f "$bk_lookup"' RETURN
+  bk_shell_lookup "$f" > "$bk_lookup" || return 1
+  if [[ "$AGENT" == "cursor" ]]; then
+    jq -n --slurpfile bk_commands "$bk_lookup" "$CURSOR_TOOL_NAME_JQ$BK_CLI_JQ$STRUGGLES_JQ"'
+      [inputs | select(type == "object")] as $all
+      # Results come on the completed events, keyed by call_id.
+      | ($all | map(select(.type == "tool_call" and .subtype == "completed" and (.call_id // "") != ""
+                           and (.tool_call | type) == "object"))
+              | map({key: (.call_id | tostring), value: (.tool_call | to_entries[0].value.result // {})})
+              | from_entries) as $results
+      # Stream positions per call_id: first event (when the call was made) and
+      # completed event (when its result came back).
+      | ([range(0; $all | length) as $i | $all[$i]
+          | select(.type == "tool_call" and (.call_id // "") != "") | {id: (.call_id | tostring), i: $i, done: (.subtype == "completed")}]) as $evs
+      | ($evs | reduce .[] as $e ({}; if has($e.id) then . else .[$e.id] = $e.i end)) as $first
+      | ($evs | map(select(.done)) | reduce .[] as $e ({}; .[$e.id] = $e.i)) as $done
+      | [ $all | cursor_calls | .[]
+          | (.tool_call | to_entries[0]) as $t
+          | ($t.value.args // {}) as $a
+          | ($results[(.call_id // "") | tostring] // {}) as $r
+          | ($r.failure // null) as $fail
+          | (($t.key == "mcpToolCall") and (($r.success.isError? // false) == true)) as $mcp_err
+          | ($t.key == "shellToolCall") as $shell
+          | (if $shell then ($a.command // "" | shell_program | "Bash: " + .)
+             else (cursor_tool_name($t) | sub("^mcp__[^_]+(?:_[^_]+)*?__"; "")) end) as $lbl
+          | ((.call_id // "") | tostring) as $cid
+          | {label: $lbl,
+             pos: $first[$cid], result_pos: $done[$cid],
+             input: (if $t.key == "mcpToolCall" then ($a.args // $a.arguments // {}) else $a end),
+             failed: (if $fail != null or $mcp_err then true
+                      elif $r.success != null then false else null end),
+             type: (if $mcp_err then "MCP tool error"
+                    elif $fail == null then null
+                    elif ($fail.aborted? // false) then "interrupted"
+                    elif ($fail.exitCode? // null) != null then "exit \($fail.exitCode)"
+                    else "tool error" end),
+             text: (if $mcp_err then ($r.success.content // [] | map(.text // "") | join(" "))
+                    else ($fail.stderr? // $fail.message? // $fail.error? // ($fail | tojson)) end),
+             harmless: ($shell and ($fail.exitCode? // null) == 1
+                        and ((($fail.stdout? // "") + ($fail.stderr? // "")) | test("\\S") | not)
+                        and ($a.command // "" | harmless_command))} ]
+      | struggle_summary
+    ' "$f"
+    return
+  fi
+  jq -n --slurpfile bk_commands "$bk_lookup" "$BK_CLI_JQ$STRUGGLES_JQ"'
+    [inputs] as $all
+    # Model responses in order (message.id -> 1, 2, ...). Claude Code writes
+    # each tool_use of a response on its own line and may run the first before
+    # writing the next, so line order cannot tell parallel calls from retries;
+    # the response they came from can. A call sees the results of every call
+    # made in an earlier response.
+    | (reduce ($all[] | select(.type == "assistant") | .message.id // empty) as $m
+         ({}; if has($m) then . else .[$m] = (length + 1) end)) as $turn
+    # tool_use blocks in transcript order (deduped by id, first seen wins)
+    | (reduce ($all[] | . as $l | (.message.content? // []) | select(type == "array") | .[]
+                | select(.type == "tool_use") | . + {_turn: $turn[$l.message.id? // ""]}) as $u
+         ({seen: {}, out: []}; if .seen[$u.id] then . else .seen[$u.id] = true | .out += [$u] end) | .out) as $uses
+    | ($all | [ .[] | . as $l | (.message.content? // []) | select(type == "array") | .[]
+                | select(.type == "tool_result" and .tool_use_id != null)
+                | {key: .tool_use_id,
+                   value: {is_error: (.is_error // false),
+                           text: ((.content // "") | if type == "array" then (map(.text // "") | join("")) else tostring end),
+                           tur: (if ($l.toolUseResult | type) == "object" then $l.toolUseResult else {} end)}} ]
+              | from_entries) as $results
+    | [ $uses[]
+        | ($results[.id] // {is_error: null, text: "", tur: {}}) as $r
+        | (.name == "Bash") as $shell
+        | (.input.command? // "" | tostring) as $cmd
+        # null (not empty) when there is no exit code, or the call would be dropped
+        | ([$r.text | capture("^Exit code (?<n>[0-9]+)")? | .n] | first) as $exit
+        | {label: (if $shell then ($cmd | shell_program | "Bash: " + .) else (.name | sub("^mcp__[^_]+(?:_[^_]+)*?__"; "")) end),
+           pos: ._turn, result_pos: (if $r.is_error != null then ._turn else null end),
+           input: .input,
+           failed: (if $r.is_error != null then ($r.is_error or ($r.tur.interrupted? // false)) else null end),
+           type: (if ($r.tur.interrupted? // false) or ($r.text | test("\\[Request interrupted")) then "interrupted"
+                  elif $exit != null then "exit \($exit)"
+                  elif ($r.text | test("timed out"; "i")) then "timeout"
+                  elif ($r.text | test("not permitted|permission|haven.t granted|requires approval|denied|isolated in the worktree|Refusing to run|blocked"; "i")) then "blocked"
+                  elif (.name | startswith("mcp__")) then "MCP tool error"
+                  else "tool error" end),
+           text: ($r.text | sub("^Exit code [0-9]+\n?"; "")),
+           harmless: ($shell and $exit == "1"
+                      and ($r.text | sub("^Exit code [0-9]+\n?"; "") | test("\\S") | not)
+                      and ($cmd | harmless_command))} ]
+    | struggle_summary
+  ' "$f"
+}
+
+# struggles_markdown <struggles.json>  -- render the struggles summary.
+struggles_markdown() {
+  jq -r '
+    if (.implemented // false) | not then
+      "> ⚠️ **Struggles report not implemented for this agent yet** (\(.reason // "unknown reason")). Failed tool calls are not counted."
+    else
+      "**Tool calls: \(.tool_calls), explicitly flagged failures: \(.failed_calls)** (likely harmless: \(.likely_harmless), e.g. grep with no match)",
+      "",
+      (if (.errors_by_type | length) > 0 then
+        "**Failed tool calls by type** (type → tool → failed calls):", "", "```",
+        (.errors_by_type | to_entries[] | "\(.key):", (.value | to_entries[] | "  \(.key): \(.value)")),
+        "```", ""
+       else empty end),
+      "- Longest run of failed calls in a row: **\(.longest_failure_streak)**",
+      "- Failed, then the same tool straight away: **\(.retries_after_failure)** (succeeded on that retry: \(.recovered_after_retry))",
+      "- Same call failing more than once: **\(.repeated_failures | length)**",
+      (.repeated_failures[0:5][] | "  - \(.count)× `\(.label)`: `\(.call | gsub("`"; "\u0027"))`"),
+      (if (.examples | length) > 0 then
+        "", "<details><summary>Example errors</summary>", "",
+        (.examples | to_entries[] | "**\(.key)**", (.value[] | "- `\(gsub("`"; "\u0027"))`"), ""),
+        "</details>"
+       else empty end)
+    end
+  ' "$1"
+}
+
+# --- model API retries -----------------------------------------------------
+# The agent harness retrying its call to the MODEL API (e.g. a 504 or 429
+# from the model gateway) — not a tool call (and not a Buildkite API
+# request), so the struggles report does not see it. Claude Code emits
+# one {"type":"system","subtype":"api_retry", attempt, max_retries,
+# retry_delay_ms, error_status, error} event per retry in its stream-json
+# output (claude.sh's raw log, CLAUDE_RAW_LOG). Grouped by status; a null
+# status (no HTTP response) is keyed by the error name. Other agents emit no
+# known equivalent yet: {"available": false}.
+model_retries() {
+  local f="${1:-}"
+  if [[ "$AGENT" != "claude" || -z "$f" || ! -f "$f" ]]; then
+    jq -n --arg agent "$AGENT" '{available: false, reason: "no model API retry events known for agent \($agent) (or no raw stream captured)"}'
+    return
+  fi
+  # The raw stream may hold non-JSON lines; skip them.
+  jq -Rn '
+    [inputs | fromjson? | select(type == "object" and .type == "system" and .subtype == "api_retry")] as $r
+    | {
+        available: true,
+        retries: ($r | length),
+        wait_seconds: ((($r | map(.retry_delay_ms // 0) | add) // 0) / 1000 | . * 10 | round / 10),
+        max_attempt: ($r | map(.attempt // 0) | max // 0),
+        max_retries: ($r | map(.max_retries // 0) | max // 0),
+        by_status: ($r
+          | map(. + {key: (if .error_status != null then (.error_status | tostring) else (.error // "unknown") end)})
+          | group_by(.key)
+          | map({key: .[0].key,
+                 value: {retries: length,
+                         wait_seconds: ((map(.retry_delay_ms // 0) | add) / 1000 | . * 10 | round / 10),
+                         error: (map(.error // empty) | unique | join(", "))}})
+          | from_entries)
+      }' "$f"
+}
+
+# model_retries_markdown <model-retries.json>  -- render it.
+model_retries_markdown() {
+  jq -r '
+    "**Model API retries** (the agent harness retrying its call to the model API — not the agent, not Buildkite):",
+    "",
+    if (.available // false) | not then
+      "_Not available: \(.reason // "unknown")._"
+    elif .retries == 0 then
+      "_None._"
+    else
+      "```",
+      (.by_status | to_entries[] | "\(.key): \(.value.retries) retr\(if .value.retries == 1 then "y" else "ies" end) (\(.value.wait_seconds)s waiting\(if .value.error != "" then ", \(.value.error)" else "" end))"),
+      "```",
+      "",
+      "Total: \(.retries) retries, \(.wait_seconds)s waiting; highest attempt \(.max_attempt) of \(.max_retries)."
+    end
+  ' "$1"
 }
 
 # --- dispatch --------------------------------------------------------------
 case "${1:-}" in
+  model-retries)
+    model_retries "${2:-}"
+    ;;
+  model-retries-markdown)
+    model_retries_markdown "${2:?model-retries-markdown needs the model-retries JSON}"
+    ;;
+  struggles)
+    f="${2:-$(newest_session)}"
+    [[ -n "$f" ]] || { echo "no sessions in $PROJECT_DIR" >&2; exit 1; }
+    struggles "$f"
+    ;;
+  struggles-markdown)
+    struggles_markdown "${2:?struggles-markdown needs the struggles JSON}"
+    ;;
   list)
     echo "# project dir: $PROJECT_DIR"
     ls -lt "$PROJECT_DIR"/*.jsonl 2>/dev/null || echo "(no sessions found)"

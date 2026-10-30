@@ -1,6 +1,6 @@
 # Build the Buildkite MCP server from this repo's source, so the eval exercises
 # the code under review rather than a published release.
-ARG GO_VERSION="1.26"
+ARG GO_VERSION="1.27.3"
 FROM golang:${GO_VERSION} AS mcp-builder
 WORKDIR /src
 # Cache module downloads separately from the source.
@@ -17,6 +17,10 @@ FROM ubuntu:22.04
 ARG NODE_VERSION="24"
 ARG GITHUB_CLI_VERSION
 ARG YQ_VERSION="v4.47.1"
+ARG SHFMT_VERSION="v3.10.0"
+# The Buildkite CLI (bk) that `mode: cli` entries use when they set no
+# mode_params.download_url. Installed off PATH (see below).
+ARG BK_CLI_VERSION="3.59.1"
 
 # Install system dependencies.
 RUN apt-get update && apt-get install -y \
@@ -25,6 +29,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     jq \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js.
@@ -38,9 +43,20 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
 RUN curl -fsSL https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64 \
     -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
 
+# Parse agent shell commands for the CLI audit without executing them.
+RUN curl -fsSL https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64 \
+    -o /usr/local/bin/shfmt && chmod +x /usr/local/bin/shfmt
+
 # Install the GitHub CLI.
 RUN curl -fsSL https://github.com/cli/cli/releases/download/v${GITHUB_CLI_VERSION}/gh_${GITHUB_CLI_VERSION}_linux_amd64.tar.gz | tar -xz -C /tmp
 RUN cp /tmp/gh_${GITHUB_CLI_VERSION}_linux_amd64/bin/gh /usr/local/bin/
+
+# Install the Buildkite CLI (bk), pinned like the tools above. It goes in
+# /opt/bk/bin, NOT on PATH: babystand.sh puts it on the agent's PATH only for
+# modes that use bk (`mode: cli`), so `mode: mcp` agents can't reach for it.
+RUN curl -fsSL https://github.com/buildkite/cli/releases/download/v${BK_CLI_VERSION}/bk_${BK_CLI_VERSION}_linux_amd64.tar.gz | tar -xz -C /tmp \
+    && install -D -m 0755 /tmp/bk_${BK_CLI_VERSION}_linux_amd64/bk /opt/bk/bin/bk \
+    && /opt/bk/bin/bk --version
 
 # Install the Buildkite MCP server, built from source in the mcp-builder stage.
 COPY --from=mcp-builder /out/buildkite-mcp-server /usr/local/bin/buildkite-mcp-server
@@ -61,8 +77,11 @@ COPY evals/prompts /workspace/prompts
 COPY evals/package*.json /workspace/
 COPY evals/tsconfig.json /workspace/
 COPY evals/mcp_in_ci.json /workspace/
+COPY evals/mcp_none.json /workspace/
 COPY evals/mcp_cursor_cloud.json /workspace/
 COPY evals/evals.yaml /workspace/
+# Do not copy evals/expected/: these are the reviewed answer keys. Klaren
+# loads pinned references only after the evaluated agent has finished.
 
 # Run the build.
 RUN npm ci && npm run build

@@ -13,6 +13,7 @@ import (
 type StdioCmd struct {
 	EnabledToolsets []string `help:"Comma-separated list of toolsets to enable (e.g., 'pipelines,builds,clusters'). Use 'all' to enable all toolsets." default:"all" env:"BUILDKITE_TOOLSETS"`
 	ReadOnly        bool     `help:"Enable read-only mode, which filters out write operations from all toolsets." default:"false" env:"BUILDKITE_READ_ONLY"`
+	MinimumAccess   bool     `help:"Enable only read-only tools requiring read_builds, read_pipelines and read_user scopes (or no API scopes)." default:"false" env:"BUILDKITE_MINIMUM_ACCESS"`
 }
 
 func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
@@ -21,30 +22,32 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 
 	deps := buildkite.ToolDependencies{
-		BuildsClient:            globals.Client.Builds,
-		PipelinesClient:         globals.Client.Pipelines,
-		PipelineSchedulesClient: globals.Client.PipelineSchedules,
-		ClustersClient:          globals.Client.Clusters,
-		ClusterSecretsClient:    globals.Client.ClusterSecrets,
-		CacheRegistriesClient:   globals.Client.CacheRegistries,
-		ClusterQueuesClient:     globals.Client.ClusterQueues,
-		AgentsClient:            globals.Client.Agents,
-		ArtifactsClient:         &buildkite.BuildkiteClientAdapter{Client: globals.Client, HTTPClient: globals.HTTPClient},
-		AnnotationsClient:       globals.Client.Annotations,
-		OrganizationsClient:     globals.Client.Organizations,
-		UserClient:              globals.Client.User,
-		AccessTokensClient:      globals.Client.AccessTokens,
-		JobsClient:              globals.Client.Jobs,
-		StepUploadsClient:       globals.Client.StepUploads,
-		TestRunsClient:          globals.Client.TestRuns,
-		TestSuitesClient:        globals.Client.TestSuites,
-		TestExecutionsClient:    globals.Client.TestRuns,
-		ExecutionTraceClient:    globals.Client.Executions,
-		SlowestExecutionsClient: globals.Client.Executions,
-		TestsClient:             globals.Client.Tests,
-		BuildTestsClient:        globals.Client.BuildTests,
-		BuildkiteLogsClient:     globals.BuildkiteLogsClient,
-		FailureSummary:          globals.FailureSummary,
+		BuildsClient:                globals.Client.Builds,
+		PipelinesClient:             globals.Client.Pipelines,
+		PipelineSchedulesClient:     globals.Client.PipelineSchedules,
+		ClustersClient:              globals.Client.Clusters,
+		ClusterSecretsClient:        globals.Client.ClusterSecrets,
+		CacheRegistriesClient:       globals.Client.CacheRegistries,
+		ClusterQueuesClient:         globals.Client.ClusterQueues,
+		AgentsClient:                globals.Client.Agents,
+		ArtifactsClient:             &buildkite.BuildkiteClientAdapter{Client: globals.Client, HTTPClient: globals.HTTPClient},
+		AnnotationsClient:           globals.Client.Annotations,
+		OrganizationsClient:         globals.Client.Organizations,
+		RepositoryConnectionsClient: globals.Client.RepositoryConnections,
+		UserClient:                  globals.Client.User,
+		AccessTokensClient:          globals.Client.AccessTokens,
+		JobsClient:                  globals.Client.Jobs,
+		StepUploadsClient:           globals.Client.StepUploads,
+		TestRunsClient:              globals.Client.TestRuns,
+		TestSuitesClient:            globals.Client.TestSuites,
+		TestWorkflowsClient:         globals.Client.TestWorkflows,
+		TestExecutionsClient:        globals.Client.TestRuns,
+		ExecutionTraceClient:        globals.Client.Executions,
+		SlowestExecutionsClient:     globals.Client.Executions,
+		TestsClient:                 globals.Client.Tests,
+		BuildTestsClient:            globals.Client.BuildTests,
+		BuildkiteLogsClient:         globals.BuildkiteLogsClient,
+		FailureSummary:              globals.FailureSummary,
 	}
 
 	log.Info().Msg("Starting MCP server over stdio")
@@ -52,6 +55,7 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 
 	s := server.NewMCPServer(globals.Version, deps,
 		server.WithReadOnly(c.ReadOnly),
+		server.WithMinimumAccess(c.MinimumAccess),
 		server.WithToolsets(c.EnabledToolsets...))
 
 	return s.Run(ctx, &mcp.StdioTransport{})

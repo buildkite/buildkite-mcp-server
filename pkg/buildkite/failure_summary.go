@@ -37,6 +37,8 @@ const (
 	failureSummaryTestContentByteLimit   = 64 * 1024
 	failureSummaryContentByteLimit       = failureSummaryLogContentByteLimit + failureSummaryAnnotationContentLimit + failureSummaryTestContentByteLimit
 	failureSummaryConcurrency            = 4
+	// Bounds how far soft-failed jobs can push the scan for blocking failures.
+	failureSummaryPrimaryJobPages = 5
 )
 
 // GetBuildFailureSummaryArgs controls the amount of diagnostic context returned
@@ -48,7 +50,7 @@ type GetBuildFailureSummaryArgs struct {
 	PipelineSlug           string `json:"pipeline_slug"`
 	BuildNumber            string `json:"build_number"`
 	LogTail                int    `json:"log_tail,omitempty" jsonschema:"Log lines to include for each failed, timed-out, canceled, or promised-failing job (default 50, max 200)"`
-	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum problem jobs to return (default 10, server may enforce a lower maximum, absolute max 50). Failed, timed-out, and expired jobs fill the limit first, followed by canceled jobs. Unless include_never_ran_jobs is false, remaining slots are filled first by jobs stopped by a failed dependency (waiting_failed, blocked_failed, unblocked_failed), then by broken jobs excluded by pipeline configuration."`
+	MaxJobs                int    `json:"max_jobs,omitempty" jsonschema:"Maximum problem jobs to return (default 10, server may enforce a lower maximum, absolute max 50). Blocking failed, timed-out, and expired jobs fill the limit first, followed by canceled jobs, then soft-failed jobs. Unless include_never_ran_jobs is false, remaining slots are filled first by jobs stopped by a failed dependency (waiting_failed, blocked_failed, unblocked_failed), then by broken jobs excluded by pipeline configuration."`
 	MaxAnnotations         int    `json:"max_annotations,omitempty" jsonschema:"Maximum error or warning annotations to return (default 20, max 100); the server scans at most 500 total annotations"`
 	MaxTestRuns            int    `json:"max_test_runs,omitempty" jsonschema:"Maximum Test Engine runs to scan for failure details of the returned failed tests (default 5, max 20); the runs holding the most returned failed tests are scanned first"`
 	MaxFailedTests         int    `json:"max_failed_tests,omitempty" jsonschema:"Maximum failed Test Engine tests to return for the build (default 50, max 100)"`
@@ -77,7 +79,6 @@ type BuildFailureSummaryBuild struct {
 	JobStateCounts *FailureSummaryJobStateCounts `json:"job_state_counts,omitempty"`
 	ScheduledAt    *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
 	StartedAt      *buildkite.Timestamp          `json:"started_at,omitempty"`
-	FinishedAt     *buildkite.Timestamp          `json:"finished_at,omitempty"`
 }
 
 type FailureSummaryLogEntry struct {
@@ -123,20 +124,24 @@ type FailureSummaryAnnotation struct {
 // its run was past the scan cap, past the first page of the run's failed
 // executions, unlisted on the build, or the lookup failed —
 // failure_detail_status says so, and get_failed_executions with
-// test_suite_slug and run_id fetches the detail.
+// test_suite_slug and run_id fetches the detail. Labels are the test's Test
+// Engine labels, such as "flaky", and ExecutionsCountByResult counts its
+// executions within the job; the list call already returns both.
 type FailureSummaryFailedTest struct {
-	TestID              string                      `json:"test_id"`
-	Name                string                      `json:"name,omitempty"`
-	Scope               string                      `json:"scope,omitempty"`
-	Location            string                      `json:"location,omitempty"`
-	FileName            string                      `json:"file_name,omitempty"`
-	WebURL              string                      `json:"web_url,omitempty"`
-	TestSuiteSlug       string                      `json:"test_suite_slug,omitempty"`
-	RunID               string                      `json:"run_id,omitempty"`
-	FailureReason       string                      `json:"failure_reason,omitempty"`
-	FailureExpanded     []buildkite.FailureExpanded `json:"failure_expanded,omitempty"`
-	FailureDetailStatus string                      `json:"failure_detail_status,omitempty"`
-	ContentTruncated    bool                        `json:"content_truncated,omitempty"`
+	TestID                  string                      `json:"test_id"`
+	Name                    string                      `json:"name,omitempty"`
+	Scope                   string                      `json:"scope,omitempty"`
+	Location                string                      `json:"location,omitempty"`
+	FileName                string                      `json:"file_name,omitempty"`
+	WebURL                  string                      `json:"web_url,omitempty"`
+	Labels                  []string                    `json:"labels,omitempty"`
+	ExecutionsCountByResult map[string]int              `json:"executions_count_by_result,omitempty"`
+	TestSuiteSlug           string                      `json:"test_suite_slug,omitempty"`
+	RunID                   string                      `json:"run_id,omitempty"`
+	FailureReason           string                      `json:"failure_reason,omitempty"`
+	FailureExpanded         []buildkite.FailureExpanded `json:"failure_expanded,omitempty"`
+	FailureDetailStatus     string                      `json:"failure_detail_status,omitempty"`
+	ContentTruncated        bool                        `json:"content_truncated,omitempty"`
 }
 
 // failureDetailStatusNotRetrieved marks a failed-test entry whose
@@ -223,7 +228,6 @@ func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
 		JobStateCounts: jobStateCounts,
 		ScheduledAt:    build.ScheduledAt,
 		StartedAt:      build.StartedAt,
-		FinishedAt:     build.FinishedAt,
 	}
 }
 
@@ -678,14 +682,19 @@ func loadFailureJobTests(ctx context.Context, deps ToolDependencies, args GetBui
 		for j, test := range tests {
 			suiteSlug := testSuiteSlugFromURL(test.URL)
 			anchor.result.FailedTests[j] = FailureSummaryFailedTest{
-				TestID:        test.ID,
-				Name:          test.Name,
-				Scope:         test.Scope,
-				Location:      test.Location,
-				FileName:      test.FileName,
-				WebURL:        test.WebURL,
-				TestSuiteSlug: suiteSlug,
-				RunID:         firstRunID(suiteSlug),
+				TestID:   test.ID,
+				Name:     test.Name,
+				Scope:    test.Scope,
+				Location: test.Location,
+				FileName: test.FileName,
+				WebURL:   test.WebURL,
+				Labels:   test.Labels,
+				// The list is filtered to this job's executions, so these counts
+				// are this job's attempts: failed 2 means the first run and its
+				// retry both failed.
+				ExecutionsCountByResult: test.ExecutionsCountByResult,
+				TestSuiteSlug:           suiteSlug,
+				RunID:                   firstRunID(suiteSlug),
 			}
 			targetsByTestID[test.ID] = append(targetsByTestID[test.ID], failureSummaryFailedTestTarget{jobID: anchor.job.ID, entry: &anchor.result.FailedTests[j]})
 		}
@@ -1003,31 +1012,12 @@ func limitFailureExpanded(values []buildkite.FailureExpanded, entryRemaining, se
 		}
 
 		bounded := buildkite.FailureExpanded{}
-		for _, backtrace := range value.Backtrace {
-			structureBytes := len(`""`)
-			if len(bounded.Backtrace) == 0 {
-				structureBytes += len(`"backtrace":[]`)
-			} else {
-				structureBytes++ // comma between backtrace items
-			}
-			if !consumeFailureSummaryBytes(structureBytes, entryRemaining, sectionRemaining) {
-				truncated = true
-				break
-			}
-			line, lineTruncated := limitFailureSummaryString(backtrace, failureSummaryEntryContentByteLimit, entryRemaining, sectionRemaining)
-			bounded.Backtrace = append(bounded.Backtrace, line)
-			truncated = truncated || lineTruncated
-		}
-		if len(bounded.Backtrace) < len(value.Backtrace) {
-			truncated = true
-		}
+		// Bound the error message before the backtrace: the message says what
+		// failed, and a long backtrace would otherwise use the whole budget.
 		for _, expanded := range value.Expanded {
 			structureBytes := len(`""`)
 			if len(bounded.Expanded) == 0 {
 				structureBytes += len(`"expanded":[]`)
-				if len(bounded.Backtrace) > 0 {
-					structureBytes++ // comma between object fields
-				}
 			} else {
 				structureBytes++ // comma between expanded items
 			}
@@ -1040,6 +1030,27 @@ func limitFailureExpanded(values []buildkite.FailureExpanded, entryRemaining, se
 			truncated = truncated || lineTruncated
 		}
 		if len(bounded.Expanded) < len(value.Expanded) {
+			truncated = true
+		}
+		for _, backtrace := range value.Backtrace {
+			structureBytes := len(`""`)
+			if len(bounded.Backtrace) == 0 {
+				structureBytes += len(`"backtrace":[]`)
+				if len(bounded.Expanded) > 0 {
+					structureBytes++ // comma between object fields
+				}
+			} else {
+				structureBytes++ // comma between backtrace items
+			}
+			if !consumeFailureSummaryBytes(structureBytes, entryRemaining, sectionRemaining) {
+				truncated = true
+				break
+			}
+			line, lineTruncated := limitFailureSummaryString(backtrace, failureSummaryEntryContentByteLimit, entryRemaining, sectionRemaining)
+			bounded.Backtrace = append(bounded.Backtrace, line)
+			truncated = truncated || lineTruncated
+		}
+		if len(bounded.Backtrace) < len(value.Backtrace) {
 			truncated = true
 		}
 		result = append(result, bounded)
@@ -1325,7 +1336,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Annotation content is in the body field exactly as submitted (Markdown or HTML, unrendered); artifact:// references in it name artifacts of this build, which you can fetch with list_artifacts_for_build and get_artifact. Start with this tool before calling individual job, log, annotation, or test tools.",
+		Description: "Diagnose a Buildkite build failure in one call. Returns build.state, build.job_state_counts tallying every job in the build by state (when present, use it to confirm the returned problem jobs are the build's only problems without calling list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, soft-failed jobs (soft_failed true: ran and failed, but the step's soft_fail setting in the pipeline allowed that exit status, so they did not block the build; soft_failed is authoritative, so the pipeline configuration is not needed; listed after blocking failures and canceled jobs — not proof the problem is harmless, but do not dig into their logs, retry, or fix them unless the user asks or evidence links them to the reported failure), and — unless include_never_ran_jobs is false, using the remaining max_jobs slots — the jobs that never ran (waiting_failed/blocked_failed/unblocked_failed stopped by a failed dependency, broken excluded by pipeline configuration — no logs, never the cause), and size-bounded diagnostic content from logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason joined from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'); an empty or absent failed_tests list does NOT mean the job's tests passed — follow the job's failed_tests_hint and treat the job's log_tail as the authoritative fallback. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; when it carries both test_suite_slug and run_id, call get_failed_executions with them for the detail (page past the first 100 if needed). When run_id is absent, the suite lists several runs for this build or none: use get_build_test_engine_runs to list them and query each. Each failed test also carries its Test Engine labels, such as 'flaky', and executions_count_by_result for its attempts within that job (failed: 2 means the first run and a retry both failed, which is why the job log can report more failures than failed_tests lists), so there is no need to call a test tool or get_failed_executions for them. If a failed test is labeled 'flaky', do not stop at the label: trace the actual error (failure_reason, failure_expanded, or the job log) and propose a permanent fix. Never conclude a failure is flaky from a PR or commit title alone. Retry the job with retry_job only when the user explicitly permits it. Annotation content is in the body field exactly as submitted (Markdown or HTML, unrendered); artifact:// references in it name artifacts of this build, which you can fetch with list_artifacts_for_build and get_artifact. Start with this tool before calling individual job, log, annotation, or test tools.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,
@@ -1372,33 +1383,59 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		result := BuildFailureSummary{Build: failureSummaryBuild(build), JobLimit: maxJobs}
 
 		includeRetriedJobs := false
-		primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.JobsListOptions{
-			// The API's failed filter includes running jobs with a hard promised
-			// failure. Querying running separately can include promises covered by
-			// soft-fail or retry rules that do not put the build into failing.
-			State:              []string{"failed", "timed_out", "expired"},
+		// The API's failed filter includes running jobs with a hard promised
+		// failure. Querying running separately can include promises covered by
+		// soft-fail or retry rules that do not put the build into failing.
+		primaryStates := []string{"failed", "timed_out", "expired"}
+		primaryOptions := &buildkite.JobsListOptions{
+			State:              primaryStates,
 			IncludeRetriedJobs: &includeRetriedJobs,
 			PerPage:            maxJobs + 1,
-		})
-		if err != nil {
-			return handleBuildkiteError(err)
 		}
 
+		// Soft-failed jobs share the failed state but their exit status was
+		// allowed by soft_fail, so they did not block the build. They are held
+		// back, and later pages are scanned, so they cannot displace blocking
+		// failures from the job limit; they are added after canceled jobs.
 		sourceJobs := make([]buildkite.Job, 0, maxJobs)
-		jobsTruncated := primaryJobsList.Links.Next != ""
-		for _, job := range primaryJobsList.Items {
-			if !isPrimaryFailureSummaryJob(job) {
-				continue
+		var softFailedJobs []buildkite.Job
+		jobsTruncated := false
+		for page := 1; ; page++ {
+			primaryJobsList, _, err := deps.JobsClient.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, primaryOptions)
+			if err != nil {
+				return handleBuildkiteError(err)
 			}
-			if len(sourceJobs) < maxJobs {
-				sourceJobs = append(sourceJobs, job)
-			} else {
+			for _, job := range primaryJobsList.Items {
+				switch {
+				case !isPrimaryFailureSummaryJob(job):
+				case job.SoftFailed:
+					softFailedJobs = append(softFailedJobs, job)
+				case len(sourceJobs) < maxJobs:
+					sourceJobs = append(sourceJobs, job)
+				default:
+					jobsTruncated = true
+				}
+			}
+			if primaryJobsList.Links.Next == "" {
+				break
+			}
+			// Only held-back soft failures justify scanning further pages.
+			if len(softFailedJobs) == 0 || len(sourceJobs) >= maxJobs || page >= failureSummaryPrimaryJobPages {
 				jobsTruncated = true
+				break
 			}
+			primaryOptions, err = primaryJobsList.Links.Next.ToOptions()
+			if err != nil {
+				return utils.NewToolResultError(fmt.Sprintf("failed to read next page of failed jobs: %v", err)), nil, nil
+			}
+			primaryOptions.State = primaryStates
+			primaryOptions.IncludeRetriedJobs = &includeRetriedJobs
+			primaryOptions.PerPage = maxJobs + 1
 		}
 
 		// Non-primary jobs fill whatever budget the primaries left, in priority
-		// order. Canceled jobs ran and may have logs. The *_failed states exist
+		// order. Canceled jobs ran and may have logs. Soft-failed jobs follow:
+		// they ran and failed but were allowed through. The *_failed states exist
 		// only because a dependency failed, so they are evidence of the failure.
 		// Broken jobs were excluded by pipeline configuration when the build was
 		// created; they are routine in passing builds and go last. Neither of the
@@ -1433,6 +1470,13 @@ func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSumma
 		}
 		if listErr := appendJobsInStates([]string{"canceled"}, isCanceledFailureSummaryJob); listErr != nil {
 			return handleBuildkiteError(listErr)
+		}
+		for _, job := range softFailedJobs {
+			if len(sourceJobs) < maxJobs {
+				sourceJobs = append(sourceJobs, job)
+			} else {
+				jobsTruncated = true
+			}
 		}
 		if defaultTrue(args.IncludeNeverRanJobs) {
 			if listErr := appendJobsInStates([]string{"waiting_failed", "blocked_failed", "unblocked_failed"}, isDependencyFailedFailureSummaryJob); listErr != nil {

@@ -148,10 +148,48 @@ metrics_table() {
           r("Cache write (total)"; cwt($B.tokens);           cwt($C.tokens)),
           r("Cache read";          $B.tokens.cache_read;     $C.tokens.cache_read),
           r("Tool calls (total)";  $B.tool_calls_total;      $C.tool_calls_total),
+          r("Shell calls running bk"; $B.tool_calls_bk_cli;  $C.tool_calls_bk_cli),
+          r("API requests (total)"; $B.api_fanout.total_requests?; $C.api_fanout.total_requests?),
+          # Struggles: real failures only (likely-harmless ones left out).
+          r("Failed tool calls";   (if $B.struggles.implemented? then $B.struggles.failed_calls - $B.struggles.likely_harmless else null end);
+                                   (if $C.struggles.implemented? then $C.struggles.failed_calls - $C.struggles.likely_harmless else null end)),
+          r("Longest failure streak"; (if $B.struggles.implemented? then $B.struggles.longest_failure_streak else null end);
+                                      (if $C.struggles.implemented? then $C.struggles.longest_failure_streak else null end)),
+          r("Calls failing 2+ times"; (if $B.struggles.implemented? then ($B.struggles.repeated_failures | length) else null end);
+                                      (if $C.struggles.implemented? then ($C.struggles.repeated_failures | length) else null end)),
+          # Harness-level, not the agent: model API retries (504 / 429 ...).
+          r("Model API retries";   (if $B.model_api_retries.available? then $B.model_api_retries.retries else null end);
+                                   (if $C.model_api_retries.available? then $C.model_api_retries.retries else null end)),
           r("Assistant responses"; $B.assistant_responses;   $C.assistant_responses),
           r("User messages";       $B.user_messages;         $C.user_messages),
           r("Duration (min)";      $B.duration_min;          $C.duration_min),
           r("Est. cost (USD)";     $B.est_cost_usd;          $C.est_cost_usd)
+        ] | .[]'
+}
+
+# run_info_table BASE_JSON CUR_JSON  -> what each run used (metrics.json's
+# run_info: mode, harness / bk CLI / MCP server versions). Strings, so the last
+# column says whether they match rather than a numeric delta. Bundles from
+# before run_info existed show N/A.
+run_info_table() {
+    jq -rn --slurpfile b "$1" --slurpfile c "$2" '
+        ($b[0].run_info // null) as $B | ($c[0].run_info // null) as $C |
+        def cell(x): if x == null or x == "" then "N/A" else "`\(x)`" end;
+        def same(bv; cv): if (bv // "") == (cv // "") then "same" else "**changed**" end;
+        def r(lbl; f): ($B | if . == null then null else f end) as $bv
+                     | ($C | if . == null then null else f end) as $cv
+                     | "| \(lbl) | \(cell($bv)) | \(cell($cv)) | \(same($bv; $cv)) |";
+        [
+          "| Run setup | Base | Target | |",
+          "|---|---|---|---|",
+          r("Mode";               .mode),
+          r("Agent";              .harness.agent),
+          r("Harness version";    .harness.version),
+          r("Model";              .harness.model),
+          r("bk CLI version";     .bk_cli.version?),
+          r("bk CLI download";    .bk_cli.download_url?),
+          r("MCP server version"; .mcp_server.version?),
+          r("MCP source SHA";     .mcp_server.source_sha?)
         ] | .[]'
 }
 
@@ -171,6 +209,59 @@ tool_table() {
         | .[]'
 }
 
+# bk_cli_table BASE_JSON CUR_JSON  -> per-bk-command count comparison table
+# (bk_cli_commands_by_name; same shape as tool_calls_by_name).
+bk_cli_table() {
+    jq -rn --slurpfile b "$1" --slurpfile c "$2" '
+        def tomap(a): ((a // [])
+          | map(capture("^(?<n>[0-9]+) (?<name>.+)$"))
+          | map({(.name): (.n|tonumber)}) | add // {});
+        (tomap($b[0].bk_cli_commands_by_name)) as $B |
+        (tomap($c[0].bk_cli_commands_by_name)) as $C |
+        (($B|keys) + ($C|keys) | unique) as $names |
+        if $b[0].bk_cli_commands_by_name == null or $c[0].bk_cli_commands_by_name == null then
+          "_bk CLI command counts are not available for one or both runs._"
+        elif ($names | length) == 0 then "_No bk CLI calls in either run._"
+        else
+          (["| bk command | Base | Target | Δ |", "|---|---:|---:|---:|"]
+           + ($names | map(. as $n
+               | (($B[$n]) // 0) as $bv | (($C[$n]) // 0) as $cv
+               | "| `\($n)` | \($bv) | \($cv) | \(if ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) |")))
+          | .[]
+        end'
+}
+
+# fanout_table BASE_JSON CUR_JSON  -> Buildkite API requests per MCP tool and
+# per bk command (metrics.json's api_fanout), base vs target. Rows are keyed
+# "mcp <tool>" / "<bk command>" so a cli run and an mcp run line up side by
+# side (each side just shows "–" for the other's rows). A run without
+# api_fanout (recorded before request logging, or cursor-cloud) was not
+# measured, so deltas against it are N/A; a tool missing from a measured run
+# counts as 0.
+fanout_table() {
+    jq -rn --slurpfile b "$1" --slurpfile c "$2" '
+        def rows(f): ((f // {}) as $f
+          | (($f.mcp.tools // []) | map({key: "mcp \(.tool)", value: {calls: .calls, requests: .requests}}))
+          + (($f.bk_cli.commands // []) | map({key: .command, value: {calls: .invocations, requests: .requests}}))
+          | from_entries);
+        def cell(x): if x == null then "–" else "\(x)" end;
+        ($b[0].api_fanout | if .available == false then null else . end) as $BF |
+        ($c[0].api_fanout | if .available == false then null else . end) as $CF |
+        if $BF == null and $CF == null then "_No API fan-out recorded in either run._"
+        else
+          rows($BF) as $B | rows($CF) as $C |
+          (($B | keys) + ($C | keys) | unique) as $names |
+          (["| Tool / bk command | Base calls | Base API requests | Target calls | Target API requests | Δ requests |",
+            "|---|---:|---:|---:|---:|---:|"]
+           + ($names | map(. as $n
+               | ($B[$n].requests // 0) as $bv | ($C[$n].requests // 0) as $cv
+               | (if $BF == null or $CF == null then "N/A"
+                  elif ($cv-$bv)>0 then "+\($cv-$bv)" else "\($cv-$bv)" end) as $delta
+               | "| `\($n)` | \(cell($B[$n].calls)) | \(cell($B[$n].requests)) | \(cell($C[$n].calls)) | \(cell($C[$n].requests)) | \($delta) |")))
+          | .[]
+        end'
+}
+
 # _sect FILE -- print a file, or a placeholder if empty/missing.
 _sect() { if [[ -s "$1" ]]; then cat "$1"; else echo "_(not available)_"; fi; }
 
@@ -178,6 +269,12 @@ _sect() { if [[ -s "$1" ]]; then cat "$1"; else echo "_(not available)_"; fi; }
 semantic_compare() {
     local b_eval="$1" c_eval="$2" b_klaren="$3" c_klaren="$4"
     [[ -s "$c_eval" || -s "$c_klaren" ]] || return 0
+
+    # Either run may lack a Klaren report (for example, evaluator: yilong).
+    # Scoring one against nothing would read as every issue resolved
+    # (or new). Compare klaren only when both runs have one.
+    local with_klaren=false
+    [[ -s "$b_klaren" && -s "$c_klaren" ]] && with_klaren=true
 
     local PROMPT; PROMPT="$(mktemp)"
     {
@@ -193,6 +290,9 @@ Output ONLY GitHub-flavored markdown (no preamble). Use exactly these sections:
 ### Plan Steps
 - SIDE-BY-SIDE table: Step | Base | Target.
 - Then bullet the notable DIFFERENCES (steps added, dropped, reordered, or done differently).
+PROMPT_HEADER
+        if [[ "$with_klaren" == "true" ]]; then
+            cat <<'PROMPT_KLAREN'
 
 ## :female-detective: Klaren
 ### Score
@@ -209,13 +309,16 @@ Categorize issues across the two reports (match by substance, not wording):
   - **Resolved (gone):** in base but not target.
   - **New:** in target but not base.
   - **Remaining:** in both (note any severity/frequency change).
-
-Keep it tight and skimmable.
-PROMPT_HEADER
+PROMPT_KLAREN
+        fi
+        echo
+        echo "Keep it tight and skimmable."
         echo; echo "=== BASE — EVAL SUMMARY ===";  _sect "$b_eval"
         echo; echo "=== TARGET — EVAL SUMMARY ==="; _sect "$c_eval"
-        echo; echo "=== BASE — KLAREN REPORT ===";  _sect "$b_klaren"
-        echo; echo "=== TARGET — KLAREN REPORT ==="; _sect "$c_klaren"
+        if [[ "$with_klaren" == "true" ]]; then
+            echo; echo "=== BASE — KLAREN REPORT ===";  _sect "$b_klaren"
+            echo; echo "=== TARGET — KLAREN REPORT ==="; _sect "$c_klaren"
+        fi
     } > "$PROMPT"
 
     local LOG; LOG="$(mktemp)"; local RESULT=""
@@ -305,9 +408,17 @@ main() {
         echo "## :bar_chart: Metrics"
         echo
         if [[ -s "$BASE_METRICS" && -s "$TGT_METRICS" ]]; then
+            run_info_table "$BASE_METRICS" "$TGT_METRICS"
+            echo
             metrics_table "$BASE_METRICS" "$TGT_METRICS" "$BASE_LABEL" "$TGT_LABEL"
             echo; echo "<details><summary>Per-tool call counts</summary>"; echo
             tool_table "$BASE_METRICS" "$TGT_METRICS"
+            echo; echo "</details>"
+            echo; echo "<details><summary>bk CLI command counts</summary>"; echo
+            bk_cli_table "$BASE_METRICS" "$TGT_METRICS"
+            echo; echo "</details>"
+            echo; echo "<details><summary>API fan-out (Buildkite API requests per tool / bk command)</summary>"; echo
+            fanout_table "$BASE_METRICS" "$TGT_METRICS"
             echo; echo "</details>"
         else
             echo "_Metrics unavailable (missing base or target metrics)._"
