@@ -69,8 +69,17 @@ func rateLimitedMessage(errResp *buildkite.ErrorResponse) string {
 	detail := "Retry in a minute."
 	if errResp.Message != "" {
 		detail = errResp.Message
-	} else if secs, err := strconv.Atoi(errResp.Response.Header.Get("RateLimit-Reset")); err == nil && secs >= 0 {
-		detail = fmt.Sprintf("The limit resets in %d seconds.", secs)
+	} else {
+		// HEAD responses have no message; conservatively wait for both windows.
+		reset := -1
+		for _, header := range []string{"RateLimit-Reset", "RateLimit-User-Reset"} {
+			if secs, err := strconv.Atoi(errResp.Response.Header.Get(header)); err == nil && secs >= 0 {
+				reset = max(reset, secs)
+			}
+		}
+		if reset >= 0 {
+			detail = fmt.Sprintf("The limit resets in %d seconds.", reset)
+		}
 	}
 	return "Buildkite API rate limit exceeded (HTTP 429). " + detail +
 		" If available, use get_rate_limit with the affected org_slug to inspect quota without consuming it." +
