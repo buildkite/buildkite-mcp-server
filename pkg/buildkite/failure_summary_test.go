@@ -32,6 +32,7 @@ func TestGetBuildFailureSummaryToolDefinition(t *testing.T) {
 }
 
 func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
+	const rawBody = "**error**: expected `<ok>` & got `bad`\n[report](artifact://reports/結果.html)"
 	failedLog := t.TempDir() + "/failed.parquet"
 	promisedLog := t.TempDir() + "/promised.parquet"
 	writeTestParquetFile(t, failedLog, []string{"setup", "compile error", "build failed"})
@@ -96,14 +97,15 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	annotationsClient := &MockAnnotationsClient{
 		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
 			require.Equal(t, "all", options.Scope)
+			require.Equal(t, "raw", options.BodyFormat)
 			require.Equal(t, failureSummaryAnnotationPageSize, options.PerPage)
 			switch options.Page {
 			case 1:
-				return []buildkite.Annotation{{ID: "annotation-success", Context: "coverage", Style: "success", BodyHTML: "coverage passed"}}, &buildkite.Response{NextPage: 2}, nil
+				return []buildkite.Annotation{{ID: "annotation-success", Context: "coverage", Style: "success", Body: "coverage passed"}}, &buildkite.Response{NextPage: 2}, nil
 			case 2:
 				return []buildkite.Annotation{
-					{ID: "annotation-error", Context: "tests", Style: "error", BodyHTML: "<p>2 tests failed</p>"},
-					{ID: "annotation-warning", Context: "lint", Style: "warning", JobID: "job-failed", BodyHTML: "lint warning"},
+					{ID: "annotation-error", Context: "tests", Style: "error", Body: rawBody},
+					{ID: "annotation-warning", Context: "lint", Style: "warning", JobID: "job-failed", Body: "lint warning"},
 				}, &buildkite.Response{}, nil
 			default:
 				return nil, nil, errors.New("unexpected annotation page")
@@ -182,6 +184,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	require.Len(t, summary.Annotations, 2)
 	require.False(t, summary.AnnotationsTruncated)
 	require.Equal(t, "annotation-error", summary.Annotations[0].ID)
+	require.Equal(t, rawBody, summary.Annotations[0].Body)
 	require.NotContains(t, getTextResult(t, callResult).Text, "coverage passed")
 
 	logCallsMu.Lock()
@@ -751,7 +754,7 @@ func TestGetBuildFailureSummaryDefaultLimitPreservesCollectionsForStringOverage(
 	annotationsClient := &MockAnnotationsClient{
 		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
 			if options.Page == 1 {
-				return []buildkite.Annotation{{ID: "ann-1", Style: "error", BodyHTML: "test failed"}}, &buildkite.Response{}, nil
+				return []buildkite.Annotation{{ID: "ann-1", Style: "error", Body: "test failed"}}, &buildkite.Response{}, nil
 			}
 			return nil, &buildkite.Response{}, nil
 		},
@@ -948,7 +951,7 @@ func TestApplyFailureSummaryContentLimitsBoundsAggregateContent(t *testing.T) {
 		}
 	}
 	for i := range result.Annotations {
-		result.Annotations[i].BodyHTML = content
+		result.Annotations[i].Body = content
 	}
 
 	applyFailureSummaryContentLimits(&result)
@@ -1018,7 +1021,7 @@ func TestApplyFailureSummaryContentLimitsPreservesWarnings(t *testing.T) {
 		Warnings:    []string{"annotations unavailable after partial scan: request failed"},
 	}
 	for i := range result.Annotations {
-		result.Annotations[i].BodyHTML = content
+		result.Annotations[i].Body = content
 	}
 
 	applyFailureSummaryContentLimits(&result)
@@ -1032,15 +1035,15 @@ func TestFailureSummaryAnnotationsBoundsLargeBodies(t *testing.T) {
 	body := strings.Repeat("annotation line\n", 100_000)
 
 	annotations, truncated := failureSummaryAnnotations([]buildkite.Annotation{{
-		Style:    "error",
-		BodyHTML: body,
+		Style: "error",
+		Body:  body,
 	}}, 1)
 
 	require.False(t, truncated)
 	require.Len(t, annotations, 1)
-	require.LessOrEqual(t, len(annotations[0].BodyHTML), failureSummaryEntryContentByteLimit)
+	require.LessOrEqual(t, len(annotations[0].Body), failureSummaryEntryContentByteLimit)
 	require.True(t, annotations[0].BodyTruncated)
-	require.NotEqual(t, body, annotations[0].BodyHTML)
+	require.NotEqual(t, body, annotations[0].Body)
 }
 
 func TestLoadFailureAnnotationsStopsAtScanLimit(t *testing.T) {
@@ -1048,7 +1051,7 @@ func TestLoadFailureAnnotationsStopsAtScanLimit(t *testing.T) {
 	client := &MockAnnotationsClient{
 		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
 			pages++
-			return []buildkite.Annotation{{Style: "info", BodyHTML: "not relevant"}}, &buildkite.Response{NextPage: options.Page + 1}, nil
+			return []buildkite.Annotation{{Style: "info", Body: "not relevant"}}, &buildkite.Response{NextPage: options.Page + 1}, nil
 		},
 	}
 

@@ -94,9 +94,15 @@ func summarizeJob(job buildkite.Job) JobSummary {
 		stepID = job.Step.ID
 	}
 
+	name := job.Name
+	if name == "" {
+		// Manual jobs expose their display name as label rather than name.
+		name = job.Label
+	}
+
 	return JobSummary{
 		ID:           job.ID,
-		Name:         job.Name,
+		Name:         name,
 		State:        job.State,
 		Command:      job.Command,
 		ExitStatus:   job.ExitStatus,

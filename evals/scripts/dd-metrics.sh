@@ -30,12 +30,22 @@
 #   AGENT                   claude | cursor | cursor-cloud -> tag agent:
 #   MODEL                   model id ("default" if unset)  -> tag model:
 #   GOAL_ACHIEVED           true | false | unknown         -> tag goal:
+#   MODE                    mcp | cli (default mcp)        -> tag mode:
+#   HARNESS_VERSION         agent harness version, as reported (e.g.
+#                           "2.1.300 (Claude Code)")       -> tag harness_version:
+#                           (its first dotted version only; omitted if none)
+#   BK_CLI_VERSION          bk CLI version, cli mode only  -> tag bk_cli_version:
 #   EVAL_DURATION_SECONDS   agent wall-clock measured by run_entry
 #   METRICS_FILE            path to the metrics JSON. May be empty or hold
 #                           null fields (cursor runs emit no token usage);
 #                           null metrics are simply not submitted, so gaps in
 #                           Datadog mean "not measured", never zero.
 #   BUILDKITE_BUILD_NUMBER  optional                       -> tag buildkite_build:
+#   EVALUATOR               optional                       -> tag evaluator:
+#   KLAREN_FILE             optional path to the run's klaren.sh verdicts.
+#                           Missing/empty = no klaren rubric series.
+#   YILONG_FILE             optional path to the run's yilong.sh verdicts.
+#                           Missing/empty = no yilong rubric series.
 #
 # Submitted series (all gauges; the point timestamp is DD_TIMESTAMP — the
 # run's end — falling back to submission time; that carries the "datetime"
@@ -48,7 +58,24 @@
 #                                       (wait_for_build / Bash sleep; claude only)
 #   <prefix>.tool_calls.total
 #   <prefix>.tool_calls.buildkite_mcp   calls with the mcp__ prefix
+#   <prefix>.tool_calls.bk_cli          shell tool calls that ran the bk CLI
+#   <prefix>.api_requests.total         Buildkite API requests (fan-out; from
+#   <prefix>.api_requests.mcp           the run's request log — omitted when
+#   <prefix>.api_requests.bk_cli        no log was collected, e.g. cursor-cloud)
+#   <prefix>.tool_errors.failed         failed tool calls, minus likely harmless
+#   <prefix>.tool_errors.likely_harmless  e.g. grep with no match
+#   <prefix>.tool_errors.longest_streak most failed calls in a row
+#   <prefix>.tool_errors.repeated       distinct calls that failed 2+ times
+#                                       (tool_errors.* omitted when struggles
+#                                       are not implemented, e.g. cursor-cloud)
+#   <prefix>.model_api.retries          the harness retrying its MODEL API
+#   <prefix>.model_api.retry_wait_seconds  call (504/429...); claude only
 #   <prefix>.tokens.input / .output / .cache_read / .cache_write
+#   <prefix>.klaren.<question>          rubric score (0 / 0.5 / 1), omitted
+#                                       when n/a or undetermined
+#   <prefix>.klaren.undetermined        questions the reviewer could not grade
+#   <prefix>.yilong.<question>          Jev grade (0 / 0.5 / 1), omitted when n/a or undetermined
+#   <prefix>.yilong.undetermined        questions Jev could not evaluate
 #
 set -euo pipefail
 
@@ -75,6 +102,22 @@ if [[ -n "${METRICS_FILE:-}" && -s "${METRICS_FILE:-}" ]]; then
         echo "dd-metrics: $METRICS_FILE is not valid JSON; publishing identity/duration series only." >&2
     fi
 fi
+KLAREN_JSON="{}"
+if [[ -n "${KLAREN_FILE:-}" && -s "${KLAREN_FILE:-}" ]]; then
+    if jq -e . "$KLAREN_FILE" >/dev/null 2>&1; then
+        KLAREN_JSON="$(cat "$KLAREN_FILE")"
+    else
+        echo "dd-metrics: $KLAREN_FILE is not valid JSON; skipping klaren series." >&2
+    fi
+fi
+YILONG_JSON="{}"
+if [[ -n "${YILONG_FILE:-}" && -s "${YILONG_FILE:-}" ]]; then
+    if jq -e . "$YILONG_FILE" >/dev/null 2>&1; then
+        YILONG_JSON="$(cat "$YILONG_FILE")"
+    else
+        echo "dd-metrics: $YILONG_FILE is not valid JSON; skipping yilong series." >&2
+    fi
+fi
 
 # Point timestamp: prefer the recorded run end (CI publishes after the whole
 # matrix finishes). Clamp into Datadog's accepted window — points older than
@@ -96,10 +139,16 @@ PAYLOAD="$(jq -n \
     --arg agent    "${AGENT:-unknown}" \
     --arg model    "${MODEL:-default}" \
     --arg goal     "${GOAL_ACHIEVED:-unknown}" \
+    --arg mode     "${MODE:-mcp}" \
+    --arg harness  "${HARNESS_VERSION:-}" \
+    --arg bk_cli   "${BK_CLI_VERSION:-}" \
     --arg duration "${EVAL_DURATION_SECONDS:-}" \
     --arg build    "${BUILDKITE_BUILD_NUMBER:-}" \
+    --arg evaluator "${EVALUATOR:-}" \
     --argjson now  "$TS" \
-    --argjson m    "$METRICS_JSON" '
+    --argjson m    "$METRICS_JSON" \
+    --argjson y    "$YILONG_JSON" \
+    --argjson k    "$KLAREN_JSON" '
     # type 3 = gauge in the v2 series API. A null value emits nothing: absent
     # in Datadog must mean "not measured" (cursor tokens), never zero.
     def gauge($name; $v; $tags):
@@ -107,9 +156,17 @@ PAYLOAD="$(jq -n \
       else {metric: "\($prefix).\($name)", type: 3,
             points: [{timestamp: $now, value: ($v | tonumber)}], tags: $tags}
       end;
+    # Version tags carry only the dotted version ("2.1.300 (Claude Code)" ->
+    # "2.1.300"): Datadog tags must not hold spaces or parentheses.
+    def version_tag($name; $v):
+      ([$v | scan("[0-9]+(?:\\.[0-9]+)+")] | first) as $num
+      | if $num == null then [] else ["\($name):\($num)"] end;
     ([ "entry:\($entry)", "prompt:\($prompt)", "agent:\($agent)",
-       "model:\($model)", "goal:\($goal)" ]
-     + (if $build != "" then ["buildkite_build:\($build)"] else [] end)) as $tags
+       "model:\($model)", "goal:\($goal)", "mode:\($mode)" ]
+     + version_tag("harness_version"; $harness)
+     + version_tag("bk_cli_version"; $bk_cli)
+     + (if $build != "" then ["buildkite_build:\($build)"] else [] end)
+     + (if $evaluator != "" then ["evaluator:\($evaluator)"] else [] end)) as $tags
     | ($m.tokens // {}) as $tok
     # claude reports the cache-write split (5m/1h); cursor-cloud a single
     # cache_write. Publish one combined series so dashboards compare agents.
@@ -124,10 +181,32 @@ PAYLOAD="$(jq -n \
         gauge("wait_seconds"; (($m.wait // {}) | .seconds // null); $tags),
         gauge("tool_calls.total"; ($m.tool_calls_total // null); $tags),
         gauge("tool_calls.buildkite_mcp"; ($m.tool_calls_mcp // null); $tags),
+        gauge("tool_calls.bk_cli"; ($m.tool_calls_bk_cli // null); $tags),
+        gauge("api_requests.total"; ($m.api_fanout.total_requests? // null); $tags),
+        gauge("api_requests.mcp"; ($m.api_fanout.mcp.requests? // null); $tags),
+        gauge("api_requests.bk_cli"; ($m.api_fanout.bk_cli.requests? // null); $tags),
+        # Struggles; absent (not zero) when not implemented for the agent.
+        (($m.struggles // {}) as $s | if ($s.implemented // false) then
+          gauge("tool_errors.failed"; ($s.failed_calls - $s.likely_harmless); $tags),
+          gauge("tool_errors.likely_harmless"; $s.likely_harmless; $tags),
+          gauge("tool_errors.longest_streak"; $s.longest_failure_streak; $tags),
+          gauge("tool_errors.repeated"; ($s.repeated_failures | length); $tags)
+        else empty end),
+        # Model API retries (harness, not the agent); absent when unavailable.
+        (($m.model_api_retries // {}) as $r | if ($r.available // false) then
+          gauge("model_api.retries"; $r.retries; $tags),
+          gauge("model_api.retry_wait_seconds"; $r.wait_seconds; $tags)
+        else empty end),
         gauge("tokens.input"; ($tok.input // null); $tags),
         gauge("tokens.output"; ($tok.output // null); $tags),
         gauge("tokens.cache_read"; ($tok.cache_read // null); $tags),
-        gauge("tokens.cache_write"; (if ($m.tokens // null) == null then null else $cw end); $tags)
+        gauge("tokens.cache_write"; (if ($m.tokens // null) == null then null else $cw end); $tags),
+        ($k.questions // [] | .[] | gauge("klaren.\(.key)"; .score; $tags)),
+        (if ($k.questions // null) == null then empty
+         else gauge("klaren.undetermined"; ([$k.questions[] | select(.verdict == "undetermined")] | length); $tags) end),
+        ($y.questions // [] | .[] | gauge("yilong.\(.key)"; .score; $tags)),
+        (if ($y.questions // null) == null then empty
+         else gauge("yilong.undetermined"; ([$y.questions[] | select(.verdict == "undetermined")] | length); $tags) end)
       ]}
 ')"
 

@@ -40,6 +40,56 @@ disabling `retries` removes its inspection and retry tools from other groups.
 
 ---
 
+## Configuring GitHub Actions pipelines
+
+`create_pipeline` and `update_pipeline` accept GitHub `provider_settings`
+and `branch_configuration`. Omit provider keys to use API defaults on create
+or leave them unchanged on update. Explicit `false` is preserved. Set
+`filter_condition` or `pull_request_branch_filter_configuration` to `null`
+to clear them; an empty string is sent as an empty string. Set
+`branch_configuration: null` on update to clear an existing branch filter.
+On create, an omitted, null or empty branch filter uses the API's null default.
+Full `get_pipeline` and `list_pipelines` responses preserve the supported
+GitHub settings. go-buildkite response strings do not distinguish null from
+empty, so do not reconstruct partial updates from readback.
+
+Follow the [manual GitHub Actions setup](https://buildkite.com/docs/pipelines/migration/run-github-actions-workflows#add-a-github-actions-workflow-to-a-pipeline-configure-an-equivalent-pipeline-manually).
+Keep branch-wide `skip_queued_branch_builds` and `cancel_running_branch_builds`
+false to avoid skipping or cancelling sibling workflow builds. Use
+`create_webhook: false`: provider settings do not provision a dedicated GitHub
+Actions trigger or its webhook, and the existing webhook tools create
+traditional repository webhooks. Server-side feature availability and token
+permissions still apply; accepting settings does not prove workflow execution.
+
+On create, supply nonblank `configuration` **or** an approved
+`pipeline_template_uuid`, not both. On update, omit `pipeline_template_uuid`
+to retain the assignment, supply a UUID to assign a template without
+`configuration`, or send `null` to remove it. Removal can include replacement
+`configuration`; the API enforces configuration requirements and organization
+template policy. Full pipeline responses retain assigned UUIDs; go-buildkite
+omits the field when the response assignment is null or absent.
+
+Use `get_pipeline_github_webhook_processing`,
+`enable_pipeline_github_webhook_processing`, and
+`disable_pipeline_github_webhook_processing` to inspect or change traditional
+GitHub webhook processing. These use GET/PUT/DELETE `github-webhooks`, not the
+POST `webhook` creation endpoint. They do not delete repository webhooks or
+change dedicated GitHub Actions triggers. Responses preserve `enabled` and
+nullable `disabled_at` and `disabled_by` metadata; `disabled_by` is a user name.
+All three require Full Access, a GitHub or GitHub Enterprise pipeline, and
+organization enrollment in expanded webhook triggers. GET requires
+`read_pipelines`; enable/disable require `write_pipelines` and are excluded in
+read-only mode. A 404 can mean the controls are unavailable, not that the
+pipeline is missing. API errors are returned without treating failure as a
+disabled state.
+
+These contracts are covered with local synthetic HTTP fixtures. Hosted
+availability, permissions, persistence, and workflow execution require separate
+verification; local success is not proof of deployed support. Dedicated GitHub
+Actions trigger management is not included.
+
+---
+
 ## Comparing builds
 
 The read-only `compare_builds` tool in the `investigations` toolset answers questions such as “What changed since this build last worked on main?” Supply `org_slug`, `pipeline_slug`, and the target `build_number`. It selects the most recently created earlier build that is currently passed on the same pipeline and exact branch. It does not require that the baseline had already passed when the target started. Supply `baseline_build_number` to compare against a specific build in that pipeline instead, including a failed build or one on another branch.
@@ -53,6 +103,58 @@ Any change in `soft_failed` is reported as `state_changed`: transitions between 
 By default, up to three newly blocking failures include their last 20 log entries: `newly_failing` jobs first, then `state_changed` jobs that are now hard failures, such as a job that soft-failed in the baseline. Logs are bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison, except HTTP 401 authentication errors, which propagate through the server's reauthentication path. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
 
 Baseline discovery searches at most 500 candidates. If none is found, the response says no comparison was performed and asks for an explicit baseline. Job inventories are limited to 1,000 jobs per build; larger inventories return an error instead of misleading partial added/removed results. Output omissions are reported separately from the complete outcome counts.
+
+---
+
+## Inspecting Test Engine workflows
+
+The read-only `list_test_workflows` and `get_test_workflow` tools in the `tests`
+toolset expose a suite's configured monitors, filters, alarm/recovery actions,
+and links. Both require `read_suites` and suite access. Supply `org_slug` and
+`test_suite_slug` (a slug or UUID) to list workflows:
+
+```json
+{"org_slug": "acme", "test_suite_slug": "backend"}
+```
+
+To inspect one, call `get_test_workflow` with the same organization and suite
+and an item's `id` as `workflow_id`.
+
+Use the configured labels with `list_tests` to find marked tests; labels alone
+do not rank flakiness. Workflows describe configuration, not proof an action
+ran or event history. Both tools always replace webhook endpoints with
+`[REDACTED]`, regardless of the caller's API permissions.
+
+---
+
+## Inspecting Test Engine span aggregates
+
+The read-only `tests` toolset includes four span aggregate tools requiring
+`read_suites`:
+
+- `list_span_aggregate_scopes`: supply `org_slug`, `test_suite_slug`, and an
+  optional `period` to list instrumentation scopes by total duration. OTel
+  trace ingestion must be enabled. Aggregates have hourly precision and
+  one-month retention; the requested period must fit the organization's API
+  history allowance.
+- `list_span_aggregate_scopes_for_build`: supply `org_slug` and `build_uuid`
+  to list instrumentation scopes across the build's visible suites. Requires
+  OTel trace ingestion and access to the build's pipeline.
+- `list_span_aggregate_names`: supply `org_slug`, `test_suite_slug`, and
+  `scope_name` to get span-name statistics for a suite. Supports the same
+  `period` values and retention as `list_span_aggregate_scopes`, plus the
+  `sort` and `limit` options described below. Requires OTel trace ingestion.
+- `list_span_aggregate_names_for_build`: supply `org_slug`, `build_uuid` (not
+  the pipeline build number), and `scope_name` to get span-name statistics
+  across the build's visible suites. Use an empty string for the unnamed
+  scope. Requires access to the build's pipeline. Optional `sort` defaults to
+  `-total`, and `limit` defaults to 20 (maximum 100). Check
+  `span_names_truncated` before treating the result as complete.
+
+Durations are in nanoseconds. Totals sum span durations rather than measuring
+wall-clock time; p50 and p95 values are approximate. No span aggregate tool is
+paginated. Both span-name tools accept an empty `scope_name` for the unnamed
+scope and return `span_names_truncated` when more names exist.
 
 ---
 

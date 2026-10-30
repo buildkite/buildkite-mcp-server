@@ -1,1 +1,3 @@
 /goal make the CI for git branch '{{.SCENARIO_BRANCH}}' (Buildkite org '{{.ORG_SLUG}}', pipeline '{{.PIPELINE_SLUG}}') from red {{.WAIT_STATUS}} to green. Push your fixes to that same branch and confirm its build passes. Do NOT read/reverse-engineer babystand.sh.{{.DEBUG_STRING}}
+
+Do NOT read or use evaluation reference answers under `evals/expected/` or `expected/`, evaluator reviews, or generated candidate reference-answer artifacts to solve this task. This applies to every local checkout (including `/tmp/bk-mcp-src`) and to remote copies accessed through git, URLs, APIs, or other tools. Investigate independently using the target build, its logs, and the relevant application source.

@@ -309,9 +309,15 @@ func ValidateToolsets(names []string) error {
 // The generic parameters In and Out match the typed handler signature.
 func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, Out], []string)) ToolDefinition {
 	tool, handler, scopes := toolFunc()
-	inputSchema, err := jsonschema.For[In](nil)
-	if err != nil {
-		panic(fmt.Sprintf("generate input schema for tool %q: %v", tool.Name, err))
+	var inputSchema *jsonschema.Schema
+	if tool.InputSchema != nil {
+		inputSchema = tool.InputSchema.(*jsonschema.Schema)
+	} else {
+		var err error
+		inputSchema, err = jsonschema.For[In](nil)
+		if err != nil {
+			panic(fmt.Sprintf("generate input schema for tool %q: %v", tool.Name, err))
+		}
 	}
 	telemetrySchema, ok := inputSchema.Properties["telemetry"]
 	if !ok {
@@ -391,6 +397,9 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CreatePipeline),
 				newToolDef(buildkite.CreatePipelineWebhook),
 				newToolDef(buildkite.UpdatePipeline),
+				newToolDef(buildkite.GetPipelineGitHubWebhookProcessing),
+				newToolDef(buildkite.EnablePipelineGitHubWebhookProcessing),
+				newToolDef(buildkite.DisablePipelineGitHubWebhookProcessing),
 				newToolDef(buildkite.ListPipelineSchedules),
 				newToolDef(buildkite.GetPipelineSchedule),
 				newToolDef(buildkite.CreatePipelineSchedule),
@@ -455,8 +464,14 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.GetFailedTestExecutions),
 				newToolDef(buildkite.SlowestExecutionsForBuild),
 				newToolDef(buildkite.ReadExecutionTrace),
+				newToolDef(buildkite.ListSpanAggregateScopes),
+				newToolDef(buildkite.ListSpanAggregateScopesForBuild),
+				newToolDef(buildkite.ListSpanAggregateNames),
+				newToolDef(buildkite.ListSpanAggregateNamesForBuild),
 				newToolDef(buildkite.GetTest),
 				newToolDef(buildkite.ListTestSuitesForPipeline),
+				newToolDef(buildkite.ListTestWorkflows),
+				newToolDef(buildkite.GetTestWorkflow),
 			},
 		},
 		ToolsetLogs: {

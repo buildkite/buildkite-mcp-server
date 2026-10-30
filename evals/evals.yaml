@@ -36,6 +36,13 @@
 #   prompt        Name of a template under prompts/<prompt>.md. Rendered with the
 #                 substitution vars below (Go-style {{.KEY}} placeholders).
 #   scenario:
+#     id          Stable name for the scenario's inputs and expected outcome,
+#                 shared across agent/model variants. References live under
+#                 expected/<prompt>/<scenario.id>/{root_cause,fix}.md. Use a new
+#                 id when changing the target build or expected failure/fix.
+#                 No id means no reference lookup and n/a rubric grades.
+#                 Letters, digits, dot, underscore and hyphen only; excludes
+#                 the path components '.' and '..'.
 #     setup       Optional bash run BEFORE the prompt to establish state (e.g.
 #                 create a branch, push it). It runs inside babystand.sh's clone
 #                 of the EVAL repo (EVAL_REPO_SLUG), under `set -euo pipefail`
@@ -44,6 +51,24 @@
 #                 environment. To pass values on to the prompt, append KEY=VALUE
 #                 lines to the file at $SCENARIO_VARS_FILE.
 #     vars        Static KEY=VALUE map substituted into the prompt template.
+#   evaluator     Optional. How the agent's run is judged afterwards:
+#                 'yilong' — scripts/yilong.sh, in its own pipeline
+#                 step: three cheap Jev (TypeSafe) scored questions, each
+#                 recorded as a verdict (and a mcp_eval.yilong.* Datadog score
+#                 of 0 / 0.5 / 1), or undetermined when the API call fails:
+#                   conclusion     bollocks | sorta | yeah-baby
+#                   investigation  homer-simpson | scooby-doo | sherlock
+#                   fix            airshot | duct-tape | sweeet
+#                 The shared rubric lives in prompts/rubric.json. Jev only
+#                 compares supplied evidence, so references are required in
+#                 expected/<prompt>/<scenario.id>/{root_cause,fix}.md
+#                 (n/a without them). They live outside
+#                 this file so they never reach the agent's container (the
+#                 image copies evals.yaml, not expected/).
+#                 'klaren' (default) — the full klaren session review
+#                 (prompts/klaren.md): detailed, but slower and token-hungry.
+#                 Set EVALUATOR=klaren or EVALUATOR=yilong when creating a build
+#                 to override every entry without editing this file.
 #   kill_agent_on_complete  Optional, cursor-cloud only. Whether to DELETE the
 #                 one-shot cloud agent when the run ends (any outcome — success,
 #                 failure, or abort). Default: true, because the agent is
@@ -64,6 +89,43 @@
 #                 BUILDKITE_API_TOKEN for this entry's run only; entries whose
 #                 named var is unset are skipped loudly. Default: the ambient
 #                 BUILDKITE_API_TOKEN.
+#   mode          Optional. How the agent reaches Buildkite: 'mcp' (default — the
+#                 MCP server under test, see mcp_version; bk is NOT available:
+#                 a stub `bk` first on PATH fails like a missing command) or
+#                 'cli' (the Buildkite CLI, `bk`, and NO MCP server). Either
+#                 way, shell calls that run bk are counted (tool_calls_bk_cli),
+#                 so an mcp run is expected to show 0. In cli mode the agent gets an
+#                 empty MCP config (claude: --strict-mcp-config, so no MCP server
+#                 from the caller's own settings leaks in), bk on PATH, the entry
+#                 token (token_env) as BUILDKITE_API_TOKEN — bk reads it before
+#                 any stored credential — BUILDKITE_ORGANIZATION_SLUG set to the
+#                 entry's org (never the ambient one), BK_TELEMETRY=false, and a
+#                 one-line note appended to the prompt saying bk is there
+#                 (prompts/modes/cli.md; an MCP server announces itself through
+#                 its tool list, a CLI does not). Supported for agents claude and
+#                 cursor; cursor-cloud entries in cli mode are skipped loudly
+#                 (bk is installed on this host, not in Cursor's VM).
+#   mode_params   Optional hash of per-mode settings. Unknown keys skip the entry
+#                 loudly. mode 'mcp' takes none. mode 'cli' takes:
+#                   download_url  https URL of a bk release archive (.tar.gz /
+#                                 .tgz / .zip — the bk binary inside is used)
+#                                 or a bare binary, e.g.
+#                                 https://github.com/buildkite/cli/releases/download/v3.59.1/bk_3.59.1_linux_amd64.tar.gz
+#                                 (CI is linux/amd64; a local macOS run needs a
+#                                 macOS build). Default: the bk pinned in
+#                                 evals/Dockerfile, installed off PATH at
+#                                 /opt/bk/bin/bk; else (local runs) the bk on PATH.
+#                   org_slug      bk's default organization. Default: the
+#                                 token's only organization (GET
+#                                 /v2/organizations). If discovery fails or
+#                                 is ambiguous, CLI setup fails before the
+#                                 scenario runs; set org_slug explicitly.
+#                 Every run records what it used — mode, mode_params, the
+#                 harness (agent CLI) version, and the bk CLI or MCP server
+#                 version — in <run>.run-info.json, in <run>.metrics.json under
+#                 run_info (so in the eval-metrics annotation and comparisons),
+#                 in the eval-metrics / eval-tools annotation titles, and as
+#                 Datadog tags (mode:, harness_version:, bk_cli_version:).
 #   mcp_version   MCP server version this run's agent talks to: a release tag, a
 #                 branch, a commit SHA, or 'source' (the in-image binary built
 #                 from the code under review). NOTE: overrides other than 'source'
@@ -90,6 +152,7 @@ matrix:
   #  model: claude-opus-4-8
   #  prompt: red-to-green-complete
   #  scenario:
+  #    id: test-broken-and-failed-jobs
   #    setup: |
   #      # Establish the red CI signal: branch from the deliberately-broken base
   #      # and push it (the branch push triggers its own Quality Checks build,
@@ -120,6 +183,7 @@ matrix:
   #  model: claude-opus-4-8-thinking-high
   #  prompt: red-to-green-complete
   #  scenario:
+  #    id: test-broken-and-failed-jobs
   #    setup: |
   #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
   #      git fetch
@@ -143,6 +207,7 @@ matrix:
   #  model: composer-2.5
   #  prompt: red-to-green-complete
   #  scenario:
+  #    id: test-broken-and-failed-jobs
   #    setup: |
   #      SCENARIO_BRANCH="mcp-eval-scenario-${ENTRY_ID}-${DATETIME}"
   #      git fetch
@@ -164,13 +229,34 @@ matrix:
   - id: red-to-green-comment-only
     agent: claude
     model: claude-opus-4-8
+    mode: mcp
+    mode_params: {}
     prompt: red-to-green-comment-only
     scenario:
+      id: buildkite-204234
       vars:
         BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
     # The build above lives in the `buildkite` org, not the default eval org.
     token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
     mcp_version: source
+
+  # The same diagnosis driven through the Buildkite CLI (bk) instead of the MCP
+  # server — compare its tool calls / tokens / klaren review against the entry
+  # above. Uncomment to run. Drop download_url to use the bk pinned in
+  # evals/Dockerfile.
+  # - id: red-to-green-comment-only-cli
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   mode: cli
+  #   mode_params:
+  #     download_url: https://github.com/buildkite/cli/releases/download/v3.59.1/bk_3.59.1_linux_amd64.tar.gz
+  #     org_slug: buildkite
+  #   prompt: red-to-green-comment-only
+  #   scenario:
+  #     id: buildkite-204234
+  #     vars:
+  #       BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+  #   token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
 
   # A no-build scenario: analyze an existing build and propose speedups. Produces
   # only a written proposal — no git push, no new Buildkite build — so it is
@@ -182,6 +268,7 @@ matrix:
   #   model: claude-opus-4-8
   #   prompt: analyze-build
   #   scenario:
+  #     id: anothertest-677
   #     vars:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source

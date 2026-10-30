@@ -76,8 +76,8 @@ github.com/bitfield/gotestdox v0.2.2 h1:x6RcPAbBbErKLnapz1QeAlf3ospg8efBsedU93CD
 github.com/bitfield/gotestdox v0.2.2/go.mod h1:D+gwtS0urjBrzguAkTM2wodsTQYFHdpx8eqRJ3N+9pY=
 github.com/buildkite/buildkite-logs v0.13.1 h1:KIdVP0OisatvZ6XA2123r/aQlQcdPMfHPyVzhwAwj1Y=
 github.com/buildkite/buildkite-logs v0.13.1/go.mod h1:lgSJ08tjx8Y63d/WLz5sO8jmobRoNslLkyy2SosDl3U=
-github.com/buildkite/go-buildkite/v5 v5.23.0 h1:R0XhTE8QnEFdnCdnqBUUDGEEc7cqNF5aCHfj0cQnbpI=
-github.com/buildkite/go-buildkite/v5 v5.23.0/go.mod h1:a5uCFNQjMFxT7g4H4NDId+DRkfYBo+CqvryoDZRppPk=
+github.com/buildkite/go-buildkite/v5 v5.29.0 h1:VVfCkBozCAge7gaU9c6jxeP5tE9BE9NvHj0CFxe26r0=
+github.com/buildkite/go-buildkite/v5 v5.29.0/go.mod h1:a5uCFNQjMFxT7g4H4NDId+DRkfYBo+CqvryoDZRppPk=
 github.com/buildkite/roko v1.4.0 h1:DxixoCdpNqxu4/1lXrXbfsKbJSd7r1qoxtef/TT2J80=
 github.com/buildkite/roko v1.4.0/go.mod h1:0vbODqUFEcVf4v2xVXRfZZRsqJVsCCHTG/TBRByGK4E=
 github.com/cenkalti/backoff/v5 v5.0.3 h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=

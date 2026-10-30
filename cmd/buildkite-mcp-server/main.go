@@ -40,6 +40,7 @@ var (
 		HTTPHeaders           []string          `help:"Additional HTTP headers to send with every request. Format: 'Key: Value'" name:"http-header" env:"BUILDKITE_HTTP_HEADERS"`
 		Record                string            `help:"Record API calls to this HAR file path." env:"BUILDKITE_RECORD"`
 		Replay                string            `help:"Replay recorded API calls from this HAR file path." env:"BUILDKITE_REPLAY"`
+		RequestLog            string            `help:"Append one JSON line per Buildkite API request (method, URL, status, duration, and the MCP tool call that made it) to this file. No headers or bodies are logged." env:"BUILDKITE_REQUEST_LOG"`
 		Version               kong.VersionFlag
 	}
 )
@@ -96,6 +97,15 @@ func run(ctx context.Context, cmd *kong.Context) error {
 	innerTransport, err := newAPITransport(passthrough, cli.Record, cli.Replay, version)
 	if err != nil {
 		return err
+	}
+	if cli.RequestLog != "" {
+		// Wrapped inside the tracing transport (below), so each request still
+		// carries the context of the MCP tool call that made it.
+		innerTransport, err = recording.NewRequestLogTransport(innerTransport, cli.RequestLog, cli.BaseURL)
+		if err != nil {
+			return err
+		}
+		log.Info().Str("path", cli.RequestLog).Msg("Logging API requests")
 	}
 
 	httpClient := trace.NewHTTPClientWithHeadersAndTransport(headers, innerTransport)

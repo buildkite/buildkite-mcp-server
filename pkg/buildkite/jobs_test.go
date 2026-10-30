@@ -464,6 +464,47 @@ func TestListJobs(t *testing.T) {
 		}, response.Items[0])
 	})
 
+	t.Run("NamesFromWire", func(t *testing.T) {
+		const payload = `{"items":[
+			{"id":"manual-job","type":"manual","label":"Update branch or run CI anyway","state":"blocked","step_key":"branch-freshness-override","unblockable":true},
+			{"id":"command-job","type":"script","name":"Run tests","label":"Do not replace the name","command":"go test ./...","state":"passed"},
+			{"id":"unnamed-job","state":"waiting"}
+		]}`
+
+		for _, level := range []string{"", "summary", "detailed", "full"} {
+			t.Run("DetailLevel="+level, func(t *testing.T) {
+				var list buildkite.JobsList
+				require.NoError(t, json.Unmarshal([]byte(payload), &list))
+				mockJobs := &MockJobsClient{
+					ListByBuildFunc: func(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+						return list, &buildkite.Response{}, nil
+					},
+				}
+				ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+				_, handler, _ := ListJobs()
+				result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListJobsArgs{
+					OrgSlug: "test-org", PipelineSlug: "test-pipeline", BuildNumber: "123", DetailLevel: level,
+				})
+				require.NoError(t, err)
+
+				var jobs buildkite.JobsList
+				require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &jobs))
+				require.Len(t, jobs.Items, 3)
+				if level == "full" {
+					assert.Empty(t, jobs.Items[0].Name)
+					assert.Equal(t, "Update branch or run CI anyway", jobs.Items[0].Label)
+				} else {
+					assert.Equal(t, "Update branch or run CI anyway", jobs.Items[0].Name)
+				}
+				assert.Equal(t, "blocked", jobs.Items[0].State)
+				assert.Equal(t, "branch-freshness-override", jobs.Items[0].StepKey)
+				assert.Equal(t, "Run tests", jobs.Items[1].Name)
+				assert.Equal(t, "go test ./...", jobs.Items[1].Command)
+				assert.Empty(t, jobs.Items[2].Name)
+			})
+		}
+	})
+
 	t.Run("SummaryIncludesBrokenReasonForBrokenJobs", func(t *testing.T) {
 		mockJobs := &MockJobsClient{
 			ListByBuildFunc: func(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
