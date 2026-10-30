@@ -240,6 +240,31 @@ matrix:
     token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
     mcp_version: source
 
+  # Independent starting points for OTel performance investigations. Keep tool
+  # names and investigation steps out of the prompts to measure discovery.
+  # Refresh the build target before its span aggregates expire (one month).
+  - id: analyze-test-spans-for-build
+    agent: claude
+    model: claude-opus-4-8
+    prompt: analyze-test-spans-for-build
+    scenario:
+      id: buildkite-241398
+      vars:
+        BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/241398
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
+
+  - id: analyze-test-spans-for-suite
+    agent: claude
+    model: claude-opus-4-8
+    prompt: analyze-test-spans-for-suite
+    scenario:
+      id: buildkite-rspec
+      vars:
+        SUITE_URL: https://buildkite.com/organizations/buildkite/analytics/suites/buildkite-rspec
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
+
   # The same diagnosis driven through the Buildkite CLI (bk) instead of the MCP
   # server — compare its tool calls / tokens / klaren review against the entry
   # above. Uncomment to run. Drop download_url to use the bk pinned in

@@ -209,6 +209,35 @@ three categories with the level markers above. Yilong publishes matching
 Run the focused checks with
 `python3 -B -m unittest discover -s evals/scripts -p 'test_*.py' -v`.
 
+## OTel performance scenarios
+
+Two independent, read-only MCP scenarios exercise span aggregate discovery:
+
+* `analyze-test-spans-for-build`: "Where are the tests in this build spending
+  their time?" Starts from a build URL, requiring the agent to resolve its UUID.
+* `analyze-test-spans-for-suite`: "What should we investigate first to speed up
+  this test suite?" Starts from a suite URL and leaves the period choice to the
+  agent, including the API default.
+
+Review the captured results, not just which tools were called. A useful answer
+identifies expensive instrumentation scopes and operations, supports its
+conclusions with counts and durations, and distinguishes repeated cheap work
+from individually slow operations. It must not equate summed span duration
+with build wall-clock time, double-count nested spans as independent savings,
+or treat a truncated span-name list as complete. Do not require an exact tool
+sequence or claim a caller-level root cause without further evidence.
+
+Both entries use the existing `buildkite` org token. These are live-data
+scenarios, not replay fixtures: the suite's results change over time, and the
+pinned build's span aggregates expire after one month. Refresh the build URL
+and scenario ID before then. Confirm nonempty aggregate responses when choosing
+a replacement; having test results alone does not establish span availability.
+
+No reference answers are installed yet. Until a human verifies the first run's
+evidence and approves reference answers, Klaren still reports tool usage and
+struggles, but rubric grades are **n/a**, not a pass. Do not reuse a fixed suite
+ranking as an answer key for a later, different live-data window.
+
 ## Modes: MCP server or Buildkite CLI
 
 Each entry also picks HOW its agent reaches Buildkite (`mode:`, default `mcp`), with per-mode settings in `mode_params:` (a hash; unknown keys skip the entry loudly). Full field docs are at the top of `evals.yaml`.
