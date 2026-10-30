@@ -127,6 +127,37 @@ ran or event history. Both tools always replace webhook endpoints with
 
 ---
 
+## Inspecting Test Engine span aggregates
+
+The read-only `tests` toolset includes four span aggregate tools requiring
+`read_suites`:
+
+- `list_span_aggregate_scopes`: supply `org_slug`, `test_suite_slug`, and an
+  optional `period` to list instrumentation scopes by total duration. OTel
+  trace ingestion must be enabled. Aggregates have hourly precision and
+  one-month retention; the requested period must fit the organization's API
+  history allowance.
+- `list_span_aggregate_scopes_for_build`: supply `org_slug` and `build_uuid`
+  to list instrumentation scopes across the build's visible suites. Requires
+  OTel trace ingestion and access to the build's pipeline.
+- `list_span_aggregate_names`: supply `org_slug`, `test_suite_slug`, and
+  `scope_name` to get span-name statistics for a suite. Supports the same
+  `period` values and retention as `list_span_aggregate_scopes`, plus the
+  `sort` and `limit` options described below. Requires OTel trace ingestion.
+- `list_span_aggregate_names_for_build`: supply `org_slug`, `build_uuid` (not
+  the pipeline build number), and `scope_name` to get span-name statistics
+  across the build's visible suites. Use an empty string for the unnamed
+  scope. Requires access to the build's pipeline. Optional `sort` defaults to
+  `-total`, and `limit` defaults to 20 (maximum 100). Check
+  `span_names_truncated` before treating the result as complete.
+
+Durations are in nanoseconds. Totals sum span durations rather than measuring
+wall-clock time; p50 and p95 values are approximate. No span aggregate tool is
+paginated. Both span-name tools accept an empty `scope_name` for the unnamed
+scope and return `span_names_truncated` when more names exist.
+
+---
+
 ## Library Usage
 
 The exported Go API of this module should be considered unstable, and subject to breaking changes as we evolve this project.

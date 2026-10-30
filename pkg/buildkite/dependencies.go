@@ -35,6 +35,7 @@ type ToolDependencies struct {
 	TestExecutionsClient        TestExecutionsClient
 	ExecutionTraceClient        ExecutionTraceClient
 	SlowestExecutionsClient     SlowestExecutionsClient
+	SpanAggregatesClient        SpanAggregatesClient
 	TestsClient                 TestsClient
 	BuildTestsClient            BuildTestsClient
 	BuildkiteLogsClient         BuildkiteLogsClient

@@ -749,7 +749,11 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Contains(toolNames, "list_test_suites_for_pipeline")
 	assert.Contains(toolNames, "slowest_executions_for_build")
 	assert.Contains(toolNames, "read_execution_trace")
-	for _, name := range []string{"list_test_workflows", "get_test_workflow"} {
+	for _, name := range []string{
+		"list_test_workflows", "get_test_workflow",
+		"list_span_aggregate_scopes", "list_span_aggregate_scopes_for_build",
+		"list_span_aggregate_names", "list_span_aggregate_names_for_build",
+	} {
 		assert.Contains(toolNames, name)
 		var enabled bool
 		for _, tool := range registry.GetEnabledTools([]string{ToolsetTests}, true) {

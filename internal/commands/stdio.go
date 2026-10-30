@@ -44,6 +44,7 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 		TestExecutionsClient:        globals.Client.TestRuns,
 		ExecutionTraceClient:        globals.Client.Executions,
 		SlowestExecutionsClient:     globals.Client.Executions,
+		SpanAggregatesClient:        globals.Client.SpanAggregates,
 		TestsClient:                 globals.Client.Tests,
 		BuildTestsClient:            globals.Client.BuildTests,
 		BuildkiteLogsClient:         globals.BuildkiteLogsClient,

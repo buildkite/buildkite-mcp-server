@@ -83,6 +83,30 @@ func TestReadExecutionTraceArgsSchema(t *testing.T) {
 	require.NotContains(t, s.Properties, "view")
 }
 
+func TestSpanAggregateArgsSchema(t *testing.T) {
+	scopes := schemaFor[ListSpanAggregateScopesArgs](t)
+	require.Equal(t, []string{"org_slug", "test_suite_slug"}, sortedToolRequired(t, scopes))
+	require.Contains(t, scopes.Properties["period"].Description, "1hour")
+
+	buildScopes := schemaFor[ListSpanAggregateScopesForBuildArgs](t)
+	require.Equal(t, []string{"build_uuid", "org_slug"}, sortedToolRequired(t, buildScopes))
+	require.Contains(t, buildScopes.Properties["build_uuid"].Description, "not the pipeline build number")
+
+	suiteNames := schemaFor[ListSpanAggregateNamesArgs](t)
+	require.Equal(t, []string{"org_slug", "scope_name", "test_suite_slug"}, sortedToolRequired(t, suiteNames))
+	require.Contains(t, suiteNames.Properties["scope_name"].Description, "empty string")
+	require.Contains(t, suiteNames.Properties["period"].Description, "1hour")
+	require.Contains(t, suiteNames.Properties["sort"].Description, "'-total'")
+	require.Contains(t, suiteNames.Properties["limit"].Description, "1-100")
+
+	names := schemaFor[ListSpanAggregateNamesForBuildArgs](t)
+	require.Equal(t, []string{"build_uuid", "org_slug", "scope_name"}, sortedToolRequired(t, names))
+	require.Contains(t, names.Properties["build_uuid"].Description, "not the pipeline build number")
+	require.Contains(t, names.Properties["scope_name"].Description, "empty string")
+	require.Contains(t, names.Properties["sort"].Description, "'-total'")
+	require.Contains(t, names.Properties["limit"].Description, "1-100")
+}
+
 func TestSlowestExecutionsForBuildArgsSchema(t *testing.T) {
 	s := schemaFor[SlowestExecutionsForBuildArgs](t)
 	require.Equal(t, []string{"build_uuid", "org_slug"}, sortedToolRequired(t, s))

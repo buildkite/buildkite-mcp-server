@@ -71,7 +71,7 @@ func SlowestExecutionsForBuild() (mcp.Tool, mcp.ToolHandlerFor[SlowestExecutions
 func ReadExecutionTrace() (mcp.Tool, mcp.ToolHandlerFor[ReadExecutionTraceArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "read_execution_trace",
-			Description: "Read an OpenTelemetry trace summary for a Buildkite Test Engine execution, including category rollups and slowest spans",
+			Description: "Read an OpenTelemetry trace summary for a Buildkite Test Engine execution, including category rollups and slowest spans. For build- or suite-wide bottlenecks, use span aggregates first.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Read Execution Trace",
 				ReadOnlyHint: true,
