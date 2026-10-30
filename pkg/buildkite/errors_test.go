@@ -63,9 +63,12 @@ func TestHandleBuildkiteError_RateLimited(t *testing.T) {
 	}{
 		// When the per-user limit is exceeded, RateLimit-Reset still reports
 		// the organization's window, so the API's message must win.
-		"UserLimitMessage": {http.Header{"Ratelimit-Reset": []string{"35"}, "Ratelimit-User-Reset": []string{"60"}}, userLimit, "Please wait 60 seconds"},
-		"NoMessageReset":   {http.Header{"Ratelimit-Reset": []string{"42"}}, "", "The limit resets in 42 seconds"},
-		"NoMessageNoReset": {http.Header{}, "", "Retry in a minute"},
+		"UserLimitMessage":         {http.Header{"Ratelimit-Reset": []string{"35"}, "Ratelimit-User-Reset": []string{"60"}}, userLimit, "Please wait 60 seconds"},
+		"NoMessageReset":           {http.Header{"Ratelimit-Reset": []string{"42"}}, "", "The limit resets in 42 seconds"},
+		"NoMessageUserResetLonger": {http.Header{"Ratelimit-Reset": []string{"3"}, "Ratelimit-User-Reset": []string{"60"}}, "", "The limit resets in 60 seconds"},
+		"NoMessageOrgResetLonger":  {http.Header{"Ratelimit-Reset": []string{"42"}, "Ratelimit-User-Reset": []string{"3"}}, "", "The limit resets in 42 seconds"},
+		"NoMessageInvalidOrgReset": {http.Header{"Ratelimit-Reset": []string{"invalid"}, "Ratelimit-User-Reset": []string{"60"}}, "", "The limit resets in 60 seconds"},
+		"NoMessageNoReset":         {http.Header{}, "", "Retry in a minute"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			errResp := &buildkite.ErrorResponse{
