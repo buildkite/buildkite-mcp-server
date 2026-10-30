@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
-// SanitizeJSONBytes unmarshals JSON data, recursively applies Sanitize() to all
-// string values, and re-marshals the result. JSON keys are not sanitized as they
-// are structural. Numbers, booleans, and nulls pass through unchanged.
-func SanitizeJSONBytes(data []byte) ([]byte, error) {
+// SanitizeJSONBytes sanitizes JSON string values and re-marshals the result.
+// Named plainTextFields use SanitizePlainText to preserve unrendered content;
+// other strings use Sanitize. Keys, numbers, booleans, and nulls pass through unchanged.
+func SanitizeJSONBytes(data []byte, plainTextFields ...string) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 
@@ -18,7 +19,7 @@ func SanitizeJSONBytes(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to decode JSON for sanitization: %w", err)
 	}
 
-	sanitized := sanitizeValue(raw)
+	sanitized := sanitizeValue(raw, plainTextFields)
 
 	result, err := json.Marshal(sanitized)
 	if err != nil {
@@ -28,19 +29,23 @@ func SanitizeJSONBytes(data []byte) ([]byte, error) {
 	return result, nil
 }
 
-// sanitizeValue recursively walks a JSON value and applies Sanitize() to strings.
-func sanitizeValue(v any) any {
+// sanitizeValue recursively walks and sanitizes a JSON value.
+func sanitizeValue(v any, plainTextFields []string) any {
 	switch val := v.(type) {
 	case string:
 		return Sanitize(val)
 	case map[string]any:
 		for k, v := range val {
-			val[k] = sanitizeValue(v)
+			if text, ok := v.(string); ok && slices.Contains(plainTextFields, k) {
+				val[k] = SanitizePlainText(text)
+				continue
+			}
+			val[k] = sanitizeValue(v, plainTextFields)
 		}
 		return val
 	case []any:
 		for i, v := range val {
-			val[i] = sanitizeValue(v)
+			val[i] = sanitizeValue(v, plainTextFields)
 		}
 		return val
 	default:

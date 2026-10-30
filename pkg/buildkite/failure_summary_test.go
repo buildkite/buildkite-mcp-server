@@ -32,6 +32,7 @@ func TestGetBuildFailureSummaryToolDefinition(t *testing.T) {
 }
 
 func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
+	const rawBody = "**error**: expected `<ok>` & got `bad`\n[report](artifact://reports/結果.html)"
 	failedLog := t.TempDir() + "/failed.parquet"
 	promisedLog := t.TempDir() + "/promised.parquet"
 	writeTestParquetFile(t, failedLog, []string{"setup", "compile error", "build failed"})
@@ -103,7 +104,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 				return []buildkite.Annotation{{ID: "annotation-success", Context: "coverage", Style: "success", Body: "coverage passed"}}, &buildkite.Response{NextPage: 2}, nil
 			case 2:
 				return []buildkite.Annotation{
-					{ID: "annotation-error", Context: "tests", Style: "error", Body: "<p>2 tests failed</p>"},
+					{ID: "annotation-error", Context: "tests", Style: "error", Body: rawBody},
 					{ID: "annotation-warning", Context: "lint", Style: "warning", JobID: "job-failed", Body: "lint warning"},
 				}, &buildkite.Response{}, nil
 			default:
@@ -183,7 +184,7 @@ func TestGetBuildFailureSummaryAggregatesDiagnostics(t *testing.T) {
 	require.Len(t, summary.Annotations, 2)
 	require.False(t, summary.AnnotationsTruncated)
 	require.Equal(t, "annotation-error", summary.Annotations[0].ID)
-	require.Equal(t, "<p>2 tests failed</p>", summary.Annotations[0].Body)
+	require.Equal(t, rawBody, summary.Annotations[0].Body)
 	require.NotContains(t, getTextResult(t, callResult).Text, "coverage passed")
 
 	logCallsMu.Lock()

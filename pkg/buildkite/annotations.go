@@ -36,7 +36,7 @@ type ListAnnotationsArgs struct {
 	JobID        string `json:"job_id,omitempty" jsonschema:"Job ID required when scope is job"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
-	BodyFormat   string `json:"body_format,omitempty" jsonschema:"'raw' (default) returns the body as submitted in body; 'html' returns the rendered HTML in body_html instead"`
+	BodyFormat   string `json:"body_format,omitempty" jsonschema:"'raw' (default) returns unrendered content in body; 'html' returns rendered HTML in body_html instead"`
 }
 
 type CreateAnnotationArgs struct {
@@ -82,7 +82,7 @@ func normalizeAnnotationBodyFormat(format string) (string, error) {
 func ListAnnotations() (mcp.Tool, mcp.ToolHandlerFor[ListAnnotationsArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "list_annotations",
-		Description: "List annotations for a build or a specific job. Use scope='build' (default) or scope='job' with job_id. By default each annotation's content is in the body field exactly as submitted (Markdown or HTML, unrendered); artifact:// references in it name artifacts of this build, which you can fetch with list_artifacts_for_build and get_artifact. Set body_format='html' to get the rendered HTML in body_html instead",
+		Description: "List annotations for a build or a specific job. Use scope='build' (default) or scope='job' with job_id. By default each annotation's unrendered content is in body (Markdown or HTML; safety filtering still applies); artifact:// references in it name artifacts of this build, which you can fetch with list_artifacts_for_build and get_artifact. Set body_format='html' to get the rendered HTML in body_html instead",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "List Annotations",
 			ReadOnlyHint: true,

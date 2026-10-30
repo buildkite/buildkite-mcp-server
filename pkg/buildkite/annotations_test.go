@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -48,12 +49,13 @@ var _ AnnotationsClient = (*MockAnnotationsClient)(nil)
 
 func TestListAnnotations(t *testing.T) {
 	assert := require.New(t)
+	const rawBody = "**error**: expected `<ok>` & got `bad`\n[report](artifact://reports/結果.html)"
 
 	client := &MockAnnotationsClient{
 		ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
 			assert.Equal("raw", opts.BodyFormat)
 			return []buildkite.Annotation{
-				{ID: "1", Body: "Test annotation 1"},
+				{ID: "1", Body: rawBody},
 				{ID: "2", Body: "![chart](artifact://chart.png)"},
 			}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
 		},
@@ -73,7 +75,13 @@ func TestListAnnotations(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"1","body":"Test annotation 1"},{"id":"2","body":"![chart](artifact://chart.png)"}]}`, textContent.Text)
+	var payload PaginatedResult[buildkite.Annotation]
+	assert.NoError(json.Unmarshal([]byte(textContent.Text), &payload))
+	assert.Equal(map[string]string{"Link": ""}, payload.Headers)
+	assert.Equal([]buildkite.Annotation{
+		{ID: "1", Body: rawBody},
+		{ID: "2", Body: "![chart](artifact://chart.png)"},
+	}, payload.Items)
 }
 
 func TestListAnnotationsHTMLBodyFormat(t *testing.T) {

@@ -177,7 +177,11 @@ func TestGetBuild(t *testing.T) {
 
 		buildsClient := &MockBuildsClient{
 			GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-				return buildkite.Build{ID: "123", Number: 1}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+				return buildkite.Build{
+					ID:       "123",
+					Number:   1,
+					MetaData: map[string]string{"body": "<script>evil()</script>metadata"},
+				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
 			},
 		}
 		annotationsClient := &MockAnnotationsClient{
@@ -196,6 +200,7 @@ func TestGetBuild(t *testing.T) {
 		})
 		assert.NoError(err)
 		requireJSONPathEqual(t, getTextResult(t, result).Text, []any{}, "annotations")
+		requireJSONPathEqual(t, getTextResult(t, result).Text, "metadata", "meta_data", "body")
 		assert.NotContains(getTextResult(t, result).Text, `"annotations_truncated"`)
 	})
 
