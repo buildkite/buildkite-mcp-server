@@ -54,6 +54,41 @@ func TestHandleBuildkiteError_WithRawBody(t *testing.T) {
 	require.JSONEq(t, `{"message":"validation failed"}`, textContent.Text)
 }
 
+func TestHandleBuildkiteError_RateLimited(t *testing.T) {
+	userLimit := "You have exceeded your rest_user API rate limit. Please wait 60 seconds before making more requests."
+	for name, tc := range map[string]struct {
+		header  http.Header
+		message string
+		want    string
+	}{
+		// When the per-user limit is exceeded, RateLimit-Reset still reports
+		// the organization's window, so the API's message must win.
+		"UserLimitMessage":         {http.Header{"Ratelimit-Reset": []string{"35"}, "Ratelimit-User-Reset": []string{"60"}}, userLimit, "Please wait 60 seconds"},
+		"NoMessageReset":           {http.Header{"Ratelimit-Reset": []string{"42"}}, "", "The limit resets in 42 seconds"},
+		"NoMessageUserResetLonger": {http.Header{"Ratelimit-Reset": []string{"3"}, "Ratelimit-User-Reset": []string{"60"}}, "", "The limit resets in 60 seconds"},
+		"NoMessageOrgResetLonger":  {http.Header{"Ratelimit-Reset": []string{"42"}, "Ratelimit-User-Reset": []string{"3"}}, "", "The limit resets in 42 seconds"},
+		"NoMessageInvalidOrgReset": {http.Header{"Ratelimit-Reset": []string{"invalid"}, "Ratelimit-User-Reset": []string{"60"}}, "", "The limit resets in 60 seconds"},
+		"NoMessageNoReset":         {http.Header{}, "", "Retry in a minute"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			errResp := &buildkite.ErrorResponse{
+				Response: &http.Response{StatusCode: http.StatusTooManyRequests, Header: tc.header},
+				Message:  tc.message,
+			}
+
+			result, _, err := handleBuildkiteError(fmt.Errorf("failed to fetch logs from API: %w", errResp))
+
+			require.NoError(t, err)
+			require.True(t, result.IsError)
+			text := getTextResult(t, result).Text
+			require.Contains(t, text, "Buildkite API rate limit exceeded (HTTP 429)")
+			require.Contains(t, text, tc.want)
+			require.Contains(t, text, "If available, use get_rate_limit with the affected org_slug")
+			require.NotContains(t, text, "35 seconds")
+		})
+	}
+}
+
 func TestHandleBuildkiteError_GenericError(t *testing.T) {
 	genericErr := fmt.Errorf("connection refused")
 
