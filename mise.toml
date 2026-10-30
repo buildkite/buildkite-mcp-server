@@ -7,11 +7,11 @@ github.slsa = false
 
 [tools]
 go = "1.27.3"
-golangci-lint = "2.14.0"
-goreleaser = "2.18.3"
+golangci-lint = "2.15.0"
+goreleaser = "2.19.0"
 ko = "0.19.1"
-lefthook = "2.2.1"
-node = "24.21.0"
+lefthook = "2.2.2"
+node = "24.22.2"
 
 [tasks.setup]
 description = "Install repository dependencies and Git hooks"
