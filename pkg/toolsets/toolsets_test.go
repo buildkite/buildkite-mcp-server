@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -704,6 +705,20 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
 	}
+
+	user, exists := registry.Get(ToolsetUser)
+	assert.True(exists)
+	foundRateLimit := false
+	for _, tool := range user.Tools {
+		if tool.Tool.Name == "get_rate_limit" {
+			foundRateLimit = true
+			assert.Equal([]string{"read_organizations"}, tool.RequiredScopes)
+			assert.True(tool.IsReadOnly())
+			assert.False(tool.IsMinimumAccess())
+			assert.Equal([]string{"org_slug"}, tool.Tool.InputSchema.(*jsonschema.Schema).Required)
+		}
+	}
+	assert.True(foundRateLimit, "get_rate_limit should be available in the user toolset")
 
 	investigations, exists := registry.Get(ToolsetInvestigations)
 	assert.True(exists)

@@ -490,6 +490,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.CurrentUser),
 				newToolDef(buildkite.UserTokenOrganization),
+				newToolDef(buildkite.GetRateLimit),
 				newToolDef(buildkite.AccessToken),
 			},
 		},
