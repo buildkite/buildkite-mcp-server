@@ -51,7 +51,7 @@ type ListSpanAggregateNamesForBuildArgs struct {
 func ListSpanAggregateScopes() (mcp.Tool, mcp.ToolHandlerFor[ListSpanAggregateScopesArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_span_aggregate_scopes",
-			Description: "List OpenTelemetry instrumentation scopes for a Test Engine suite, ordered by total span duration descending. Returns span counts and summed durations in nanoseconds, not wall-clock time. Aggregates have hourly precision and one-month retention. Requires OTel trace ingestion to be enabled. Results are not paginated.",
+			Description: "List OpenTelemetry instrumentation scopes for a Test Engine suite, ordered by total span duration descending. Start here for suite-wide bottlenecks; drill down with list_span_aggregate_names. Returns span counts and summed durations in nanoseconds, not wall-clock time. Durations are inclusive; nested spans overlap, so do not add their durations together. Aggregates have hourly precision and one-month retention. Requires OTel trace ingestion to be enabled. Results are not paginated.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Span Aggregate Scopes",
 				ReadOnlyHint: true,
@@ -83,7 +83,7 @@ func ListSpanAggregateScopes() (mcp.Tool, mcp.ToolHandlerFor[ListSpanAggregateSc
 func ListSpanAggregateScopesForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListSpanAggregateScopesForBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_span_aggregate_scopes_for_build",
-			Description: "List OpenTelemetry instrumentation scopes across a build's visible Test Engine suites, ordered by total span duration descending. Returns span counts and summed durations in nanoseconds, not wall-clock time. Requires OTel trace ingestion to be enabled and access to the build's pipeline. Results are not paginated.",
+			Description: "List OpenTelemetry instrumentation scopes across a build's visible Test Engine suites, ordered by total span duration descending. Start here for build-wide bottlenecks; drill down with list_span_aggregate_names_for_build. Returns span counts and summed durations in nanoseconds, not wall-clock time. Durations are inclusive; nested spans overlap, so do not add their durations together. Requires OTel trace ingestion to be enabled and access to the build's pipeline. Results are not paginated.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Span Aggregate Scopes for Build",
 				ReadOnlyHint: true,
@@ -112,7 +112,7 @@ func ListSpanAggregateScopesForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListSpanAgg
 func ListSpanAggregateNames() (mcp.Tool, mcp.ToolHandlerFor[ListSpanAggregateNamesArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_span_aggregate_names",
-			Description: "List top span-name statistics for an OpenTelemetry instrumentation scope in a Test Engine suite. Returns counts, summed durations, averages, approximate p50/p95 percentiles, maximum durations, and a truncation indicator. All durations are in nanoseconds. Aggregates have hourly precision and one-month retention. Requires OTel trace ingestion to be enabled. An unknown scope returns an empty list; results are not paginated.",
+			Description: "List top span-name statistics for an OpenTelemetry instrumentation scope in a Test Engine suite. Returns counts, summed durations, averages, approximate p50/p95 percentiles, maximum durations, and a truncation indicator. All durations are in nanoseconds. Durations are inclusive; nested spans overlap, so do not add their durations together. Aggregates have hourly precision and one-month retention. Requires OTel trace ingestion to be enabled. An unknown scope returns an empty list; results are not paginated.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Span Aggregate Names",
 				ReadOnlyHint: true,
@@ -151,7 +151,7 @@ func ListSpanAggregateNames() (mcp.Tool, mcp.ToolHandlerFor[ListSpanAggregateNam
 func ListSpanAggregateNamesForBuild() (mcp.Tool, mcp.ToolHandlerFor[ListSpanAggregateNamesForBuildArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_span_aggregate_names_for_build",
-			Description: "List top span-name statistics for an OpenTelemetry instrumentation scope across a build's visible Test Engine suites. Returns counts, summed durations, averages, approximate p50/p95 percentiles, maximum durations, and a truncation indicator. All durations are in nanoseconds. Requires access to the build's pipeline. An unknown scope returns an empty list; results are not paginated.",
+			Description: "List top span-name statistics for an OpenTelemetry instrumentation scope across a build's visible Test Engine suites. Returns counts, summed durations, averages, approximate p50/p95 percentiles, maximum durations, and a truncation indicator. All durations are in nanoseconds. Durations are inclusive; nested spans overlap, so do not add their durations together. Requires access to the build's pipeline. An unknown scope returns an empty list; results are not paginated.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Span Aggregate Names for Build",
 				ReadOnlyHint: true,
