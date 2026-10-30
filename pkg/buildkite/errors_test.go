@@ -80,6 +80,7 @@ func TestHandleBuildkiteError_RateLimited(t *testing.T) {
 			text := getTextResult(t, result).Text
 			require.Contains(t, text, "Buildkite API rate limit exceeded (HTTP 429)")
 			require.Contains(t, text, tc.want)
+			require.Contains(t, text, "If available, use get_rate_limit with the affected org_slug")
 			require.NotContains(t, text, "35 seconds")
 		})
 	}

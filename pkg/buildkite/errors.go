@@ -73,5 +73,6 @@ func rateLimitedMessage(errResp *buildkite.ErrorResponse) string {
 		detail = fmt.Sprintf("The limit resets in %d seconds.", secs)
 	}
 	return "Buildkite API rate limit exceeded (HTTP 429). " + detail +
+		" If available, use get_rate_limit with the affected org_slug to inspect quota without consuming it." +
 		" To stay under the limit, make fewer, broader calls, such as filtered list calls with a larger per_page, rather than one call per build or job."
 }
