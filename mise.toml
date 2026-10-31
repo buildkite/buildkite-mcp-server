@@ -11,7 +11,7 @@ golangci-lint = "2.14.0"
 goreleaser = "2.18.3"
 ko = "0.19.1"
 lefthook = "2.2.1"
-node = "24.21.0"
+node = "26.13.0"
 
 [tasks.setup]
 description = "Install repository dependencies and Git hooks"
