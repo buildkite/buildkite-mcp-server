@@ -145,6 +145,11 @@ var instructionSections = []instructionSection{
 	},
 	{
 		toolsets: []string{toolsets.ToolsetBuilds, toolsets.ToolsetRetries},
+		tools:    []string{"get_job_concurrency"},
+		text:     "Job concurrency: use get_job_concurrency for a job's concurrency group, target limit, stored state, and up to 30 visible active jobs ahead of a limited target. Non-limited targets retain configuration but return empty items. Submission order is not execution order; this is not a complete blocker list and empty items do not establish no blockers. Do not infer queue position, free capacity, or a scheduling cause. current_state_since may be populated only on the first item.",
+	},
+	{
+		toolsets: []string{toolsets.ToolsetBuilds, toolsets.ToolsetRetries},
 		tools:    []string{"list_builds"},
 		text:     "Build selection after a push: resolve the pushed commit's full SHA and call list_builds with pipeline_slug and commit. Do not assume the newest build on the branch is for that push. Webhook-created builds may not appear immediately; if no exact commit match is returned, retry before concluding no build exists. Once found, use its build number with wait_for_build.",
 	},

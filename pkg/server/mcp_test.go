@@ -50,13 +50,13 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		{
 			name:    "builds alone",
 			enabled: []string{"builds"},
-			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads),
+			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, "Job concurrency:", "empty items do not establish no blockers"),
 			notWant: []string{startHere, skillDiscovery, failureSummary, logInvestigation, annotationScope},
 		},
 		{
 			name:    "retries alone",
 			enabled: []string{"retries"},
-			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, logInvestigation),
+			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, logInvestigation, "Job concurrency:"),
 			notWant: []string{startHere, skillDiscovery, failureSummary, dynamicUploads, annotationScope},
 		},
 		{
@@ -82,7 +82,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 			name:    "investigations alone",
 			enabled: []string{"investigations"},
 			want:    append(append([]string{}, always...), failureSummary, softFailures),
-			notWant: []string{startHere, skillDiscovery, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope},
+			notWant: []string{startHere, skillDiscovery, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope, "Job concurrency:"},
 		},
 		{
 			name:     "annotations toolset, read-only, omits annotation scope",
@@ -109,7 +109,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 }
 
 func TestRetryToolsetRegistration(t *testing.T) {
-	inspection := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job"}
+	inspection := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job", "get_job_concurrency"}
 	logs := []string{"search_logs", "tail_logs", "read_logs"}
 	readTools := append(append([]string{}, inspection...), logs...)
 	for _, tt := range []struct {
@@ -162,7 +162,7 @@ func TestToolsetOverlapWarning(t *testing.T) {
 	}{
 		{name: "shared tools excluded", enabled: []string{"retries"}, disabled: []string{"logs"}, removed: []string{"read_logs", "search_logs", "tail_logs"}},
 		{name: "all toolsets", enabled: []string{"all"}, disabled: []string{"logs"}, removed: []string{"read_logs", "search_logs", "tail_logs"}},
-		{name: "read-only", enabled: []string{"logs", "builds"}, disabled: []string{"retries"}, readOnly: true, removed: []string{"get_build", "get_job", "list_builds", "list_jobs", "read_logs", "search_logs", "tail_logs", "wait_for_build"}},
+		{name: "read-only", enabled: []string{"logs", "builds"}, disabled: []string{"retries"}, readOnly: true, removed: []string{"get_build", "get_job", "get_job_concurrency", "list_builds", "list_jobs", "read_logs", "search_logs", "tail_logs", "wait_for_build"}},
 		{name: "duplicate selections", enabled: []string{"retries", "retries", "logs"}, disabled: []string{"logs", "logs"}, removed: []string{"read_logs", "search_logs", "tail_logs"}},
 		{name: "HTTP override", enabled: []string{"user"}, disabled: []string{"logs"}, header: "retries,logs", removed: []string{"read_logs", "search_logs", "tail_logs"}},
 		{name: "minimum access and disabled logs", enabled: []string{"retries"}, disabled: []string{"logs"}, readOnly: true, minimum: true, removed: []string{"read_logs", "search_logs", "tail_logs"}},
@@ -185,7 +185,7 @@ func TestToolsetOverlapWarning(t *testing.T) {
 			} else {
 				srv := NewMCPServer("test", buildkite.ToolDependencies{}, WithToolsets(tt.enabled...), WithDisabledToolsets(tt.disabled...), WithReadOnly(tt.readOnly), WithMinimumAccess(tt.minimum))
 				if tt.minimum {
-					require.ElementsMatch(t, []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job"}, listToolNames(t, srv))
+					require.ElementsMatch(t, []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job", "get_job_concurrency"}, listToolNames(t, srv))
 				}
 			}
 
@@ -256,7 +256,7 @@ func TestMinimumAccessWarning(t *testing.T) {
 }
 
 func TestMinimumAccessRegistration(t *testing.T) {
-	inspection := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job"}
+	inspection := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job", "get_job_concurrency"}
 	all := append(append([]string{}, inspection...),
 		"get_build_test_engine_runs", "list_step_uploads", "get_step_upload",
 		"get_pipeline", "list_pipelines", "validate_pipeline", "list_pipeline_schedules", "get_pipeline_schedule", "get_pipeline_github_webhook_processing",

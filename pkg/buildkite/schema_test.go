@@ -461,6 +461,12 @@ func TestCancelJobArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"job_id", "org_slug"}, sortedRequired[CancelJobArgs](t))
 }
 
+func TestGetJobConcurrencyArgsSchema(t *testing.T) {
+	s := schemaFor[GetJobConcurrencyArgs](t)
+	require.Equal(t, []string{"job_id", "org_slug"}, sortedToolRequired(t, s))
+	require.Len(t, s.Properties, 3, "only org, job UUID and optional telemetry; no pagination or group membership controls")
+}
+
 func TestListJobsArgsSchemaOptionalFields(t *testing.T) {
 	s := schemaFor[ListJobsArgs](t)
 	req := sortedToolRequired(t, s)

@@ -12,7 +12,7 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 The `retries` toolset supports investigating failures and retrying jobs without
 broader build-write access. It includes `list_builds`, `get_build`,
-`wait_for_build`, `list_jobs`, `get_job`, `search_logs`, `tail_logs`, `read_logs`,
+`wait_for_build`, `list_jobs`, `get_job`, `get_job_concurrency`, `search_logs`, `tail_logs`, `read_logs`,
 `retry_job`, and `retry_failed_jobs`. It requires `read_builds`,
 `read_build_logs`, and `retry_builds` scopes, not `write_builds`.
 
@@ -37,6 +37,28 @@ For library consumers, `WithDisabledToolsets` and the HTTP factory's disabled
 toolsets exclude all members of those toolsets, even through overlapping
 groups. For example, disabling `logs` also removes log tools from `retries`;
 disabling `retries` removes its inspection and retry tools from other groups.
+
+## Reading job concurrency context
+
+`get_job_concurrency` accepts `org_slug` and a job UUID in `job_id`, requires
+`read_builds`, and is available in `builds` and `retries`, including read-only
+and minimum-access modes. It returns the concurrency group (UUID, key, custom
+or step scope, nullable cluster UUID), the target's own limit, and stored state.
+The group and limit can be null; a null cluster UUID means unclustered.
+
+For a limited target, `jobs_ahead` contains up to 30 visible active predecessors
+ordered by `scheduled_at`, `position`, and internal job ID. Items retain job
+UUIDs, names, states, web links, pipeline names, build numbers, and nullable
+`current_state_since` (only the first item may have a timestamp). Non-limited
+targets retain configuration but return empty items.
+
+Submission order is not execution order. This is not a complete list of blockers;
+an empty list does not mean there are no blockers. The response preserves this
+notice and the list's limit, order, and scope; it provides no totals, hidden
+counts, pagination, full-group membership, or scheduling explanation.
+
+This tool depends on the phase 1 job concurrency REST endpoint being available.
+It does not require reading logs or changing jobs.
 
 ---
 
