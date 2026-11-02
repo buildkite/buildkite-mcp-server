@@ -52,12 +52,12 @@ access. Return the rest without reading further to replace omitted jobs.
 `jobs_ahead.limit` is this 30-job candidate limit, not a promise of 30 results.
 
 **Beyond UI parity:** `examined_count` and `truncated_by_scope` explain the
-returned list. `examined_count` is the number of candidates inspected (0–30),
-not database rows scanned. `truncated_by_scope` is true when any inspected
-candidate was omitted for permission; false does not imply all predecessors or
-the group are visible. When no query runs, these fields are explicitly zero
-and false. The existing UI reads 30 and returns the list only if the viewer can
-access every job; otherwise it returns 204 with no list.
+returned list. `examined_count` is the number of jobs returned by the query
+before permission filtering, at most 30. `truncated_by_scope` is true when any
+inspected candidate was omitted for permission; false does not imply all
+predecessors or the group are visible. When no query runs, these fields are
+explicitly zero and false. The existing UI reads 30 and returns the list only
+if the viewer can access every job; otherwise it returns 204 with no list.
 
 Items retain job UUIDs, names, states, web links, pipeline names, build numbers,
 and nullable `current_state_since`. Only the first returned item may have a

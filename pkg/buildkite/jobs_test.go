@@ -938,7 +938,7 @@ func TestGetJob(t *testing.T) {
 func TestGetJobConcurrency(t *testing.T) {
 	// Exercise the real typed SDK: nulls, identity links and coverage metadata must
 	// survive decoding and tool serialization, not just Go-to-Go mock assignment.
-	const metadata = `"limit":30,"order":["scheduled_at","position","id"],"scope":"visible_subset_of_first_30_active_jobs_ahead_of_limited_target","notice":"Up to the first 30 active predecessors are examined, then filtered by access without refilling. examined_count counts candidates, not database rows scanned. truncated_by_scope describes only these candidates, not full group visibility. Submission order is not execution order. This is not a complete list of blockers; an empty list does not mean there are no blockers."`
+	const metadata = `"limit":30,"order":["scheduled_at","position","id"],"scope":"visible_subset_of_first_30_active_jobs_ahead_of_limited_target","notice":"Up to the first 30 active predecessors are examined, then filtered by access without refilling. examined_count is the number of jobs returned by the query before permission filtering, at most 30. truncated_by_scope describes only these candidates, not full group visibility. Submission order is not execution order. This is not a complete list of blockers; an empty list does not mean there are no blockers."`
 	const group = `{"id":"fe954d1d-cd44-4264-9d64-2d6e9c783076","key":"deploy/prod","scope":"custom","cluster_id":null}`
 	const items = `[
 		{"id":"019a0000-0000-7000-8000-000000000002","name":"Deploy production","state":"running","web_url":"https://buildkite.com/acme/deploy/builds/41#019a0000-0000-7000-8000-000000000002","pipeline_name":"Deploy","build_number":41,"current_state_since":"2026-11-01T13:00:26.051Z"},
