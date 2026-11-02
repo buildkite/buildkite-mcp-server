@@ -146,7 +146,7 @@ var instructionSections = []instructionSection{
 	{
 		toolsets: []string{toolsets.ToolsetBuilds, toolsets.ToolsetRetries},
 		tools:    []string{"get_job_concurrency"},
-		text:     "Job concurrency: use get_job_concurrency for a job's concurrency group, target limit, stored state, and up to 30 visible active jobs ahead of a limited target. Non-limited targets retain configuration but return empty items. Submission order is not execution order; this is not a complete blocker list and empty items do not establish no blockers. Do not infer queue position, free capacity, or a scheduling cause. current_state_since may be populated only on the first item.",
+		text:     "Job concurrency: use get_job_concurrency for a job's concurrency group, target limit, stored state, and jobs ahead of a limited target. Read the first 30 jobs ahead, then leave out jobs the caller's token cannot access. Return the rest without reading further to replace omitted jobs. limit is the candidate limit. Beyond UI parity: examined_count is inspected candidates (0–30), not database rows; truncated_by_scope means at least one inspected candidate was omitted for permission, and false does not imply all predecessors or the group are visible. Non-limited targets retain configuration with empty items and zero/false coverage fields. Submission order is not execution order; this is not a complete blocker list and empty items do not establish no blockers. Do not infer queue position, free capacity, or a scheduling cause. First-returned-row-only current_state_since preserves UI behavior.",
 	},
 	{
 		toolsets: []string{toolsets.ToolsetBuilds, toolsets.ToolsetRetries},

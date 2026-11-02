@@ -50,7 +50,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		{
 			name:    "builds alone",
 			enabled: []string{"builds"},
-			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, "Job concurrency:", "empty items do not establish no blockers"),
+			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, "Job concurrency:", "empty items do not establish no blockers", "without reading further to replace omitted jobs", "Beyond UI parity: examined_count", "false does not imply all predecessors or the group are visible", "preserves UI behavior"),
 			notWant: []string{startHere, skillDiscovery, failureSummary, logInvestigation, annotationScope},
 		},
 		{

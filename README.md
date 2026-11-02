@@ -46,16 +46,32 @@ and minimum-access modes. It returns the concurrency group (UUID, key, custom
 or step scope, nullable cluster UUID), the target's own limit, and stored state.
 The group and limit can be null; a null cluster UUID means unclustered.
 
-For a limited target, `jobs_ahead` contains up to 30 visible active predecessors
-ordered by `scheduled_at`, `position`, and internal job ID. Items retain job
-UUIDs, names, states, web links, pipeline names, build numbers, and nullable
-`current_state_since` (only the first item may have a timestamp). Non-limited
-targets retain configuration but return empty items.
+For a limited target, read the first 30 jobs ahead, ordered by `scheduled_at`,
+`position`, and internal job ID, then leave out jobs the caller's token cannot
+access. Return the rest without reading further to replace omitted jobs.
+`jobs_ahead.limit` is this 30-job candidate limit, not a promise of 30 results.
+
+**Beyond UI parity:** `examined_count` and `truncated_by_scope` explain the
+returned list. `examined_count` is the number of candidates inspected (0–30),
+not database rows scanned. `truncated_by_scope` is true when any inspected
+candidate was omitted for permission; false does not imply all predecessors or
+the group are visible. When no query runs, these fields are explicitly zero
+and false. The existing UI reads 30 and returns the list only if the viewer can
+access every job; otherwise it returns 204 with no list.
+
+Items retain job UUIDs, names, states, web links, pipeline names, build numbers,
+and nullable `current_state_since`. Only the first returned item may have a
+timestamp, preserving existing UI behavior. Non-limited targets retain
+configuration but return empty items.
 
 Submission order is not execution order. This is not a complete list of blockers;
 an empty list does not mean there are no blockers. The response preserves this
-notice and the list's limit, order, and scope; it provides no totals, hidden
-counts, pagination, full-group membership, or scheduling explanation.
+notice and the list's limit, order, scope, and coverage fields; it provides no
+group totals, pagination, full-group membership, or scheduling explanation.
+
+Existing general job REST endpoints already expose job state, timestamps, and
+recorded concurrency wait time; those fields are not a concurrency-context API
+and do not identify the concurrency group or its active predecessors.
 
 This tool depends on the phase 1 job concurrency REST endpoint being available.
 It does not require reading logs or changing jobs.
