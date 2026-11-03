@@ -40,6 +40,57 @@ disabling `retries` removes its inspection and retry tools from other groups.
 
 ---
 
+## Configuring scoped cluster agent tokens
+
+The `clusters` toolset includes `list_cluster_tokens`, `get_cluster_token`,
+`create_cluster_token`, and `update_cluster_token`. Reads require `read_clusters`;
+writes require `write_clusters` and are excluded by read-only mode. All four are
+excluded by minimum-access mode. These are cluster **agent tokens**, not the API
+access token used to authenticate MCP. The API enforces feature availability,
+organization/cluster access, supported permissions, and queue validation.
+
+List with `org_slug` and `cluster_id`, then use an item's `id` as `token_id`
+for get/update. To create a token limited to running jobs and reading metrics
+on one queue, call `create_cluster_token` with:
+
+```json
+{
+  "org_slug": "acme",
+  "cluster_id": "00000000-0000-4000-8000-000000000001",
+  "description": "Limited agent pool",
+  "permissions": ["run_jobs", "read_metrics"],
+  "allow_all_queues": false,
+  "allowed_queue_ids": ["00000000-0000-4000-8000-000000000002"]
+}
+```
+
+`permissions` is a replacement allowlist, not an additive change. Omission uses
+full permissions on create and preserves permissions on update; `[]` grants no
+permission-controlled actions. Queue access grants no actions by itself.
+
+Omitted queue settings default to all queues on create and preserve settings on
+update. Restricted creation (`allow_all_queues: false`) requires an explicit
+`allowed_queue_ids` list of REST queue UUIDs, not queue keys. `false` with `[]`
+allows no queues. On update, `allowed_queue_ids: []` clears bindings without
+changing `allow_all_queues`. To switch from restricted to all queues, explicitly
+send `allow_all_queues: true` and `allowed_queue_ids: []`; `true` with nonempty IDs
+is invalid. Explicit `null` is rejected, not treated as omission.
+
+Create requires `description` and also accepts `allowed_ip_addresses` and an
+RFC3339 `expires_at` at least 10 minutes in the future. Expiry cannot be updated.
+Update accepts description and IP restriction changes; an empty IP restriction
+string clears it. The API validates description values.
+
+Only creation returns the token secret; treat that tool result as a credential.
+List/get/update do not retrieve the secret. Permission and queue fields may be
+absent when their API features are disabled; absence is not evidence of
+unrestricted access. Queue changes affect **new agent registrations**, not
+existing agents or jobs. Local synthetic HTTP tests cover these request and
+readback contracts; deployed availability and permission enforcement require
+separate verification. No token deletion or rotation tools are included.
+
+---
+
 ## Configuring GitHub Actions pipelines
 
 `create_pipeline` and `update_pipeline` accept GitHub `provider_settings`

@@ -345,12 +345,16 @@ func CreateBuiltinToolsets() map[string]Toolset {
 	return map[string]Toolset{
 		ToolsetClusters: {
 			Name:        "Cluster Management",
-			Description: "Tools for managing Buildkite clusters and cluster queues",
+			Description: "Tools for managing Buildkite clusters, cluster queues, and agent tokens",
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.GetCluster),
 				newToolDef(buildkite.ListClusters),
 				newToolDef(buildkite.CreateCluster),
 				newToolDef(buildkite.UpdateCluster),
+				newToolDef(buildkite.ListClusterTokens),
+				newToolDef(buildkite.GetClusterToken),
+				newToolDef(buildkite.CreateClusterToken),
+				newToolDef(buildkite.UpdateClusterToken),
 				newToolDef(buildkite.GetClusterQueue),
 				newToolDef(buildkite.ListClusterQueues),
 				newToolDef(buildkite.CreateClusterQueue),
