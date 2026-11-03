@@ -54,6 +54,13 @@ func TestClusterTokenWritesThroughHTTP(t *testing.T) {
 			{"description only", `{"description":"test token"}`},
 		} {
 			t.Run(tool+"/"+tt.name, func(t *testing.T) {
+				var expected map[string]any
+				require.NoError(t, json.Unmarshal([]byte(tt.fields), &expected))
+				if tool == "create_cluster_token" {
+					expected["description"] = "test token"
+				}
+				expectedJSON, err := json.Marshal(expected)
+				require.NoError(t, err)
 				var calls atomic.Int32
 				session := clusterTokenSession(t, func(w http.ResponseWriter, r *http.Request) {
 					calls.Add(1)
@@ -65,11 +72,14 @@ func TestClusterTokenWritesThroughHTTP(t *testing.T) {
 					assert.Equal(t, path, r.URL.Path)
 					body, err := io.ReadAll(r.Body)
 					assert.NoError(t, err)
-					assert.JSONEq(t, tt.fields, string(body))
+					assert.JSONEq(t, string(expectedJSON), string(body))
 					w.Header().Set("Content-Type", "application/json")
 					_, _ = io.WriteString(w, `{"id":"token-uuid","permissions":[],"allow_all_queues":false,"allowed_queue_ids":[]}`)
 				})
 				args := map[string]any{"org_slug": "acme", "cluster_id": "cluster-uuid"}
+				if tool == "create_cluster_token" {
+					args["description"] = "test token"
+				}
 				require.NoError(t, json.Unmarshal([]byte(tt.fields), &args))
 				if tool == "update_cluster_token" {
 					args["token_id"] = "token-uuid"
@@ -122,7 +132,11 @@ func TestClusterTokenNullsDoNotBecomeOmittedAccess(t *testing.T) {
 		}
 		for _, field := range fields {
 			t.Run(tool+"/"+field, func(t *testing.T) {
-				args := map[string]any{"org_slug": "acme", "cluster_id": "cluster-uuid", field: nil}
+				args := map[string]any{"org_slug": "acme", "cluster_id": "cluster-uuid"}
+				if tool == "create_cluster_token" {
+					args["description"] = "test token"
+				}
+				args[field] = nil
 				if tool == "update_cluster_token" {
 					args["token_id"] = "token-uuid"
 				}
@@ -210,7 +224,7 @@ func TestClusterTokenCreateReturnsSecretWithoutLoggingOrTracingIt(t *testing.T) 
 		_, _ = fmt.Fprintf(w, `{"id":"token-uuid","token":%q}`, secret)
 	})
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "create_cluster_token", Arguments: map[string]any{"org_slug": "acme", "cluster_id": "cluster-uuid"},
+		Name: "create_cluster_token", Arguments: map[string]any{"org_slug": "acme", "cluster_id": "cluster-uuid", "description": "test token"},
 	})
 	require.NoError(t, err)
 	require.False(t, result.IsError)
@@ -302,6 +316,9 @@ func TestClusterTokenAPIErrorsThroughHTTP(t *testing.T) {
 					_, _ = io.WriteString(w, `{"message":"API rejected scoped token request"}`)
 				}, WithOnUnauthorized(func() { unauthorized.Store(true) }))
 				args := map[string]any{"org_slug": "acme", "cluster_id": "cluster-uuid"}
+				if tool == "create_cluster_token" {
+					args["description"] = "test token"
+				}
 				if tool == "get_cluster_token" || tool == "update_cluster_token" {
 					args["token_id"] = "token-uuid"
 				}

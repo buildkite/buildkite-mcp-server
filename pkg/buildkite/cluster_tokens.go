@@ -39,7 +39,7 @@ type CreateClusterTokenArgs struct {
 	ToolInput
 	OrgSlug            string     `json:"org_slug"`
 	ClusterID          string     `json:"cluster_id"`
-	Description        string     `json:"description,omitempty"`
+	Description        string     `json:"description"`
 	AllowedIPAddresses string     `json:"allowed_ip_addresses,omitempty" jsonschema:"Space-separated IP addresses or CIDR ranges; omission allows any address"`
 	ExpiresAt          *time.Time `json:"expires_at,omitempty" jsonschema:"RFC3339 expiry for new agent registrations, at least 10 minutes in the future; omitted means no expiry; cannot be updated"`
 	Permissions        []string   `json:"permissions,omitzero" jsonschema:"Replacement permission allowlist; omitted defaults to full permissions; [] grants no actions"`

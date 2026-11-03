@@ -493,7 +493,7 @@ func TestClusterTokenArgsSchema(t *testing.T) {
 	updateTool, _, _ := UpdateClusterToken()
 	create := createTool.InputSchema.(*jsonschema.Schema)
 	update := updateTool.InputSchema.(*jsonschema.Schema)
-	require.Equal(t, []string{"cluster_id", "org_slug"}, sortedToolRequired(t, create))
+	require.Equal(t, []string{"cluster_id", "description", "org_slug"}, sortedToolRequired(t, create))
 	require.Equal(t, []string{"cluster_id", "org_slug", "token_id"}, sortedToolRequired(t, update))
 	for _, schema := range []*jsonschema.Schema{create, update} {
 		for _, field := range []string{"permissions", "allowed_queue_ids"} {

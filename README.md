@@ -76,9 +76,10 @@ changing `allow_all_queues`. To switch from restricted to all queues, explicitly
 send `allow_all_queues: true` and `allowed_queue_ids: []`; `true` with nonempty IDs
 is invalid. Explicit `null` is rejected, not treated as omission.
 
-Create also accepts `allowed_ip_addresses` and an RFC3339 `expires_at` at least
-10 minutes in the future. Expiry cannot be updated. Update accepts description
-and IP restriction changes, including an empty string to clear them.
+Create requires `description` and also accepts `allowed_ip_addresses` and an
+RFC3339 `expires_at` at least 10 minutes in the future. Expiry cannot be updated.
+Update accepts description and IP restriction changes; an empty IP restriction
+string clears it. The API validates description values.
 
 Only creation returns the token secret; treat that tool result as a credential.
 List/get/update do not retrieve the secret. Permission and queue fields may be
