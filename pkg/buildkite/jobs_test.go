@@ -938,19 +938,20 @@ func TestGetJob(t *testing.T) {
 func TestGetJobConcurrency(t *testing.T) {
 	// Exercise the real typed SDK: nulls, identity links and coverage metadata must
 	// survive decoding and tool serialization, not just Go-to-Go mock assignment.
-	const metadata = `"limit":30,"order":["scheduled_at","position","id"],"scope":"visible_subset_of_first_30_active_jobs_ahead_of_limited_target","notice":"Up to the first 30 active predecessors are examined, then filtered by access without refilling. examined_count is the number of jobs returned by the query before permission filtering, at most 30. truncated_by_scope describes only these candidates, not full group visibility. Submission order is not execution order. This is not a complete list of blockers; an empty list does not mean there are no blockers."`
+	const metadata = `"limit":30,"order":["scheduled_at","position","id"],"scope":"visible_subset_of_first_30_active_jobs_ahead_of_limited_target","notice":"Up to the first 30 active predecessors are examined, then filtered by access without refilling. internal_limit_reached means the query returned the maximum of 30 jobs before permission filtering; it does not establish that more jobs exist. truncated_by_scope describes only these candidates, not full group visibility. Submission order is not execution order. This is not a complete list of blockers; an empty list does not mean there are no blockers."`
 	const group = `{"id":"fe954d1d-cd44-4264-9d64-2d6e9c783076","key":"deploy/prod","scope":"custom","cluster_id":null}`
 	const items = `[
 		{"id":"019a0000-0000-7000-8000-000000000002","name":"Deploy production","state":"running","web_url":"https://buildkite.com/acme/deploy/builds/41#019a0000-0000-7000-8000-000000000002","pipeline_name":"Deploy","build_number":41,"current_state_since":"2026-11-01T13:00:26.051Z"},
 		{"id":"019a0000-0000-7000-8000-000000000001","name":"Release","state":"limited","web_url":"https://buildkite.com/acme/release/builds/73#019a0000-0000-7000-8000-000000000001","pipeline_name":"Release","build_number":73,"current_state_since":null}
 	]`
 	for _, tt := range []struct{ name, payload string }{
-		{"limited with visible predecessors", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":` + items + `,"examined_count":2,"truncated_by_scope":false,` + metadata + `}}`},
-		{"limited with permission omissions", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":` + items + `,"examined_count":3,"truncated_by_scope":true,` + metadata + `}}`},
-		{"candidate cap with no visible items", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":[],"examined_count":30,"truncated_by_scope":true,` + metadata + `}}`},
-		{"limited with no candidates", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":[],"examined_count":0,"truncated_by_scope":false,` + metadata + `}}`},
-		{"non-limited retains step configuration", `{"concurrency_group":{"id":"fe954d1d-cd44-4264-9d64-2d6e9c783076","key":"step-key","scope":"step","cluster_id":"f9249739-fafe-4cde-a742-33ff8788b5ba"},"concurrency_limit":2,"state":"passed","jobs_ahead":{"items":[],"examined_count":0,"truncated_by_scope":false,` + metadata + `}}`},
-		{"no concurrency", `{"concurrency_group":null,"concurrency_limit":null,"state":"scheduled","jobs_ahead":{"items":[],"examined_count":0,"truncated_by_scope":false,` + metadata + `}}`},
+		{"limited with visible predecessors", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":` + items + `,"internal_limit_reached":false,"truncated_by_scope":false,` + metadata + `}}`},
+		{"limited with permission omissions", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":` + items + `,"internal_limit_reached":false,"truncated_by_scope":true,` + metadata + `}}`},
+		{"candidate cap with two visible items", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":` + items + `,"internal_limit_reached":true,"truncated_by_scope":true,` + metadata + `}}`},
+		{"candidate cap with no visible items", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":[],"internal_limit_reached":true,"truncated_by_scope":true,` + metadata + `}}`},
+		{"limited with no candidates", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":[],"internal_limit_reached":false,"truncated_by_scope":false,` + metadata + `}}`},
+		{"non-limited retains step configuration", `{"concurrency_group":{"id":"fe954d1d-cd44-4264-9d64-2d6e9c783076","key":"step-key","scope":"step","cluster_id":"f9249739-fafe-4cde-a742-33ff8788b5ba"},"concurrency_limit":2,"state":"passed","jobs_ahead":{"items":[],"internal_limit_reached":false,"truncated_by_scope":false,` + metadata + `}}`},
+		{"no concurrency", `{"concurrency_group":null,"concurrency_limit":null,"state":"scheduled","jobs_ahead":{"items":[],"internal_limit_reached":false,"truncated_by_scope":false,` + metadata + `}}`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

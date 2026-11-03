@@ -51,13 +51,14 @@ For a limited target, read the first 30 jobs ahead, ordered by `scheduled_at`,
 access. Return the rest without reading further to replace omitted jobs.
 `jobs_ahead.limit` is this 30-job candidate limit, not a promise of 30 results.
 
-**Beyond UI parity:** `examined_count` and `truncated_by_scope` explain the
-returned list. `examined_count` is the number of jobs returned by the query
-before permission filtering, at most 30. `truncated_by_scope` is true when any
-inspected candidate was omitted for permission; false does not imply all
-predecessors or the group are visible. When no query runs, these fields are
-explicitly zero and false. The existing UI reads 30 and returns the list only
-if the viewer can access every job; otherwise it returns 204 with no list.
+**Beyond UI parity:** `internal_limit_reached` and `truncated_by_scope` explain
+the returned list. `internal_limit_reached` is true when the query returned its
+maximum of 30 jobs before permission filtering; it does not prove more jobs
+exist. `truncated_by_scope` is true when any inspected candidate was omitted
+for permission; false does not imply all predecessors or the group are
+visible. Both fields are always present and explicitly false when no query
+runs. The existing UI reads 30 and returns the list only if the viewer can
+access every job; otherwise it returns 204 with no list.
 
 Items retain job UUIDs, names, states, web links, pipeline names, build numbers,
 and nullable `current_state_since`. Only the first returned item may have a
