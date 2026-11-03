@@ -486,6 +486,32 @@ func TestGetClusterArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"cluster_id", "org_slug"}, req)
 }
 
+func TestClusterTokenArgsSchema(t *testing.T) {
+	require.Equal(t, []string{"cluster_id", "org_slug"}, sortedRequired[ListClusterTokensArgs](t))
+	require.Equal(t, []string{"cluster_id", "org_slug", "token_id"}, sortedRequired[GetClusterTokenArgs](t))
+	createTool, _, _ := CreateClusterToken()
+	updateTool, _, _ := UpdateClusterToken()
+	create := createTool.InputSchema.(*jsonschema.Schema)
+	update := updateTool.InputSchema.(*jsonschema.Schema)
+	require.Equal(t, []string{"cluster_id", "org_slug"}, sortedToolRequired(t, create))
+	require.Equal(t, []string{"cluster_id", "org_slug", "token_id"}, sortedToolRequired(t, update))
+	for _, schema := range []*jsonschema.Schema{create, update} {
+		for _, field := range []string{"permissions", "allowed_queue_ids"} {
+			require.Equal(t, []string{"array"}, schema.Properties[field].Types)
+			require.Equal(t, "string", schema.Properties[field].Items.Type)
+			require.NotContains(t, schema.Required, field)
+		}
+		require.Equal(t, []string{"boolean"}, schema.Properties["allow_all_queues"].Types)
+		require.NotContains(t, schema.Required, "allow_all_queues")
+		require.Contains(t, schema.Properties["permissions"].Description, "[] grants no actions")
+	}
+	require.Contains(t, create.Properties["permissions"].Description, "defaults to full")
+	require.Contains(t, update.Properties["permissions"].Description, "preserves permissions")
+	require.Contains(t, update.Properties["allowed_queue_ids"].Description, "without changing allow_all_queues")
+	require.Contains(t, create.Properties, "expires_at")
+	require.NotContains(t, update.Properties, "expires_at")
+}
+
 func TestListClusterSecretsArgsSchema(t *testing.T) {
 	s := schemaFor[ListClusterSecretsArgs](t)
 	req := sortedToolRequired(t, s)
