@@ -49,7 +49,6 @@ The group and limit can be null; a null cluster UUID means unclustered.
 For a limited target, read the first 30 jobs ahead, ordered by `scheduled_at`,
 `position`, and internal job ID, then leave out jobs the caller's token cannot
 access. Return the rest without reading further to replace omitted jobs.
-`jobs_ahead.limit` is this 30-job candidate limit, not a promise of 30 results.
 
 **Beyond UI parity:** `internal_limit_reached` and `truncated_by_scope` explain
 the returned list. `internal_limit_reached` is true when the query returned its
@@ -67,7 +66,7 @@ configuration but return empty items.
 
 Submission order is not execution order. This is not a complete list of blockers;
 an empty list does not mean there are no blockers. The response preserves this
-notice and the list's limit, order, scope, and coverage fields; it provides no
+notice and the list's order, scope, and coverage fields; it provides no
 group totals, pagination, full-group membership, or scheduling explanation.
 
 Existing general job REST endpoints already expose job state, timestamps, and
