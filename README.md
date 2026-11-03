@@ -46,18 +46,19 @@ and minimum-access modes. It returns the concurrency group (UUID, key, custom
 or step scope, nullable cluster UUID), the target's own limit, and stored state.
 The group and limit can be null; a null cluster UUID means unclustered.
 
-For a limited target, read the first 30 jobs ahead, ordered by `scheduled_at`,
-`position`, and internal job ID, then leave out jobs the caller's token cannot
-access. Return the rest without reading further to replace omitted jobs.
+For a limited target, read a bounded set of active jobs ahead, ordered by
+`scheduled_at`, `position`, and internal job ID, then leave out jobs the caller's
+token cannot access. Return the rest without reading further to replace
+omitted jobs.
 
 **Beyond UI parity:** `internal_limit_reached` and `truncated_by_scope` explain
 the returned list. `internal_limit_reached` is true when the query returned its
-maximum of 30 jobs before permission filtering; it does not prove more jobs
-exist. `truncated_by_scope` is true when any inspected candidate was omitted
-for permission; false does not imply all predecessors or the group are
-visible. Both fields are always present and explicitly false when no query
-runs. The existing UI reads 30 and returns the list only if the viewer can
-access every job; otherwise it returns 204 with no list.
+maximum allowed number of jobs before permission filtering; it does not prove
+more jobs exist. `truncated_by_scope` is true when any inspected candidate was
+omitted for permission; false does not imply all predecessors or the group are
+visible. Both fields are always present and explicitly false when no query runs.
+The existing UI reads a bounded set and returns the list only if the viewer
+can access every job; otherwise it returns 204 with no list.
 
 Items retain job UUIDs, names, states, web links, pipeline names, build numbers,
 and nullable `current_state_since`. Only the first returned item may have a
