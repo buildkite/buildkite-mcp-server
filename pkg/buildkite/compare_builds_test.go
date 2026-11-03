@@ -177,6 +177,27 @@ func TestCompareBuildJobsUnkeyedPipeline(t *testing.T) {
 	}
 }
 
+func TestCompareBuildJobsManualJobLabels(t *testing.T) {
+	// Manual jobs expose their display name as label rather than name.
+	const payload = `{"items":[
+		{"id":"manual-job","type":"manual","label":"Deploy to production?","state":"passed"},
+		{"id":"command-job","type":"script","name":"Run tests","label":"Do not replace the name","state":"passed"}
+	]}`
+	var list buildkite.JobsList
+	require.NoError(t, json.Unmarshal([]byte(payload), &list))
+	result := BuildComparison{Baseline: &BuildSummary{}, ChangeCounts: map[string]int{}}
+	compareBuildJobs(list.Items, list.Items, &result)
+	require.Equal(t, map[string]int{"unchanged": 2}, result.ChangeCounts)
+	names := map[string]string{}
+	for _, step := range result.Steps {
+		require.Equal(t, "name_fallback", step.MatchMethod)
+		require.Empty(t, step.UnmatchedReason)
+		names[step.Target.ID] = step.Target.Name
+		require.Equal(t, step.Target.Name, step.Baseline.Name)
+	}
+	require.Equal(t, map[string]string{"manual-job": "Deploy to production?", "command-job": "Run tests"}, names)
+}
+
 func TestCompareBuildJobsOutputLimit(t *testing.T) {
 	var jobs []buildkite.Job
 	for i := range 110 {
