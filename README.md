@@ -51,24 +51,21 @@ For a limited target, read a bounded set of active jobs ahead, ordered by
 token cannot access. Return the rest without reading further to replace
 omitted jobs.
 
-**Beyond UI parity:** `internal_limit_reached` and `truncated_by_scope` explain
-the returned list. `internal_limit_reached` is true when the query returned its
-maximum allowed number of jobs before permission filtering; it does not prove
-more jobs exist. `truncated_by_scope` is true when any inspected candidate was
-omitted for permission; false does not imply all predecessors or the group are
-visible. Both fields are always present and explicitly false when no query runs.
 The existing UI reads a bounded set and returns the list only if the viewer
-can access every job; otherwise it returns 204 with no list.
+can access every job; otherwise it returns 204 with no list. The REST response
+instead returns the accessible subset.
 
 Items retain job UUIDs, names, states, web links, pipeline names, build numbers,
 and nullable `current_state_since`. Only the first returned item may have a
 timestamp, preserving existing UI behavior. Non-limited targets retain
 configuration but return empty items.
 
-Submission order is not execution order. This is not a complete list of blockers;
-an empty list does not mean there are no blockers. The response preserves this
-notice and the list's order, scope, and coverage fields; it provides no
-group totals, pagination, full-group membership, or scheduling explanation.
+The `jobs_ahead` response contains only `items`, `order`, `scope`, and `notice`.
+Its scope is `subset_of_active_jobs_ahead_within_callers_scope_and_internal_limit`.
+The server notice is preserved: "Submission order is not execution order. This
+is not a complete list of jobs holding up this job because of concurrency limits;
+an empty list does not establish that there are no blockers." The response provides
+no group totals, pagination, full-group membership, or scheduling explanation.
 
 Existing general job REST endpoints already expose job state, timestamps, and
 recorded concurrency wait time; those fields are not a concurrency-context API

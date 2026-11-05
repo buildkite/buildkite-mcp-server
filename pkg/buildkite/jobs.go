@@ -306,7 +306,7 @@ type GetJobConcurrencyArgs struct {
 func GetJobConcurrency() (mcp.Tool, mcp.ToolHandlerFor[GetJobConcurrencyArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_job_concurrency",
-			Description: "Get concurrency configuration and stored state for a job UUID, plus visible jobs from a bounded set of active predecessors of a limited target in submission order. internal_limit_reached means the query returned the maximum allowed number of jobs before permission filtering, not proof more exist. truncated_by_scope flags permission omissions among them, not overall visibility. Not a complete blocker list or an execution-order guarantee; empty items do not mean there are no blockers",
+			Description: "Get concurrency configuration and stored state for a job UUID, plus visible jobs from a bounded set of active predecessors of a limited target in submission order. Not a complete blocker list or an execution-order guarantee; empty items do not establish that there are no blockers",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Job Concurrency",
 				ReadOnlyHint: true,
