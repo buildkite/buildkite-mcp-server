@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
@@ -11,6 +12,7 @@ import (
 
 type ClusterQueuesClient interface {
 	List(ctx context.Context, org, clusterID string, opts *buildkite.ClusterQueuesListOptions) ([]buildkite.ClusterQueue, *buildkite.Response, error)
+	Recommendations(ctx context.Context, org, clusterID string) ([]buildkite.ClusterQueueCreate, *buildkite.Response, error)
 	Get(ctx context.Context, org, clusterID, queueID string) (buildkite.ClusterQueue, *buildkite.Response, error)
 	Create(ctx context.Context, org, clusterID string, qc buildkite.ClusterQueueCreate) (buildkite.ClusterQueue, *buildkite.Response, error)
 	Update(ctx context.Context, org, clusterID, queueID string, qu buildkite.ClusterQueueUpdate) (buildkite.ClusterQueue, *buildkite.Response, error)
@@ -33,12 +35,19 @@ type GetClusterQueueArgs struct {
 	QueueID   string `json:"queue_id"`
 }
 
+type ListClusterQueueRecommendationsArgs struct {
+	ToolInput
+	OrgSlug   string `json:"org_slug"`
+	ClusterID string `json:"cluster_id"`
+}
+
 type CreateClusterQueueArgs struct {
 	ToolInput
-	OrgSlug     string `json:"org_slug"`
-	ClusterID   string `json:"cluster_id"`
-	Key         string `json:"key"`
-	Description string `json:"description,omitempty" jsonschema:"Description of the queue"`
+	OrgSlug      string                                    `json:"org_slug"`
+	ClusterID    string                                    `json:"cluster_id"`
+	Key          string                                    `json:"key"`
+	Description  string                                    `json:"description,omitempty" jsonschema:"Description of the queue"`
+	HostedAgents *buildkite.ClusterQueueHostedAgentsCreate `json:"hostedAgents,omitempty" jsonschema:"Hosted agent configuration from list_cluster_queue_recommendations. Requires instanceShape; optionally macosVersion or xcodeVersion. Omit for a self-hosted queue."`
 }
 
 type UpdateClusterQueueArgs struct {
@@ -137,10 +146,32 @@ func GetClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[GetClusterQueueArgs, any], 
 	}, []string{"read_clusters"}
 }
 
+func ListClusterQueueRecommendations() (mcp.Tool, mcp.ToolHandlerFor[ListClusterQueueRecommendationsArgs, any], []string) {
+	return mcp.Tool{
+		Name:        "list_cluster_queue_recommendations",
+		Description: "List eligible missing hosted starter queues, not all available instance shapes. Requires permission to manage the cluster. Pass a returned key and hostedAgents object to create_cluster_queue with the same org_slug and cluster_id. Does not create queues.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "List Cluster Queue Recommendations",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListClusterQueueRecommendationsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListClusterQueueRecommendations")
+		defer span.End()
+		span.SetAttributes(attribute.String("org_slug", args.OrgSlug), attribute.String("cluster_id", args.ClusterID))
+
+		deps := DepsFromContext(ctx)
+		recommendations, _, err := deps.ClusterQueuesClient.Recommendations(ctx, args.OrgSlug, args.ClusterID)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+		return mcpTextResult(span, &recommendations)
+	}, []string{"read_clusters"}
+}
+
 func CreateClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[CreateClusterQueueArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "create_cluster_queue",
-		Description: "Create a new queue in a cluster",
+		Description: "Create a self-hosted queue, or a hosted queue by providing hostedAgents with an instanceShape. Use list_cluster_queue_recommendations to discover eligible missing starter queues. Hosted queues remain subject to the organization's terms, quotas and permissions.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:           "Create Cluster Queue",
 			DestructiveHint: boolPtr(false),
@@ -148,6 +179,10 @@ func CreateClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[CreateClusterQueueArgs, 
 	}, func(ctx context.Context, request *mcp.CallToolRequest, args CreateClusterQueueArgs) (*mcp.CallToolResult, any, error) {
 		ctx, span := trace.Start(ctx, "buildkite.CreateClusterQueue")
 		defer span.End()
+
+		if args.HostedAgents != nil && args.HostedAgents.InstanceShape == "" {
+			return utils.NewToolResultError("hostedAgents.instanceShape is required for a hosted queue"), nil, nil
+		}
 
 		span.SetAttributes(
 			attribute.String("org_slug", args.OrgSlug),
@@ -157,8 +192,9 @@ func CreateClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[CreateClusterQueueArgs, 
 
 		deps := DepsFromContext(ctx)
 		queue, _, err := deps.ClusterQueuesClient.Create(ctx, args.OrgSlug, args.ClusterID, buildkite.ClusterQueueCreate{
-			Key:         args.Key,
-			Description: args.Description,
+			Key:          args.Key,
+			Description:  args.Description,
+			HostedAgents: args.HostedAgents,
 		})
 		if err != nil {
 			return handleBuildkiteError(err)
