@@ -166,7 +166,7 @@ func TestNewPerRequestServerFactory_MinimumAccessCannotBeRelaxed(t *testing.T) {
 		expected []string
 	}{
 		{name: "defaults", expected: []string{"current_user", "access_token"}},
-		{name: "overlapping toolsets", header: "retries,logs", expected: []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job"}},
+		{name: "overlapping toolsets", header: "retries,logs", expected: []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job", "get_job_concurrency"}},
 		{name: "forbidden toolset", header: "cluster_secrets"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

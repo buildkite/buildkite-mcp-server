@@ -48,6 +48,10 @@ func (m *MockJobsClient) GetJobByOrg(ctx context.Context, org string, jobID stri
 	return buildkite.Job{}, &buildkite.Response{}, nil
 }
 
+func (m *MockJobsClient) GetJobConcurrencyByOrg(ctx context.Context, org string, jobID string) (buildkite.JobConcurrency, *buildkite.Response, error) {
+	return buildkite.JobConcurrency{}, &buildkite.Response{}, nil
+}
+
 func (m *MockJobsClient) UnblockJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string, opt *buildkite.JobUnblockOptions) (buildkite.Job, *buildkite.Response, error) {
 	if m.UnblockJobFunc != nil {
 		return m.UnblockJobFunc(ctx, org, pipeline, buildNumber, jobID, opt)
@@ -929,6 +933,68 @@ func TestGetJob(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, getTextResult(t, result).Text, "provide both")
 	})
+}
+
+func TestGetJobConcurrency(t *testing.T) {
+	// Exercise the real typed SDK: nulls, identity links and response metadata must
+	// survive decoding and tool serialization, not just Go-to-Go mock assignment.
+	const metadata = `"order":["scheduled_at","position","id"],"scope":"subset_of_active_jobs_ahead_within_callers_scope_and_internal_limit","notice":"Submission order is not execution order. This is not a complete list of jobs holding up this job because of concurrency limits; an empty list does not establish that there are no blockers."`
+	const group = `{"id":"fe954d1d-cd44-4264-9d64-2d6e9c783076","key":"deploy/prod","scope":"custom","cluster_id":null}`
+	const items = `[
+		{"id":"019a0000-0000-7000-8000-000000000002","name":"Deploy production","state":"running","web_url":"https://buildkite.com/acme/deploy/builds/41#019a0000-0000-7000-8000-000000000002","pipeline_name":"Deploy","build_number":41,"current_state_since":"2026-11-01T13:00:26.051Z"},
+		{"id":"019a0000-0000-7000-8000-000000000001","name":"Release","state":"limited","web_url":"https://buildkite.com/acme/release/builds/73#019a0000-0000-7000-8000-000000000001","pipeline_name":"Release","build_number":73,"current_state_since":null}
+	]`
+	for _, tt := range []struct{ name, payload string }{
+		{"limited with visible predecessors", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":` + items + `,` + metadata + `}}`},
+		{"limited with empty items", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":[],` + metadata + `}}`},
+		{"non-limited retains step configuration", `{"concurrency_group":{"id":"fe954d1d-cd44-4264-9d64-2d6e9c783076","key":"step-key","scope":"step","cluster_id":"f9249739-fafe-4cde-a742-33ff8788b5ba"},"concurrency_limit":2,"state":"passed","jobs_ahead":{"items":[],` + metadata + `}}`},
+		{"no concurrency", `{"concurrency_group":null,"concurrency_limit":null,"state":"scheduled","jobs_ahead":{"items":[],` + metadata + `}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/v2/organizations/acme/jobs/019a0000-0000-7000-8000-000000000003/concurrency", r.URL.Path)
+				assert.Empty(t, r.URL.RawQuery, "this bounded read has no pagination")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.payload))
+			}))
+			t.Cleanup(srv.Close)
+			client, err := buildkite.NewOpts(buildkite.WithBaseURL(srv.URL))
+			require.NoError(t, err)
+			ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: client.Jobs})
+			_, handler, _ := GetJobConcurrency()
+			result, _, err := handler(ctx, createMCPRequest(t, nil), GetJobConcurrencyArgs{
+				OrgSlug: "acme", JobID: "019a0000-0000-7000-8000-000000000003",
+			})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			require.JSONEq(t, tt.payload, getTextResult(t, result).Text)
+		})
+	}
+
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"message":"concurrency unavailable"}`))
+			}))
+			t.Cleanup(srv.Close)
+			client, err := buildkite.NewOpts(buildkite.WithBaseURL(srv.URL))
+			require.NoError(t, err)
+			ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: client.Jobs})
+			_, handler, _ := GetJobConcurrency()
+			result, _, err := handler(ctx, createMCPRequest(t, nil), GetJobConcurrencyArgs{OrgSlug: "acme", JobID: "target"})
+			if status == http.StatusUnauthorized {
+				require.ErrorIs(t, err, ErrUnauthorized)
+				require.Nil(t, result)
+			} else {
+				require.NoError(t, err)
+				require.True(t, result.IsError)
+				require.Contains(t, getTextResult(t, result).Text, "concurrency unavailable")
+			}
+		})
+	}
 }
 
 // TestJobSignalDecodesFromWire guards against the Signal field drifting back to a

@@ -16,6 +16,7 @@ type JobsClient interface {
 	ListByBuild(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error)
 	GetJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobByOrg(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error)
+	GetJobConcurrencyByOrg(ctx context.Context, org string, jobID string) (buildkite.JobConcurrency, *buildkite.Response, error)
 	UnblockJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string, opt *buildkite.JobUnblockOptions) (buildkite.Job, *buildkite.Response, error)
 	RetryJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobEnvironmentVariables(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.JobEnvs, *buildkite.Response, error)
@@ -293,6 +294,40 @@ func GetJob() (mcp.Tool, mcp.ToolHandlerFor[GetJobArgs, any], []string) {
 			}
 
 			return mcpTextResult(span, &job)
+		}, []string{"read_builds"}
+}
+
+type GetJobConcurrencyArgs struct {
+	ToolInput
+	OrgSlug string `json:"org_slug"`
+	JobID   string `json:"job_id"`
+}
+
+func GetJobConcurrency() (mcp.Tool, mcp.ToolHandlerFor[GetJobConcurrencyArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "get_job_concurrency",
+			Description: "Get concurrency configuration and stored state for a job UUID, plus visible jobs from a bounded set of active predecessors of a limited target in submission order. Not a complete blocker list or an execution-order guarantee; empty items do not establish that there are no blockers",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "Get Job Concurrency",
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetJobConcurrencyArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.GetJobConcurrency")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("job_id", args.JobID),
+			)
+
+			deps := DepsFromContext(ctx)
+			concurrency, _, err := deps.JobsClient.GetJobConcurrencyByOrg(ctx, args.OrgSlug, args.JobID)
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			return mcpTextResult(span, &concurrency)
 		}, []string{"read_builds"}
 }
 

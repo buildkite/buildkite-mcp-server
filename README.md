@@ -12,7 +12,7 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 The `retries` toolset supports investigating failures and retrying jobs without
 broader build-write access. It includes `list_builds`, `get_build`,
-`wait_for_build`, `list_jobs`, `get_job`, `search_logs`, `tail_logs`, `read_logs`,
+`wait_for_build`, `list_jobs`, `get_job`, `get_job_concurrency`, `search_logs`, `tail_logs`, `read_logs`,
 `retry_job`, and `retry_failed_jobs`. It requires `read_builds`,
 `read_build_logs`, and `retry_builds` scopes, not `write_builds`.
 
@@ -37,6 +37,42 @@ For library consumers, `WithDisabledToolsets` and the HTTP factory's disabled
 toolsets exclude all members of those toolsets, even through overlapping
 groups. For example, disabling `logs` also removes log tools from `retries`;
 disabling `retries` removes its inspection and retry tools from other groups.
+
+## Reading job concurrency context
+
+`get_job_concurrency` accepts `org_slug` and a job UUID in `job_id`, requires
+`read_builds`, and is available in `builds` and `retries`, including read-only
+and minimum-access modes. It returns the concurrency group (UUID, key, custom
+or step scope, nullable cluster UUID), the target's own limit, and stored state.
+The group and limit can be null; a null cluster UUID means unclustered.
+
+For a limited target, read a bounded set of active jobs ahead, ordered by
+`scheduled_at`, `position`, and internal job ID, then leave out jobs the caller's
+token cannot access. Return the rest without reading further to replace
+omitted jobs.
+
+The existing UI reads a bounded set and returns the list only if the viewer
+can access every job; otherwise it returns 204 with no list. The REST response
+instead returns the accessible subset.
+
+Items retain job UUIDs, names, states, web links, pipeline names, build numbers,
+and nullable `current_state_since`. Only the first returned item may have a
+timestamp, preserving existing UI behavior. Non-limited targets retain
+configuration but return empty items.
+
+The `jobs_ahead` response contains only `items`, `order`, `scope`, and `notice`.
+Its scope is `subset_of_active_jobs_ahead_within_callers_scope_and_internal_limit`.
+The server notice is preserved: "Submission order is not execution order. This
+is not a complete list of jobs holding up this job because of concurrency limits;
+an empty list does not establish that there are no blockers." The response provides
+no group totals, pagination, full-group membership, or scheduling explanation.
+
+Existing general job REST endpoints already expose job state, timestamps, and
+recorded concurrency wait time; those fields are not a concurrency-context API
+and do not identify the concurrency group or its active predecessors.
+
+This tool depends on the phase 1 job concurrency REST endpoint being available.
+It does not require reading logs or changing jobs.
 
 ---
 
