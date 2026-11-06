@@ -40,6 +40,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		ArtifactsClient:             &buildkite.BuildkiteClientAdapter{Client: globals.Client, HTTPClient: globals.HTTPClient},
 		AnnotationsClient:           globals.Client.Annotations,
 		OrganizationsClient:         globals.Client.Organizations,
+		RateLimitClient:             &buildkite.BuildkiteClientAdapter{Client: globals.Client},
 		RepositoryConnectionsClient: globals.Client.RepositoryConnections,
 		UserClient:                  globals.Client.User,
 		AccessTokensClient:          globals.Client.AccessTokens,
