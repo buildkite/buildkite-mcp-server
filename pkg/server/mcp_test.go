@@ -25,6 +25,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		buildNumber      = "build_number is a sequential"
 		jobStateBroken   = `Job state "broken"`
 		jobOutputLinks   = "Job output links:"
+		jobConcurrency   = "Job concurrency:"
 		buildSelection   = "Build selection after a push:"
 		dynamicUploads   = "Dynamic pipeline uploads:"
 		logInvestigation = "Log investigation order:"
@@ -50,13 +51,13 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 		{
 			name:    "builds alone",
 			enabled: []string{"builds"},
-			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, "Job concurrency:", "an empty list does not establish that there are no blockers", "without reading further to replace omitted jobs", "Preserve jobs_ahead items, order, scope, and notice", "preserves UI behavior"),
+			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, jobConcurrency, "an empty list does not establish that there are no blockers", "without reading further to replace omitted jobs", "Preserve jobs_ahead items, order, scope, and notice", "preserves UI behavior"),
 			notWant: []string{startHere, skillDiscovery, failureSummary, logInvestigation, annotationScope},
 		},
 		{
 			name:    "retries alone",
 			enabled: []string{"retries"},
-			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, logInvestigation, "Job concurrency:"),
+			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, logInvestigation, jobConcurrency),
 			notWant: []string{startHere, skillDiscovery, failureSummary, dynamicUploads, annotationScope},
 		},
 		{
@@ -82,7 +83,7 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 			name:    "investigations alone",
 			enabled: []string{"investigations"},
 			want:    append(append([]string{}, always...), failureSummary, softFailures),
-			notWant: []string{startHere, skillDiscovery, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope, "Job concurrency:"},
+			notWant: []string{startHere, skillDiscovery, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, logInvestigation, annotationScope, jobConcurrency},
 		},
 		{
 			name:     "annotations toolset, read-only, omits annotation scope",
