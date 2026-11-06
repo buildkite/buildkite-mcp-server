@@ -89,21 +89,24 @@ type JobListResult[T any] struct {
 	Links buildkite.JobsListLinks `json:"links"`
 }
 
+// jobName returns the job's display name. Manual jobs expose it as label
+// rather than name.
+func jobName(job buildkite.Job) string {
+	if job.Name == "" {
+		return job.Label
+	}
+	return job.Name
+}
+
 func summarizeJob(job buildkite.Job) JobSummary {
 	var stepID string
 	if job.Step != nil {
 		stepID = job.Step.ID
 	}
 
-	name := job.Name
-	if name == "" {
-		// Manual jobs expose their display name as label rather than name.
-		name = job.Label
-	}
-
 	return JobSummary{
 		ID:           job.ID,
-		Name:         name,
+		Name:         jobName(job),
 		State:        job.State,
 		Command:      job.Command,
 		ExitStatus:   job.ExitStatus,
