@@ -18,6 +18,108 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHostedQueuesThroughMCP(t *testing.T) {
+	const presets = `[{"key":"linux-arm64","hostedAgents":{"instanceShape":"linux-arm64-2x4"}},{"key":"windows","hostedAgents":{"instanceShape":"windows-amd64-4x16"}},{"key":"macos","hostedAgents":{"instanceShape":"macos-arm64-m4-6x28","macosVersion":"SEQUOIA"}}]`
+	var requests atomic.Int32
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v2/organizations/acme/clusters/cluster/queues/recommendations":
+			assert.Equal(t, http.MethodGet, r.Method)
+			fmt.Fprint(w, presets)
+		case "/v2/organizations/acme/clusters/empty/queues/recommendations":
+			fmt.Fprint(w, `[]`)
+		case "/v2/organizations/acme/clusters/forbidden/queues/recommendations":
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"message":"Forbidden"}`)
+		case "/v2/organizations/acme/clusters/cluster/queues":
+			assert.Equal(t, http.MethodPost, r.Method)
+			var body map[string]any
+			assert.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			expected := map[string]string{
+				"linux-arm64": `{"key":"linux-arm64","hostedAgents":{"instanceShape":"linux-arm64-2x4"}}`,
+				"windows":     `{"key":"windows","hostedAgents":{"instanceShape":"windows-amd64-4x16"}}`,
+				"macos":       `{"key":"macos","hostedAgents":{"instanceShape":"macos-arm64-m4-6x28","macosVersion":"SEQUOIA"}}`,
+				"self-hosted": `{"key":"self-hosted"}`,
+				"xcode":       `{"key":"xcode","hostedAgents":{"instanceShape":"macos-arm64-m4-6x28","xcodeVersion":"16.4"}}`,
+			}
+			encoded, err := json.Marshal(body)
+			assert.NoError(t, err)
+			assert.JSONEq(t, expected[body["key"].(string)], string(encoded))
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprintf(w, `{"id":"created","key":%q,"hosted":%t}`, body["key"], body["hostedAgents"] != nil)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(apiServer.Close)
+	api, err := buildkiteapi.NewOpts(buildkiteapi.WithBaseURL(apiServer.URL + "/"))
+	require.NoError(t, err)
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	server.AddReceivingMiddleware(buildkite.InjectDepsMiddleware(buildkite.ToolDependencies{ClusterQueuesClient: api.ClusterQueues}))
+	for _, tool := range registry.GetEnabledTools([]string{ToolsetClusters}, false) {
+		tool.Register(server)
+	}
+	ctx := context.Background()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil).Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	result, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "list_cluster_queue_recommendations", Arguments: map[string]any{"org_slug": "acme", "cluster_id": "cluster"}})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.JSONEq(t, presets, result.Content[0].(*mcp.TextContent).Text)
+	var recommendations []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &recommendations))
+	recommendations = append(recommendations, map[string]any{"key": "self-hosted"}, map[string]any{"key": "xcode", "hostedAgents": map[string]any{"instanceShape": "macos-arm64-m4-6x28", "xcodeVersion": "16.4"}})
+	for _, recommendation := range recommendations {
+		recommendation["org_slug"] = "acme"
+		recommendation["cluster_id"] = "cluster"
+		result, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "create_cluster_queue", Arguments: recommendation})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		var queue buildkiteapi.ClusterQueue
+		require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &queue))
+		require.Equal(t, "created", queue.ID)
+		require.Equal(t, recommendation["key"], queue.Key)
+		require.Equal(t, recommendation["hostedAgents"] != nil, queue.Hosted)
+	}
+	for _, cluster := range []string{"empty", "forbidden"} {
+		result, err := client.CallTool(ctx, &mcp.CallToolParams{Name: "list_cluster_queue_recommendations", Arguments: map[string]any{"org_slug": "acme", "cluster_id": cluster}})
+		require.NoError(t, err)
+		require.Equal(t, cluster == "forbidden", result.IsError)
+		if cluster == "empty" {
+			require.JSONEq(t, `[]`, result.Content[0].(*mcp.TextContent).Text)
+		} else {
+			require.Contains(t, result.Content[0].(*mcp.TextContent).Text, "Forbidden")
+		}
+	}
+	before := requests.Load()
+	result, err = client.CallTool(ctx, &mcp.CallToolParams{Name: "create_cluster_queue", Arguments: map[string]any{"org_slug": "acme", "cluster_id": "cluster", "key": "invalid", "hostedAgents": map[string]any{"instanceShape": ""}}})
+	require.NoError(t, err)
+	require.True(t, result.IsError)
+	require.Equal(t, before, requests.Load(), "invalid hosted configuration must not create a self-hosted queue")
+
+	readTools := registry.GetEnabledTools([]string{ToolsetClusters}, true)
+	var names []string
+	for _, tool := range readTools {
+		names = append(names, tool.Tool.Name)
+		if tool.Tool.Name == "list_cluster_queue_recommendations" {
+			require.Equal(t, []string{"read_clusters"}, tool.RequiredScopes)
+		}
+	}
+	require.Contains(t, names, "list_cluster_queue_recommendations")
+	require.NotContains(t, names, "create_cluster_queue")
+}
+
 func TestToolDefinition_IsReadOnly(t *testing.T) {
 	tests := []struct {
 		name     string
