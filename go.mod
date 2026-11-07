@@ -3,7 +3,7 @@ module github.com/buildkite/buildkite-mcp-server
 go 1.27.3
 
 require (
-	github.com/alecthomas/kong v1.16.1
+	github.com/alecthomas/kong v1.17.0
 	github.com/buildkite/buildkite-logs v0.13.1
 	github.com/buildkite/go-buildkite/v5 v5.29.1-0.20261105213313-a4b380fce08c
 	github.com/google/jsonschema-go v0.4.3
@@ -19,7 +19,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0
 	go.opentelemetry.io/otel/trace v1.47.0
-	golang.org/x/net v0.61.0
+	golang.org/x/net v0.62.0
 	golang.org/x/text v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 )
