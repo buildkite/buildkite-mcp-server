@@ -706,7 +706,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	registry.RegisterToolsets(builtin)
 
 	// Check that expected toolsets are registered
-	expectedToolsets := []string{"clusters", "cluster_secrets", "cache_registries", "agents", "pipelines", "builds", "retries", "artifacts", "logs", "tests", "annotations", "investigations", "user", "repository_connections", "skills"}
+	expectedToolsets := []string{"clusters", "cluster_secrets", "cache_registries", "agents", "pipelines", "builds", "retries", "artifacts", "releases", "logs", "tests", "annotations", "investigations", "user", "repository_connections", "skills"}
 	for _, name := range expectedToolsets {
 		_, exists := registry.Get(name)
 		assert.True(exists, "expected toolset %s to be registered", name)
@@ -1011,6 +1011,24 @@ func TestCacheRegistriesToolset(t *testing.T) {
 	require.Equal(t, "list_cache_registries", readOnlyTools[0].Tool.Name)
 	require.Equal(t, "get_cache_registry", readOnlyTools[1].Tool.Name)
 	require.Equal(t, []string{"read_clusters"}, registry.GetRequiredScopes([]string{ToolsetCacheRegistries}, true))
+}
+
+func TestReleasesToolset(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	require.NoError(t, ValidateToolsets([]string{ToolsetReleases}))
+	tools := registry.GetEnabledTools([]string{ToolsetReleases}, true)
+	require.Len(t, tools, 15)
+	require.Equal(t, []string{"read_deployment_artifacts"}, registry.GetRequiredScopes([]string{ToolsetReleases}, true))
+	for _, tool := range tools {
+		require.True(t, tool.IsReadOnly(), tool.Tool.Name)
+		require.False(t, tool.IsMinimumAccess(), tool.Tool.Name)
+		require.Equal(t, []string{"read_deployment_artifacts"}, tool.RequiredScopes, tool.Tool.Name)
+	}
+	artifacts := registry.GetEnabledTools([]string{ToolsetArtifacts}, false)
+	for _, tool := range artifacts {
+		require.Equal(t, []string{"read_artifacts"}, tool.RequiredScopes)
+	}
 }
 
 func TestRepositoryConnectionsToolset(t *testing.T) {

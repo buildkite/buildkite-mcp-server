@@ -22,6 +22,7 @@ type ToolDependencies struct {
 	ClusterQueuesClient         ClusterQueuesClient
 	AgentsClient                AgentsClient
 	ArtifactsClient             ArtifactsClient
+	ReleasesClient              ReleasesClient
 	AnnotationsClient           AnnotationsClient
 	OrganizationsClient         OrganizationsClient
 	RepositoryConnectionsClient RepositoryConnectionsClient

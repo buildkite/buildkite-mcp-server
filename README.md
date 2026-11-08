@@ -8,6 +8,36 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Reading Releases
+
+The `releases` toolset reads installations, targets, component registrations,
+observed component status and observation history, plus the deployment-artifact
+catalog, versions, version comparisons and publisher-supplied pull requests in a
+comparison range. It does not publish versions, report observations or deploy
+software. Existing `artifacts` tools still read files attached to build jobs.
+
+```bash
+buildkite-mcp-server stdio --enabled-toolsets releases --read-only
+```
+
+Releases tools require `read_deployment_artifacts`, organization access, the
+`DeploymentArtifacts` feature flag and the current API permission
+`manage_organization_rules`, including for reads. They are excluded from
+minimum-access mode. Hosted use requires a server release containing these tools
+and OAuth consent granting the new scope; changing toolset headers cannot add
+scopes to an existing grant.
+
+Select registrations explicitly by name or UUID, for example
+`installation: {"name": "payments"}` or `target: {"id": "<target UUID>"}`.
+Names are literal, even when UUID-shaped. Collections return `items` and cursor
+`links`; pass the opaque `after` or `before` value from those links, not a page
+number. Version listing defaults to registration order, not version precedence.
+Comparison reports left relative to right; unknown precedence is a valid result,
+not a statement that deployment is safe. Published pull requests are claims from
+publishers, not a complete change inventory.
+
+---
+
 ## Retrying builds with limited permissions
 
 The `retries` toolset supports investigating failures and retrying jobs without
