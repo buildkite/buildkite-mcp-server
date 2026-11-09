@@ -281,6 +281,65 @@ func TestCompareBuildsBaselineSelection(t *testing.T) {
 	}
 }
 
+func TestCompareBuildsJobDisplayNames(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+		counts  map[string]int
+		jobName string
+	}{
+		{
+			name:    "unkeyed manual job",
+			payload: `{"items":[{"type":"manual","label":"Deploy to production?","state":"blocked"}]}`,
+			counts:  map[string]int{"unchanged": 1},
+			jobName: "Deploy to production?",
+		},
+		{
+			name:    "name takes precedence over label",
+			payload: `{"items":[{"type":"script","name":"Run tests","label":"Do not use this label","state":"passed"}]}`,
+			counts:  map[string]int{"unchanged": 1},
+			jobName: "Run tests",
+		},
+		{
+			name:    "duplicate manual labels remain ambiguous",
+			payload: `{"items":[{"type":"manual","label":"Deploy?","state":"blocked"},{"type":"manual","label":"Deploy?","state":"blocked"}]}`,
+			counts:  map[string]int{"unmatched": 4},
+			jobName: "Deploy?",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			builds := &MockBuildsClient{GetFunc: func(_ context.Context, _, _, _ string, _ *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+				return buildkite.Build{State: "passed"}, nil, nil
+			}}
+			jobs := &MockJobsClient{ListByBuildFunc: func(_ context.Context, _, _, _ string, _ *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				var list buildkite.JobsList
+				require.NoError(t, json.Unmarshal([]byte(tc.payload), &list))
+				return list, nil, nil
+			}}
+			_, handler, _ := CompareBuilds()
+			res, _, err := handler(ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: builds, JobsClient: jobs}), nil, CompareBuildsArgs{
+				OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42", BaselineBuildNumber: "40", IncludeLogs: new(false),
+			})
+			require.NoError(t, err)
+			require.False(t, res.IsError)
+			var result BuildComparison
+			require.NoError(t, json.Unmarshal([]byte(getTextResult(t, res).Text), &result))
+			require.Equal(t, tc.counts, result.ChangeCounts)
+			if tc.counts["unchanged"] == 1 {
+				require.Len(t, result.Steps, 1)
+				require.Equal(t, "name_fallback", result.Steps[0].MatchMethod)
+				require.Equal(t, tc.jobName, result.Steps[0].Target.Name)
+				require.Equal(t, tc.jobName, result.Steps[0].Baseline.Name)
+			} else {
+				for _, step := range result.Steps {
+					require.Empty(t, step.MatchMethod)
+					require.Equal(t, "ambiguous step identity", step.UnmatchedReason)
+				}
+			}
+		})
+	}
+}
+
 func TestCompareBuildsNoBaselineAndErrors(t *testing.T) {
 	for _, scenario := range []string{"no baseline", "history limit", "bad target", "bad baseline", "same build", "missing branch", "api error", "job error"} {
 		t.Run(scenario, func(t *testing.T) {
