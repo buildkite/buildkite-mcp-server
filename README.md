@@ -88,6 +88,9 @@ On create, an omitted, null or empty branch filter uses the API's null default.
 Full `get_pipeline` and `list_pipelines` responses preserve the supported
 GitHub settings. go-buildkite response strings do not distinguish null from
 empty, so do not reconstruct partial updates from readback.
+Read tools, including pipeline schedules, blank `provider.webhook_url` because
+anyone holding it can trigger builds; `create_pipeline` and `update_pipeline`
+still return it.
 
 Follow the [manual GitHub Actions setup](https://buildkite.com/docs/pipelines/migration/run-github-actions-workflows#add-a-github-actions-workflow-to-a-pipeline-configure-an-equivalent-pipeline-manually).
 Keep branch-wide `skip_queued_branch_builds` and `cancel_running_branch_builds`

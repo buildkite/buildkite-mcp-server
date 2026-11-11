@@ -165,7 +165,7 @@ func TestPipelineProviderReadbackThroughMCP(t *testing.T) {
 				if tt.template != "" {
 					template = `"pipeline_template_uuid":` + tt.template + `,`
 				}
-				pipeline := `{` + template + `"slug":"synthetic","branch_configuration":"main","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider":{"id":"github","settings":` + tt.settings + `}}`
+				pipeline := `{` + template + `"slug":"synthetic","branch_configuration":"main","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider":{"id":"github","webhook_url":"https://webhook.buildkite.com/deliver/secret","settings":` + tt.settings + `}}`
 				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					assert.Equal(t, http.MethodGet, r.Method)
 					w.Header().Set("Content-Type", "application/json")
@@ -199,6 +199,7 @@ func TestPipelineProviderReadbackThroughMCP(t *testing.T) {
 				}
 				require.Equal(t, false, output["skip_queued_branch_builds"])
 				require.Equal(t, false, output["cancel_running_branch_builds"])
+				require.Empty(t, output["provider"].(map[string]any)["webhook_url"], "read tools must not expose the build-triggering webhook URL")
 				actual := output["provider"].(map[string]any)["settings"].(map[string]any)
 				var expected map[string]any
 				require.NoError(t, json.Unmarshal([]byte(tt.settings), &expected))

@@ -132,7 +132,7 @@ func ListPipelines() (mcp.Tool, mcp.ToolHandlerFor[ListPipelinesArgs, any], []st
 		case "detailed":
 			result = createPaginatedResult(pipelines, detailPipeline, headers)
 		default: // "full"
-			result = createPaginatedResult(pipelines, func(p buildkite.Pipeline) buildkite.Pipeline { return p }, headers)
+			result = createPaginatedResult(pipelines, withoutWebhookURL, headers)
 		}
 
 		span.SetAttributes(
@@ -187,7 +187,7 @@ func GetPipeline() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineArgs, any], []string
 			case "detailed":
 				result = detailPipeline(pipeline)
 			default: // "full"
-				result = pipeline
+				result = withoutWebhookURL(pipeline)
 			}
 
 			return mcpTextResult(span, &result)
@@ -224,6 +224,13 @@ type PipelineDetail struct {
 	StepsCount                int                  `json:"steps_count"`
 	CreatedAt                 *buildkite.Timestamp `json:"created_at"`
 	ArchivedAt                *buildkite.Timestamp `json:"archived_at,omitempty"`
+}
+
+// withoutWebhookURL hides the provider webhook URL from read tools. Anyone
+// holding it can trigger builds, which read_pipelines alone must not allow.
+func withoutWebhookURL(p buildkite.Pipeline) buildkite.Pipeline {
+	p.Provider.WebhookURL = ""
+	return p
 }
 
 // summarizePipeline converts a full Pipeline to PipelineSummary

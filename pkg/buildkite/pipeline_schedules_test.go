@@ -61,6 +61,7 @@ func TestListPipelineSchedules(t *testing.T) {
 					Label:    "Nightly build",
 					Cronline: "@daily",
 					Enabled:  true,
+					Pipeline: &buildkite.Pipeline{Slug: "pipeline", Provider: buildkite.Provider{WebhookURL: "https://webhook.buildkite.com/deliver/secret"}},
 				},
 			}, &buildkite.Response{
 				Response: &http.Response{StatusCode: 200},
@@ -82,7 +83,7 @@ func TestListPipelineSchedules(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"abc","label":"Nightly build","cronline":"@daily","enabled":true}]}`, textContent.Text)
+	assert.JSONEq(`{"headers":{"Link":""},"items":[{"id":"abc","label":"Nightly build","cronline":"@daily","enabled":true,"pipeline":{"slug":"pipeline","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider":{"id":"","webhook_url":"","settings":null}}}]}`, textContent.Text)
 }
 
 func TestGetPipelineSchedule(t *testing.T) {
@@ -99,6 +100,7 @@ func TestGetPipelineSchedule(t *testing.T) {
 				Cronline: "@daily",
 				Branch:   "main",
 				Enabled:  true,
+				Pipeline: &buildkite.Pipeline{Slug: "pipeline", Provider: buildkite.Provider{WebhookURL: "https://webhook.buildkite.com/deliver/secret"}},
 			}, &buildkite.Response{
 				Response: &http.Response{StatusCode: 200},
 			}, nil
@@ -120,7 +122,7 @@ func TestGetPipelineSchedule(t *testing.T) {
 	assert.NoError(err)
 
 	textContent := getTextResult(t, result)
-	assert.JSONEq(`{"id":"abc","label":"Nightly build","cronline":"@daily","branch":"main","enabled":true}`, textContent.Text)
+	assert.JSONEq(`{"id":"abc","label":"Nightly build","cronline":"@daily","branch":"main","enabled":true,"pipeline":{"slug":"pipeline","skip_queued_branch_builds":false,"cancel_running_branch_builds":false,"provider":{"id":"","webhook_url":"","settings":null}}}`, textContent.Text)
 }
 
 func TestCreatePipelineSchedule(t *testing.T) {

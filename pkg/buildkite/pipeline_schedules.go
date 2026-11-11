@@ -53,6 +53,10 @@ func ListPipelineSchedules() (mcp.Tool, mcp.ToolHandlerFor[ListPipelineSchedules
 			return handleBuildkiteError(err)
 		}
 
+		for i := range schedules {
+			schedules[i] = scheduleWithoutWebhookURL(schedules[i])
+		}
+
 		result := PaginatedResult[buildkite.PipelineSchedule]{
 			Items: schedules,
 			Headers: map[string]string{
@@ -99,8 +103,17 @@ func GetPipelineSchedule() (mcp.Tool, mcp.ToolHandlerFor[GetPipelineScheduleArgs
 			return handleBuildkiteError(err)
 		}
 
+		schedule = scheduleWithoutWebhookURL(schedule)
 		return mcpTextResult(span, &schedule)
 	}, []string{"read_pipelines"}
+}
+
+func scheduleWithoutWebhookURL(s buildkite.PipelineSchedule) buildkite.PipelineSchedule {
+	if s.Pipeline != nil {
+		p := withoutWebhookURL(*s.Pipeline)
+		s.Pipeline = &p
+	}
+	return s
 }
 
 type CreatePipelineScheduleArgs struct {
