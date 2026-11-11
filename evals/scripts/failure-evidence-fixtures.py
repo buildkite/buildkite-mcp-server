@@ -56,7 +56,7 @@ def generate():
             "schema_version": 1, "build": build, "jobs": [evidence_job], "job_limit": 10,
             "jobs_truncated": False, "annotations": annotations, "annotations_truncated": False,
             "collected_at": timestamp,
-        }, {"job_limit": 10})
+        })
         record(path, {**build, "job_state_counts": {"total": 1, "states": {"failed": 1}}},
                {"exclude_jobs": "true", "exclude_pipeline": "true", "include_test_engine": "true"})
         record(path + "/jobs", {"items": [job], "links": {}}, {
