@@ -49,6 +49,8 @@ steps:
             - BUILDKITE_AGENT_ENDPOINT
             - BUILDKITE_AGENT_ACCESS_TOKEN
             - BUILDKITE_API_TOKEN
+            - EVALS_CONFIG
+            - BUILDKITE_REPLAY
             - EVAL_COMPARE_BUILDKITE_API_TOKEN
             # Per-entry tokens: evals.yaml entries may name one of these via
             # token_env when their scenario lives in a different org (see
