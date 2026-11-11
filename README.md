@@ -126,14 +126,6 @@ Actions trigger management is not included.
 
 ---
 
-## Log-free build failure evidence
-
-`get_build_failure_evidence` in the `investigations` toolset calls the failure-evidence REST API once. It returns current terminal hard-failed script jobs ordered by finish time, warning/error annotations, timestamps and explicit truncation flags. `job_limit` defaults to 10 and accepts 1–50. Logs, soft failures, superseded retries, canceled jobs and jobs that never ran are excluded. An empty pack does not mean a build passed.
-
-The tool requires `read_builds`. Set `include_test_results: true` to request bounded, job-linked Test Engine failures; this additionally requires `read_suites` and the caller's suite permissions. Test results are omitted by default (`status: "not_requested"`). The server does not store or publish the caller's evidence. The endpoint must be deployed and enabled for the organization; 403/404 responses remain errors, with no automatic fallback.
-
-`get_build_failure_summary` is unchanged. Use it for broader job coverage and log tails, or fetch targeted logs when the evidence pack is insufficient. Pre-deployment replay comparisons measure fixture behavior, not production API latency or authorization.
-
 ## Comparing builds
 
 The read-only `compare_builds` tool in the `investigations` toolset answers questions such as “What changed since this build last worked on main?” Supply `org_slug`, `pipeline_slug`, and the target `build_number`. It selects the most recently created earlier build that is currently passed on the same pipeline and exact branch. It does not require that the baseline had already passed when the target started. Supply `baseline_build_number` to compare against a specific build in that pipeline instead, including a failed build or one on another branch.

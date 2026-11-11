@@ -2,7 +2,6 @@ package buildkite
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -19,8 +18,10 @@ func TestGetBuildFailureEvidence(t *testing.T) {
 	for _, includeTests := range []bool{false, true} {
 		t.Run(fmt.Sprint(includeTests), func(t *testing.T) {
 			calls := 0
+			payload := `{"schema_version":1,"build":{"number":42,"state":"failed"},"jobs":[{"id":"job-id","exit_status":2,"omissions":{"logs":"not_collected"},"annotations":[{"body":"Expected <value>, got 7","style":"error","scope":"job"}],"test_results":{"status":"not_requested"}}],"jobs_truncated":true,"job_limit":3,"annotations":[]}`
 			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
+				assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 				assert.Equal(t, "/v2/organizations/org/pipelines/pipeline/builds/42/failure-evidence", r.URL.Path)
 				assert.Equal(t, "3", r.URL.Query().Get("job_limit"))
 				if includeTests {
@@ -28,14 +29,14 @@ func TestGetBuildFailureEvidence(t *testing.T) {
 				} else {
 					assert.False(t, r.URL.Query().Has("include"))
 				}
-				_, _ = fmt.Fprint(w, `{"schema_version":1,"build":{"number":42,"state":"failed"},"jobs":[{"id":"job-id","exit_status":2,"omissions":{"logs":"not_collected"},"annotations":[{"body":"Expected <value>, got 7","style":"error","scope":"job"}],"test_results":{"status":"not_requested"}}],"jobs_truncated":true,"job_limit":3,"annotations":[]}`)
+				_, _ = fmt.Fprint(w, payload)
 			}))
 			defer api.Close()
-			client, err := buildkite.NewClient()
+			client, err := buildkite.NewClient(buildkite.WithTokenAuth("test-token"))
 			require.NoError(t, err)
 			client.BaseURL, err = url.Parse(api.URL + "/")
 			require.NoError(t, err)
-			ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client.Builds})
+			ctx := ContextWithDeps(context.Background(), ToolDependencies{APIClient: client})
 			tool, handler, scopes := GetBuildFailureEvidence()
 			require.True(t, tool.Annotations.ReadOnlyHint)
 			require.Equal(t, []string{"read_builds"}, scopes)
@@ -46,12 +47,7 @@ func TestGetBuildFailureEvidence(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, result.IsError)
 			require.Equal(t, 1, calls)
-			var evidence buildkite.BuildFailureEvidence
-			require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &evidence))
-			require.Equal(t, 42, evidence.Build.Number)
-			require.True(t, evidence.JobsTruncated)
-			require.Equal(t, "Expected <value>, got 7", evidence.Jobs[0].Annotations[0].Body)
-			require.Equal(t, "not_collected", evidence.Jobs[0].Omissions["logs"])
+			require.JSONEq(t, payload, result.Content[0].(*mcp.TextContent).Text)
 		})
 	}
 }
@@ -78,7 +74,7 @@ func TestGetBuildFailureEvidenceDoesNotFallback(t *testing.T) {
 			require.NoError(t, err)
 			client.BaseURL, err = url.Parse(api.URL + "/")
 			require.NoError(t, err)
-			ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client.Builds})
+			ctx := ContextWithDeps(context.Background(), ToolDependencies{APIClient: client})
 			_, handler, _ := GetBuildFailureEvidence()
 			result, _, err := handler(ctx, createMCPRequest(t, nil), GetBuildFailureEvidenceArgs{OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42"})
 			require.NoError(t, err)

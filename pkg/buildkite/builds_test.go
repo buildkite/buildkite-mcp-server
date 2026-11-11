@@ -13,17 +13,12 @@ import (
 )
 
 type MockBuildsClient struct {
-	GetFailureEvidenceFunc func(ctx context.Context, org, pipeline, number string, opt *buildkite.BuildFailureEvidenceOptions) (buildkite.BuildFailureEvidence, *buildkite.Response, error)
-	ListByOrgFunc          func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
-	ListByPipelineFunc     func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
-	GetFunc                func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
-	CreateFunc             func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error)
-	CancelFunc             func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error)
-	RebuildFunc            func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error)
-}
-
-func (m *MockBuildsClient) GetFailureEvidence(ctx context.Context, org, pipeline, number string, opt *buildkite.BuildFailureEvidenceOptions) (buildkite.BuildFailureEvidence, *buildkite.Response, error) {
-	return m.GetFailureEvidenceFunc(ctx, org, pipeline, number, opt)
+	ListByOrgFunc      func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
+	ListByPipelineFunc func(ctx context.Context, org string, pipeline string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
+	GetFunc            func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
+	CreateFunc         func(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error)
+	CancelFunc         func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error)
+	RebuildFunc        func(ctx context.Context, org, pipeline, buildNumber string) (buildkite.Build, error)
 }
 
 func (m *MockBuildsClient) Get(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {

@@ -2,13 +2,19 @@ package buildkite
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"strconv"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
-	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+// Keep the experimental API payload local without adding a Go client release dependency.
+type failureEvidence struct{ json.RawMessage }
 
 type GetBuildFailureEvidenceArgs struct {
 	ToolInput
@@ -39,12 +45,19 @@ func GetBuildFailureEvidence() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureEvid
 		if limit < 1 || limit > 50 {
 			return utils.NewToolResultError("job_limit must be an integer between 1 and 50"), nil, nil
 		}
-		options := &buildkite.BuildFailureEvidenceOptions{JobLimit: limit}
+		query := url.Values{"job_limit": {strconv.Itoa(limit)}}
 		if args.IncludeTestResults {
-			options.Include = "test_results"
+			query.Set("include", "test_results")
 		}
 		deps := DepsFromContext(ctx)
-		evidence, _, err := deps.BuildsClient.GetFailureEvidence(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, options)
+		path := fmt.Sprintf("v2/organizations/%s/pipelines/%s/builds/%s/failure-evidence?%s",
+			url.PathEscape(args.OrgSlug), url.PathEscape(args.PipelineSlug), url.PathEscape(args.BuildNumber), query.Encode())
+		req, err := deps.APIClient.NewRequest(ctx, "GET", path, nil)
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+		var evidence failureEvidence
+		_, err = deps.APIClient.Do(req, &evidence)
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
