@@ -40,6 +40,26 @@ def transcript(agent, calls):
 
 
 class StrugglesTest(unittest.TestCase):
+    def test_mcp_output_counts_only_paired_unique_results(self):
+        events = [{"type": "assistant", "message": {"id": "a", "content": [
+            {"type": "tool_use", "id": "m", "name": "mcp__buildkite__get_build_failure_evidence", "input": {}},
+            {"type": "tool_use", "id": "b", "name": "Bash", "input": {"command": "echo ignored"}},
+        ]}}]
+        result = {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": "m", "content": [{"type": "text", "text": "é1234"}]},
+            {"type": "tool_result", "tool_use_id": "b", "content": "not MCP output"},
+        ]}}
+        events.extend([result, result])
+        with tempfile.NamedTemporaryFile(mode="w") as log:
+            log.write("".join(json.dumps(e) + "\n" for e in events))
+            log.flush()
+            completed = subprocess.run(["bash", str(AUDIT), "metrics", log.name],
+                                       check=True, capture_output=True, text=True)
+        output = json.loads(completed.stdout)["mcp_output"]
+        self.assertEqual(output["bytes"], 6)
+        self.assertEqual(output["estimated_tokens"], 2)
+        self.assertEqual(output["by_tool"][0]["calls"], 1)
+
     def test_bk_counts_shell_commands_not_quoted_text(self):
         cases = [
             ("cat <<'EOF'\nbk build view 123\nEOF", []),

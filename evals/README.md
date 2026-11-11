@@ -416,3 +416,13 @@ All new code are mostly in `evals/` folder
       * Github to access scenarios (read/write) in external repo, e.g., where scnearios are, so we can access/create branches and push, etc.
       * Buildkite for bk org to retrieve the last successful build (read) to compare
       * Buildkite for orgs where the scenario pipelines (read) are (to monitor scenarios from red-to-green)
+
+## Failure-evidence comparison before API deployment
+
+Run the existing evals pipeline on the MCP branch with `EVALS_CONFIG=/workspace/failure-evidence.yaml` and `BUILDKITE_REPLAY=/workspace/fixtures/failure-evidence.har`. The image builds the MCP server from that commit. Replay serves API requests in-process, fails on an unmatched request, and makes no Buildkite API network calls. Each replay entry starts with an empty log cache so earlier entries cannot warm later ones. No deployed failure-evidence endpoint or organization flag is needed.
+
+The four entries pair the unchanged default `get_build_failure_summary` with `get_build_failure_evidence` on two identical synthetic failed builds. One has an actionable compiler annotation; the other has only an npm error in its log, so a useful evidence-path diagnosis needs a targeted log call. Both tools remain available, but the task specifies the first tool and excludes the other aggregate during the run. This measures the chosen pathway, not autonomous initial tool selection. Regenerate the snapshot with `python3 evals/scripts/failure-evidence-fixtures.py`.
+
+Run bundles contain provider input/output/cache tokens, estimated cost, elapsed seconds, MCP calls, and API fan-out. Claude metrics additionally report `mcp_output.bytes` and `mcp_output.estimated_tokens` (UTF-8 bytes / 4, rounded up per result, **not** provider tokenization). Compare the total investigation output, including follow-ups, not only the first response. Klaren compares the diagnosis with checked-in, agent-authored scenario references; human review of those references is still required.
+
+The evidence contract contains jobs and annotations only, capped by the backend at 10 jobs. `job_limit` is response metadata, not a request argument. Test Engine enrichment and `include_test_results` are not supported. These fixtures are fabricated contract examples, not production recordings. They do not cover authorization, large builds, canceled/soft/retried jobs, late annotations or packet-budget exhaustion. Replay timing excludes API network and database costs. One run per variant is a smoke comparison, not statistical evidence of production token/cost savings. After deployment and flag enablement, rerun on representative real failed builds with the same caller permissions and retain independent expected diagnoses before making rollout claims.

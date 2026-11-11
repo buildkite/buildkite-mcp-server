@@ -1,0 +1,3 @@
+Diagnose the failed build {{.BUILD_NUMBER}} in organization `evidence-eval`, pipeline `fixture`. Start with `{{.FIRST_TOOL}}` using its defaults. Then use targeted build/job/log/annotation tools if more evidence is needed. Do not call the other aggregate failure tool during this investigation. Report the failure, the evidence supporting it, and the specific correction to investigate. Say when the evidence cannot establish a deeper cause.
+
+This is a synthetic, read-only API replay. Investigate through MCP tools only; do not read local files, source code, HAR fixtures, evaluation references, evaluator outputs, or remote copies of those files. Do not edit files, retry jobs, trigger builds, push code, or post annotations.
