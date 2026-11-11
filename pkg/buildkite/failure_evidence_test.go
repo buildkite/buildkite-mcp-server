@@ -15,41 +15,33 @@ import (
 )
 
 func TestGetBuildFailureEvidence(t *testing.T) {
-	for _, includeTests := range []bool{false, true} {
-		t.Run(fmt.Sprint(includeTests), func(t *testing.T) {
-			calls := 0
-			payload := `{"schema_version":1,"build":{"number":42,"state":"failed"},"jobs":[{"id":"job-id","exit_status":2,"omissions":{"logs":"not_collected"},"annotations":[{"body":"Expected <value>, got 7","style":"error","scope":"job"}],"test_results":{"status":"not_requested"}}],"jobs_truncated":true,"job_limit":3,"annotations":[]}`
-			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
-				assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
-				assert.Equal(t, "/v2/organizations/org/pipelines/pipeline/builds/42/failure-evidence", r.URL.Path)
-				assert.Equal(t, "3", r.URL.Query().Get("job_limit"))
-				if includeTests {
-					assert.Equal(t, "test_results", r.URL.Query().Get("include"))
-				} else {
-					assert.False(t, r.URL.Query().Has("include"))
-				}
-				_, _ = fmt.Fprint(w, payload)
-			}))
-			defer api.Close()
-			client, err := buildkite.NewClient(buildkite.WithTokenAuth("test-token"))
-			require.NoError(t, err)
-			client.BaseURL, err = url.Parse(api.URL + "/")
-			require.NoError(t, err)
-			ctx := ContextWithDeps(context.Background(), ToolDependencies{APIClient: client})
-			tool, handler, scopes := GetBuildFailureEvidence()
-			require.True(t, tool.Annotations.ReadOnlyHint)
-			require.Equal(t, []string{"read_builds"}, scopes)
-			limit := 3
-			result, _, err := handler(ctx, createMCPRequest(t, nil), GetBuildFailureEvidenceArgs{
-				OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42", JobLimit: &limit, IncludeTestResults: includeTests,
-			})
-			require.NoError(t, err)
-			require.False(t, result.IsError)
-			require.Equal(t, 1, calls)
-			require.JSONEq(t, payload, result.Content[0].(*mcp.TextContent).Text)
-		})
-	}
+	calls := 0
+	payload := `{"schema_version":1,"build":{"number":42,"state":"failed"},"jobs":[{"id":"job-id","exit_status":2,"omissions":{"logs":"not_collected"},"annotations":[{"body":"Expected <value>, got 7","style":"error","scope":"job"}]}],"jobs_truncated":true,"job_limit":3,"annotations":[]}`
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		assert.Equal(t, "/v2/organizations/org/pipelines/pipeline/builds/42/failure-evidence", r.URL.Path)
+		assert.Equal(t, "3", r.URL.Query().Get("job_limit"))
+		assert.False(t, r.URL.Query().Has("include"))
+		_, _ = fmt.Fprint(w, payload)
+	}))
+	defer api.Close()
+	client, err := buildkite.NewClient(buildkite.WithTokenAuth("test-token"))
+	require.NoError(t, err)
+	client.BaseURL, err = url.Parse(api.URL + "/")
+	require.NoError(t, err)
+	ctx := ContextWithDeps(context.Background(), ToolDependencies{APIClient: client})
+	tool, handler, scopes := GetBuildFailureEvidence()
+	require.True(t, tool.Annotations.ReadOnlyHint)
+	require.Equal(t, []string{"read_builds"}, scopes)
+	limit := 3
+	result, _, err := handler(ctx, createMCPRequest(t, nil), GetBuildFailureEvidenceArgs{
+		OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "42", JobLimit: &limit,
+	})
+	require.NoError(t, err)
+	require.False(t, result.IsError)
+	require.Equal(t, 1, calls)
+	require.JSONEq(t, payload, result.Content[0].(*mcp.TextContent).Text)
 }
 
 func TestGetBuildFailureEvidenceRejectsInvalidLimits(t *testing.T) {

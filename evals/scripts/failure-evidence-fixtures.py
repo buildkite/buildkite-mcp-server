@@ -49,7 +49,6 @@ def generate():
         }] if annotated else []
         evidence_job = {**job, "state": "finished", "annotations": [], "annotations_truncated": False,
                         "web_url": f"{web_url}#{job_id}", "collected_at": timestamp,
-                        "test_results": {"status": "not_requested", "collected_at": timestamp},
                         "omissions": {"logs": "not_collected"}}
         evidence_job.pop("type")
         evidence_job.pop("soft_failed")
