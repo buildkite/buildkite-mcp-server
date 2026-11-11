@@ -838,13 +838,21 @@ run_entry() {
     [[ -n "$BK_STUB_DIR" ]] && AGENT_PATH="$BK_STUB_DIR:$AGENT_PATH"
     # The logging bk wrapper goes in front of the real bk.
     [[ -n "$BK_SHIM_DIR" ]] && AGENT_PATH="$BK_SHIM_DIR:$AGENT_PATH"
+    local AGENT_LOG_CACHE="${BKLOG_CACHE_URL:-}" REPLAY_CACHE=""
+    if [[ -n "${BUILDKITE_REPLAY:-}" ]]; then
+        # Paired replay entries must not inherit logs downloaded by an earlier entry.
+        REPLAY_CACHE="$(mktemp -d)"
+        AGENT_LOG_CACHE="file://$REPLAY_CACHE"
+    fi
     if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" EVAL_MODE="$MODE" PATH="$AGENT_PATH" \
             BUILDKITE_ORGANIZATION_SLUG="$AGENT_ORG" BK_TELEMETRY=false \
-            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" \
+            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" BKLOG_CACHE_URL="$AGENT_LOG_CACHE" \
             run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
+        [[ -z "$REPLAY_CACHE" ]] || rm -rf "$REPLAY_CACHE"
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
     fi
+    [[ -z "$REPLAY_CACHE" ]] || rm -rf "$REPLAY_CACHE"
     local EVAL_ELAPSED_SECS=$(( $(date +%s) - EVAL_START ))
     local EVAL_ELAPSED; EVAL_ELAPSED=$(fmt_elapsed "$EVAL_ELAPSED_SECS")
     echo "*** [$ENTRY_ID] EVAL ELAPSED: $EVAL_ELAPSED  SESSION_ID: $SESSION_ID"

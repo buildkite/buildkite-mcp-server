@@ -419,7 +419,7 @@ All new code are mostly in `evals/` folder
 
 ## Failure-evidence comparison before API deployment
 
-Run the existing evals pipeline on the MCP branch with `EVALS_CONFIG=/workspace/failure-evidence.yaml` and `BUILDKITE_REPLAY=/workspace/fixtures/failure-evidence.har`. The image builds the MCP server from that commit. Replay serves API requests in-process, fails on an unmatched request, and makes no Buildkite API network calls. No deployed failure-evidence endpoint or organization flag is needed.
+Run the existing evals pipeline on the MCP branch with `EVALS_CONFIG=/workspace/failure-evidence.yaml` and `BUILDKITE_REPLAY=/workspace/fixtures/failure-evidence.har`. The image builds the MCP server from that commit. Replay serves API requests in-process, fails on an unmatched request, and makes no Buildkite API network calls. Each replay entry starts with an empty log cache so earlier entries cannot warm later ones. No deployed failure-evidence endpoint or organization flag is needed.
 
 The four entries pair the unchanged default `get_build_failure_summary` with `get_build_failure_evidence` on two identical synthetic failed builds. One has an actionable compiler annotation; the other has only an npm error in its log, so a useful evidence-path diagnosis needs a targeted log call. Both tools remain available, but the task specifies the first tool and excludes the other aggregate during the run. This measures the chosen pathway, not autonomous initial tool selection. Regenerate the snapshot with `python3 evals/scripts/failure-evidence-fixtures.py`.
 

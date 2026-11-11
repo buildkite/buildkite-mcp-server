@@ -25,6 +25,8 @@ def generate():
         # Each call consumes an entry. Permit bounded repeated inspection of the same snapshot.
         entries.extend([entry] * 5)
 
+    record("organizations", [{"id": "30000000-0000-4000-8000-000000000001", "slug": "evidence-eval",
+                              "name": "Evidence eval"}])
     scenarios = [
         ("1", "Typecheck", "src/invoice.ts:17: Type 'string' is not assignable to type 'number'.", True),
         ("2", "Install", "npm ERR! E404: @acme/missing-lib@9.9.9 is not in this registry.", False),
