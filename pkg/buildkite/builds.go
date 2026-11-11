@@ -46,6 +46,7 @@ func MaxWaitForBuildBudget() time.Duration {
 
 type BuildsClient interface {
 	Get(ctx context.Context, org, pipelineSlug, buildNumber string, options *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error)
+	GetFailureEvidence(ctx context.Context, org, pipelineSlug, buildNumber string, options *buildkite.BuildFailureEvidenceOptions) (buildkite.BuildFailureEvidence, *buildkite.Response, error)
 	ListByOrg(ctx context.Context, org string, options *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	ListByPipeline(ctx context.Context, org, pipelineSlug string, options *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error)
 	Create(ctx context.Context, org string, pipeline string, b buildkite.CreateBuild) (buildkite.Build, *buildkite.Response, error)

@@ -83,7 +83,7 @@ func marshalSanitizedJSON(result any) ([]byte, error) {
 
 	var plainTextFields []string
 	switch result.(type) {
-	case *PaginatedResult[buildkite.Annotation], *BuildFailureSummary:
+	case *PaginatedResult[buildkite.Annotation], *BuildFailureSummary, *buildkite.BuildFailureEvidence:
 		// Raw annotation bodies may contain Markdown code or literal HTML.
 		plainTextFields = []string{"body"}
 	}
