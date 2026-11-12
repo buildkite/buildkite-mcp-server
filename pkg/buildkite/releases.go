@@ -10,9 +10,7 @@ import (
 )
 
 type ReleasesClient interface {
-	ListInstallations(context.Context, string, *buildkite.ReleasesListOptions) (buildkite.ReleasesPage[buildkite.ReleaseInstallation], *buildkite.Response, error)
-	GetInstallation(context.Context, string, buildkite.ReleaseInstallationRef) (buildkite.ReleaseInstallation, *buildkite.Response, error)
-	ListTargets(context.Context, string, buildkite.ReleaseInstallationRef, *buildkite.ReleasesListOptions) (buildkite.ReleasesPage[buildkite.ReleaseTarget], *buildkite.Response, error)
+	ListTargets(context.Context, string, *buildkite.ReleasesListOptions) (buildkite.ReleasesPage[buildkite.ReleaseTarget], *buildkite.Response, error)
 	GetTarget(context.Context, string, buildkite.ReleaseTargetRef) (buildkite.ReleaseTarget, *buildkite.Response, error)
 	ListComponents(context.Context, string, buildkite.ReleaseTargetRef, *buildkite.ReleasesListOptions) (buildkite.ReleasesPage[buildkite.ReleaseComponent], *buildkite.Response, error)
 	GetComponent(context.Context, string, buildkite.ReleaseComponentRef) (buildkite.ReleaseComponent, *buildkite.Response, error)
@@ -42,102 +40,57 @@ func (a ReleasesListArgs) options() (*buildkite.ReleasesListOptions, error) {
 	return &buildkite.ReleasesListOptions{After: a.After, Before: a.Before, PerPage: a.PerPage}, nil
 }
 
-func ListInstallations() (mcp.Tool, mcp.ToolHandlerFor[ReleasesListArgs, any], []string) {
+func ListReleaseTargets() (mcp.Tool, mcp.ToolHandlerFor[ReleasesListArgs, any], []string) {
 	return mcp.Tool{
-		Name: "list_installations", Description: "List Releases installations, including archived registrations. Returns items and cursor pagination links",
-		Annotations: &mcp.ToolAnnotations{Title: "List Installations", ReadOnlyHint: true},
+		Name: "list_release_targets", Description: "List organization-owned Releases targets, including archived targets. Returns items and cursor pagination links",
+		Annotations: &mcp.ToolAnnotations{Title: "List Release Targets", ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ReleasesListArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.ListInstallations")
+		ctx, span := trace.Start(ctx, "buildkite.ListReleaseTargets")
 		defer span.End()
 		opt, err := args.options()
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
-		result, _, err := DepsFromContext(ctx).ReleasesClient.ListInstallations(ctx, args.OrgSlug, opt)
+		result, _, err := DepsFromContext(ctx).ReleasesClient.ListTargets(ctx, args.OrgSlug, opt)
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
 		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
+	}, []string{"read_release_targets"}
 }
 
-type GetInstallationArgs struct {
-	ToolInput
-	OrgSlug      string                           `json:"org_slug"`
-	Installation buildkite.ReleaseInstallationRef `json:"installation" jsonschema:"Exactly one of name or id (installation UUID); names are matched literally"`
-}
-
-func GetInstallation() (mcp.Tool, mcp.ToolHandlerFor[GetInstallationArgs, any], []string) {
-	return mcp.Tool{
-		Name: "get_installation", Description: "Get a Releases installation by name or UUID, including archive state",
-		Annotations: &mcp.ToolAnnotations{Title: "Get Installation", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetInstallationArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.GetInstallation")
-		defer span.End()
-		result, _, err := DepsFromContext(ctx).ReleasesClient.GetInstallation(ctx, args.OrgSlug, args.Installation)
-		if err != nil {
-			return handleBuildkiteError(err)
-		}
-		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
-}
-
-type ListInstallationTargetsArgs struct {
-	ReleasesListArgs
-	Installation buildkite.ReleaseInstallationRef `json:"installation" jsonschema:"Exactly one of name or id (installation UUID)"`
-}
-
-func ListInstallationTargets() (mcp.Tool, mcp.ToolHandlerFor[ListInstallationTargetsArgs, any], []string) {
-	return mcp.Tool{
-		Name: "list_installation_targets", Description: "List targets in a Releases installation, including archived targets. Returns items and cursor pagination links",
-		Annotations: &mcp.ToolAnnotations{Title: "List Installation Targets", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListInstallationTargetsArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.ListInstallationTargets")
-		defer span.End()
-		opt, err := args.options()
-		if err != nil {
-			return handleBuildkiteError(err)
-		}
-		result, _, err := DepsFromContext(ctx).ReleasesClient.ListTargets(ctx, args.OrgSlug, args.Installation, opt)
-		if err != nil {
-			return handleBuildkiteError(err)
-		}
-		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
-}
-
-type GetInstallationTargetArgs struct {
+type GetReleaseTargetArgs struct {
 	ToolInput
 	OrgSlug string                     `json:"org_slug"`
-	Target  buildkite.ReleaseTargetRef `json:"target" jsonschema:"Either id (target UUID), or name plus installation with exactly one of name or id; do not combine forms"`
+	Target  buildkite.ReleaseTargetRef `json:"target" jsonschema:"Exactly one of name or id (target UUID); names are organization-wide and matched literally"`
 }
 
-func GetInstallationTarget() (mcp.Tool, mcp.ToolHandlerFor[GetInstallationTargetArgs, any], []string) {
+func GetReleaseTarget() (mcp.Tool, mcp.ToolHandlerFor[GetReleaseTargetArgs, any], []string) {
 	return mcp.Tool{
-		Name: "get_installation_target", Description: "Get a Releases target by UUID or installation and target name, including labels and archive state",
-		Annotations: &mcp.ToolAnnotations{Title: "Get Installation Target", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetInstallationTargetArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.GetInstallationTarget")
+		Name: "get_release_target", Description: "Get an organization-owned Releases target by name or UUID, including labels and archive state",
+		Annotations: &mcp.ToolAnnotations{Title: "Get Release Target", ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetReleaseTargetArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetReleaseTarget")
 		defer span.End()
 		result, _, err := DepsFromContext(ctx).ReleasesClient.GetTarget(ctx, args.OrgSlug, args.Target)
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
 		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
+	}, []string{"read_release_targets"}
 }
 
-type ListInstallationComponentsArgs struct {
+type ListReleaseComponentsArgs struct {
 	ReleasesListArgs
-	Target buildkite.ReleaseTargetRef `json:"target" jsonschema:"Either id (target UUID), or name plus installation with exactly one of name or id; do not combine forms"`
+	Target buildkite.ReleaseTargetRef `json:"target" jsonschema:"Exactly one of name or id (target UUID)"`
 }
 
-func ListInstallationComponents() (mcp.Tool, mcp.ToolHandlerFor[ListInstallationComponentsArgs, any], []string) {
+func ListReleaseComponents() (mcp.Tool, mcp.ToolHandlerFor[ListReleaseComponentsArgs, any], []string) {
 	return mcp.Tool{
-		Name: "list_installation_components", Description: "List component registrations on a Releases target, including archived components and optional deployment-artifact bindings. Returns items and cursor pagination links",
-		Annotations: &mcp.ToolAnnotations{Title: "List Installation Components", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListInstallationComponentsArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.ListInstallationComponents")
+		Name: "list_release_components", Description: "List component registrations on a Releases target, including archived components and optional deployment-artifact bindings. Returns items and cursor pagination links",
+		Annotations: &mcp.ToolAnnotations{Title: "List Release Components", ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListReleaseComponentsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListReleaseComponents")
 		defer span.End()
 		opt, err := args.options()
 		if err != nil {
@@ -148,36 +101,36 @@ func ListInstallationComponents() (mcp.Tool, mcp.ToolHandlerFor[ListInstallation
 			return handleBuildkiteError(err)
 		}
 		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
+	}, []string{"read_release_targets"}
 }
 
-type GetInstallationComponentArgs struct {
+type GetReleaseComponentArgs struct {
 	ToolInput
 	OrgSlug   string                        `json:"org_slug"`
-	Component buildkite.ReleaseComponentRef `json:"component" jsonschema:"Either id (component UUID), or name plus target selector; do not combine forms. A target selector is id or name plus installation (name or id)"`
+	Component buildkite.ReleaseComponentRef `json:"component" jsonschema:"Either id (component UUID), or name plus target selector; do not combine forms. A target selector has exactly one of name or id"`
 }
 
-func GetInstallationComponent() (mcp.Tool, mcp.ToolHandlerFor[GetInstallationComponentArgs, any], []string) {
+func GetReleaseComponent() (mcp.Tool, mcp.ToolHandlerFor[GetReleaseComponentArgs, any], []string) {
 	return mcp.Tool{
-		Name: "get_installation_component", Description: "Get a Releases component registration and optional artifact binding, not its observed runtime status",
-		Annotations: &mcp.ToolAnnotations{Title: "Get Installation Component", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetInstallationComponentArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.GetInstallationComponent")
+		Name: "get_release_component", Description: "Get a Releases component registration and optional artifact binding, not its observed runtime status",
+		Annotations: &mcp.ToolAnnotations{Title: "Get Release Component", ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetReleaseComponentArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetReleaseComponent")
 		defer span.End()
 		result, _, err := DepsFromContext(ctx).ReleasesClient.GetComponent(ctx, args.OrgSlug, args.Component)
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
 		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
+	}, []string{"read_release_targets"}
 }
 
-func ListInstallationComponentStatuses() (mcp.Tool, mcp.ToolHandlerFor[ListInstallationComponentsArgs, any], []string) {
+func ListReleaseComponentStatuses() (mcp.Tool, mcp.ToolHandlerFor[ListReleaseComponentsArgs, any], []string) {
 	return mcp.Tool{
-		Name: "list_installation_component_statuses", Description: "List observed component state and catalog resolution on a Releases target. Null state means never observed, not absent. Returns items and cursor pagination links",
-		Annotations: &mcp.ToolAnnotations{Title: "List Installation Component Statuses", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListInstallationComponentsArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.ListInstallationComponentStatuses")
+		Name: "list_release_component_statuses", Description: "List observed component state and catalog resolution on a Releases target. Null state means never observed, not absent. Returns items and cursor pagination links",
+		Annotations: &mcp.ToolAnnotations{Title: "List Release Component Statuses", ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListReleaseComponentsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListReleaseComponentStatuses")
 		defer span.End()
 		opt, err := args.options()
 		if err != nil {
@@ -188,43 +141,43 @@ func ListInstallationComponentStatuses() (mcp.Tool, mcp.ToolHandlerFor[ListInsta
 			return handleBuildkiteError(err)
 		}
 		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
+	}, []string{"read_release_targets"}
 }
 
-type GetInstallationComponentStatusArgs struct {
+type GetReleaseComponentStatusArgs struct {
 	ToolInput
 	OrgSlug   string                     `json:"org_slug"`
-	Target    buildkite.ReleaseTargetRef `json:"target" jsonschema:"Either id (target UUID), or name plus installation with exactly one of name or id; do not combine forms"`
+	Target    buildkite.ReleaseTargetRef `json:"target" jsonschema:"Exactly one of name or id (target UUID)"`
 	Component string                     `json:"component" jsonschema:"Component name within the target, not its UUID"`
 }
 
-func GetInstallationComponentStatus() (mcp.Tool, mcp.ToolHandlerFor[GetInstallationComponentStatusArgs, any], []string) {
+func GetReleaseComponentStatus() (mcp.Tool, mcp.ToolHandlerFor[GetReleaseComponentStatusArgs, any], []string) {
 	return mcp.Tool{
-		Name: "get_installation_component_status", Description: "Get a component's observed runtime state and catalog resolution. Null state means never observed; this does not report desired state or deployment safety",
-		Annotations: &mcp.ToolAnnotations{Title: "Get Installation Component Status", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetInstallationComponentStatusArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.GetInstallationComponentStatus")
+		Name: "get_release_component_status", Description: "Get a component's observed runtime state and catalog resolution. Null state means never observed; this does not report desired state or deployment safety",
+		Annotations: &mcp.ToolAnnotations{Title: "Get Release Component Status", ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetReleaseComponentStatusArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetReleaseComponentStatus")
 		defer span.End()
 		result, _, err := DepsFromContext(ctx).ReleasesClient.GetComponentStatus(ctx, args.OrgSlug, args.Target, args.Component)
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
 		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
+	}, []string{"read_release_targets"}
 }
 
-type ListInstallationObservationsArgs struct {
-	ListInstallationComponentsArgs
+type ListReleaseObservationsArgs struct {
+	ListReleaseComponentsArgs
 	Component string `json:"component,omitempty" jsonschema:"Exact component name, not UUID"`
 	Type      string `json:"type,omitempty" jsonschema:"Comma-separated event types: TargetAppeared, ComponentAppeared, ComponentDisappeared, ComponentVersionObserved"`
 }
 
-func ListInstallationObservations() (mcp.Tool, mcp.ToolHandlerFor[ListInstallationObservationsArgs, any], []string) {
+func ListReleaseObservations() (mcp.Tool, mcp.ToolHandlerFor[ListReleaseObservationsArgs, any], []string) {
 	return mcp.Tool{
-		Name: "list_installation_observations", Description: "Browse a Releases target's observation history newest sequence first. Returns items and cursor pagination links; not a polling feed or evidence of desired state",
-		Annotations: &mcp.ToolAnnotations{Title: "List Installation Observations", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListInstallationObservationsArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.ListInstallationObservations")
+		Name: "list_release_observations", Description: "Browse a Releases target's observation history newest sequence first. Returns items and cursor pagination links; not a polling feed or evidence of desired state",
+		Annotations: &mcp.ToolAnnotations{Title: "List Release Observations", ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListReleaseObservationsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListReleaseObservations")
 		defer span.End()
 		opt, err := args.options()
 		if err != nil {
@@ -237,7 +190,7 @@ func ListInstallationObservations() (mcp.Tool, mcp.ToolHandlerFor[ListInstallati
 			return handleBuildkiteError(err)
 		}
 		return mcpTextResult(span, &result)
-	}, []string{"read_deployment_artifacts"}
+	}, []string{"read_release_targets"}
 }
 
 func ListDeploymentArtifacts() (mcp.Tool, mcp.ToolHandlerFor[ReleasesListArgs, any], []string) {

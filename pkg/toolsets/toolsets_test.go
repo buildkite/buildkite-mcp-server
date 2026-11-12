@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -1018,12 +1019,17 @@ func TestReleasesToolset(t *testing.T) {
 	registry.RegisterToolsets(CreateBuiltinToolsets())
 	require.NoError(t, ValidateToolsets([]string{ToolsetReleases}))
 	tools := registry.GetEnabledTools([]string{ToolsetReleases}, true)
-	require.Len(t, tools, 15)
-	require.Equal(t, []string{"read_deployment_artifacts"}, registry.GetRequiredScopes([]string{ToolsetReleases}, true))
+	require.Len(t, tools, 13)
+	require.ElementsMatch(t, []string{"read_release_targets", "read_deployment_artifacts"}, registry.GetRequiredScopes([]string{ToolsetReleases}, true))
 	for _, tool := range tools {
 		require.True(t, tool.IsReadOnly(), tool.Tool.Name)
 		require.False(t, tool.IsMinimumAccess(), tool.Tool.Name)
-		require.Equal(t, []string{"read_deployment_artifacts"}, tool.RequiredScopes, tool.Tool.Name)
+		require.NotContains(t, tool.Tool.Name, "installation")
+		scope := "read_release_targets"
+		if strings.Contains(tool.Tool.Name, "deployment_artifact") {
+			scope = "read_deployment_artifacts"
+		}
+		require.Equal(t, []string{scope}, tool.RequiredScopes, tool.Tool.Name)
 	}
 	artifacts := registry.GetEnabledTools([]string{ToolsetArtifacts}, false)
 	for _, tool := range artifacts {
