@@ -56,7 +56,11 @@ can access every job; otherwise it returns 204 with no list. The REST response
 instead returns the accessible subset.
 
 Items retain job UUIDs, names, states, web links, pipeline names, build numbers,
-and nullable `current_state_since`. Only the first returned item may have a
+and nullable `current_state_since`. Each item also includes its own
+`concurrency_limit`, `concurrency_method` (`ordered` or `eager`), and
+`priority.number`, including zero. The limit can be null; the method is null
+when historical step data is absent. These are per-job settings, not a group-wide
+limit or scheduler-effective priority. Only the first returned item may have a
 timestamp, preserving existing UI behavior. Non-limited targets retain
 configuration but return empty items.
 
