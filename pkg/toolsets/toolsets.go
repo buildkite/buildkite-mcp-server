@@ -251,6 +251,7 @@ const (
 	ToolsetBuilds                = "builds"
 	ToolsetRetries               = "retries"
 	ToolsetArtifacts             = "artifacts"
+	ToolsetReleases              = "releases"
 	ToolsetLogs                  = "logs"
 	ToolsetTests                 = "tests"
 	ToolsetAnnotations           = "annotations"
@@ -270,6 +271,7 @@ var ValidToolsets = []string{
 	ToolsetBuilds,
 	ToolsetRetries,
 	ToolsetArtifacts,
+	ToolsetReleases,
 	ToolsetLogs,
 	ToolsetTests,
 	ToolsetAnnotations,
@@ -453,6 +455,25 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.ListArtifactsForBuild),
 				newToolDef(buildkite.ListArtifactsForJob),
 				newToolDef(buildkite.GetArtifact),
+			},
+		},
+		ToolsetReleases: {
+			Name:        "Releases",
+			Description: "Read targets, components, observed state and the deployment-artifact catalog; not build-job artifact files",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListReleaseTargets),
+				newToolDef(buildkite.GetReleaseTarget),
+				newToolDef(buildkite.ListReleaseComponents),
+				newToolDef(buildkite.GetReleaseComponent),
+				newToolDef(buildkite.ListReleaseComponentStatuses),
+				newToolDef(buildkite.GetReleaseComponentStatus),
+				newToolDef(buildkite.ListReleaseObservations),
+				newToolDef(buildkite.ListDeploymentArtifacts),
+				newToolDef(buildkite.GetDeploymentArtifact),
+				newToolDef(buildkite.ListDeploymentArtifactVersions),
+				newToolDef(buildkite.GetDeploymentArtifactVersion),
+				newToolDef(buildkite.CompareDeploymentArtifactVersions),
+				newToolDef(buildkite.ListDeploymentArtifactComparisonPullRequests),
 			},
 		},
 		ToolsetTests: {
