@@ -24,6 +24,7 @@ type ToolDependencies struct {
 	ArtifactsClient             ArtifactsClient
 	AnnotationsClient           AnnotationsClient
 	OrganizationsClient         OrganizationsClient
+	RateLimitClient             RateLimitClient
 	RepositoryConnectionsClient RepositoryConnectionsClient
 	UserClient                  UserClient
 	AccessTokensClient          AccessTokenClient
