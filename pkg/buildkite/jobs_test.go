@@ -468,6 +468,48 @@ func TestListJobs(t *testing.T) {
 		}, response.Items[0])
 	})
 
+	t.Run("TriggerFailureReasonFromWire", func(t *testing.T) {
+		const payload = `{"items":[
+			{"id":"missing-pipeline","type":"trigger","state":"failed","trigger_failed_reason":"Pipeline \"deploy\" does not exist"},
+			{"id":"permission","type":"trigger","state":"failed","trigger_failed_reason":"Trigger permission denied"},
+			{"id":"creator","type":"trigger","state":"failed","trigger_failed_reason":"Build creation failed:\ninvalid branch"},
+			{"id":"no-reason","type":"trigger","state":"failed","trigger_failed_reason":null},
+			{"id":"script","type":"script","state":"passed"}
+		],"links":{}}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "/v2/organizations/org/pipelines/pipeline/builds/123/jobs", r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(payload))
+		}))
+		t.Cleanup(srv.Close)
+		client, err := buildkite.NewOpts(buildkite.WithBaseURL(srv.URL))
+		require.NoError(t, err)
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: client.Jobs})
+
+		for _, level := range []string{"", "summary", "detailed", "full"} {
+			t.Run("DetailLevel="+level, func(t *testing.T) {
+				_, handler, _ := ListJobs()
+				result, _, err := handler(ctx, createMCPRequest(t, nil), ListJobsArgs{
+					OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "123", DetailLevel: level,
+				})
+				require.NoError(t, err)
+				require.False(t, result.IsError)
+				text := getTextResult(t, result).Text
+				requireJSONPathEqual(t, text, `Pipeline "deploy" does not exist`, "items", 0, "trigger_failed_reason")
+				requireJSONPathEqual(t, text, "Trigger permission denied", "items", 1, "trigger_failed_reason")
+				requireJSONPathEqual(t, text, "Build creation failed:\ninvalid branch", "items", 2, "trigger_failed_reason")
+				var response struct {
+					Items []map[string]any `json:"items"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(text), &response))
+				require.Len(t, response.Items, 5)
+				require.NotContains(t, response.Items[3], "trigger_failed_reason")
+				require.NotContains(t, response.Items[4], "trigger_failed_reason")
+			})
+		}
+	})
+
 	t.Run("NamesFromWire", func(t *testing.T) {
 		const payload = `{"items":[
 			{"id":"manual-job","type":"manual","label":"Update branch or run CI anyway","state":"blocked","step_key":"branch-freshness-override","unblockable":true},

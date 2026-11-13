@@ -51,18 +51,19 @@ type ListJobsArgs struct {
 
 // JobSummary contains the fields normally needed to identify a build failure.
 type JobSummary struct {
-	ID           string                    `json:"id"`
-	Name         string                    `json:"name"`
-	State        string                    `json:"state"`
-	Command      string                    `json:"command"`
-	ExitStatus   *int                      `json:"exit_status"`
-	SoftFailed   bool                      `json:"soft_failed,omitempty"`
-	SignalReason string                    `json:"signal_reason,omitempty"`
-	BrokenReason string                    `json:"broken_reason,omitempty"`
-	StepKey      string                    `json:"step_key,omitempty"`
-	StepID       string                    `json:"step_id,omitempty"`
-	RetriesCount int                       `json:"retries_count,omitempty"`
-	RetrySource  *buildkite.JobRetrySource `json:"retry_source,omitempty"`
+	ID                  string                    `json:"id"`
+	Name                string                    `json:"name"`
+	State               string                    `json:"state"`
+	Command             string                    `json:"command"`
+	ExitStatus          *int                      `json:"exit_status"`
+	SoftFailed          bool                      `json:"soft_failed,omitempty"`
+	SignalReason        string                    `json:"signal_reason,omitempty"`
+	BrokenReason        string                    `json:"broken_reason,omitempty"`
+	TriggerFailedReason string                    `json:"trigger_failed_reason,omitempty"`
+	StepKey             string                    `json:"step_key,omitempty"`
+	StepID              string                    `json:"step_id,omitempty"`
+	RetriesCount        int                       `json:"retries_count,omitempty"`
+	RetrySource         *buildkite.JobRetrySource `json:"retry_source,omitempty"`
 }
 
 // JobDetail adds actionable job metadata while excluding repeated build,
@@ -104,18 +105,19 @@ func summarizeJob(job buildkite.Job) JobSummary {
 	}
 
 	return JobSummary{
-		ID:           job.ID,
-		Name:         jobDisplayName(job),
-		State:        job.State,
-		Command:      job.Command,
-		ExitStatus:   job.ExitStatus,
-		SoftFailed:   job.SoftFailed,
-		SignalReason: job.SignalReason,
-		BrokenReason: job.BrokenReason,
-		StepKey:      job.StepKey,
-		StepID:       stepID,
-		RetriesCount: job.RetriesCount,
-		RetrySource:  job.RetrySource,
+		ID:                  job.ID,
+		Name:                jobDisplayName(job),
+		State:               job.State,
+		Command:             job.Command,
+		ExitStatus:          job.ExitStatus,
+		SoftFailed:          job.SoftFailed,
+		SignalReason:        job.SignalReason,
+		BrokenReason:        job.BrokenReason,
+		TriggerFailedReason: job.TriggerFailedReason,
+		StepKey:             job.StepKey,
+		StepID:              stepID,
+		RetriesCount:        job.RetriesCount,
+		RetrySource:         job.RetrySource,
 	}
 }
 
