@@ -4,7 +4,7 @@
     "type": "module",
     "license": "MIT",
     "devDependencies": {
-        "@types/node": "^24",
+        "@types/node": "^26.0.0",
         "prettier": "^3.6",
         "typescript": "^5"
     },
