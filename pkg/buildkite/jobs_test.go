@@ -983,8 +983,9 @@ func TestGetJobConcurrency(t *testing.T) {
 	const metadata = `"order":["scheduled_at","position","id"],"scope":"subset_of_active_jobs_ahead_within_callers_scope_and_internal_limit","notice":"Submission order is not execution order. This is not a complete list of jobs holding up this job because of concurrency limits; an empty list does not establish that there are no blockers."`
 	const group = `{"id":"fe954d1d-cd44-4264-9d64-2d6e9c783076","key":"deploy/prod","scope":"custom","cluster_id":null}`
 	const items = `[
-		{"id":"019a0000-0000-7000-8000-000000000002","name":"Deploy production","state":"running","web_url":"https://buildkite.com/acme/deploy/builds/41#019a0000-0000-7000-8000-000000000002","pipeline_name":"Deploy","build_number":41,"current_state_since":"2026-11-01T13:00:26.051Z"},
-		{"id":"019a0000-0000-7000-8000-000000000001","name":"Release","state":"limited","web_url":"https://buildkite.com/acme/release/builds/73#019a0000-0000-7000-8000-000000000001","pipeline_name":"Release","build_number":73,"current_state_since":null}
+		{"id":"019a0000-0000-7000-8000-000000000002","name":"Deploy production","state":"running","web_url":"https://buildkite.com/acme/deploy/builds/41#019a0000-0000-7000-8000-000000000002","pipeline_name":"Deploy","build_number":41,"current_state_since":"2026-11-01T13:00:26.051Z","concurrency_limit":7,"concurrency_method":"eager","priority":{"number":-4}},
+		{"id":"019a0000-0000-7000-8000-000000000001","name":"Release","state":"limited","web_url":"https://buildkite.com/acme/release/builds/73#019a0000-0000-7000-8000-000000000001","pipeline_name":"Release","build_number":73,"current_state_since":null,"concurrency_limit":2,"concurrency_method":"ordered","priority":{"number":8}},
+		{"id":"019a0000-0000-7000-8000-000000000004","name":"Historical deploy","state":"waiting","web_url":"https://buildkite.com/acme/deploy/builds/40#019a0000-0000-7000-8000-000000000004","pipeline_name":"Deploy","build_number":40,"current_state_since":null,"concurrency_limit":null,"concurrency_method":null,"priority":{"number":0}}
 	]`
 	for _, tt := range []struct{ name, payload string }{
 		{"limited with visible predecessors", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":` + items + `,` + metadata + `}}`},
