@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetBuildFailureSummaryIncludesBrokenReasonOnBrokenJobs(t *testing.T) {
+func TestGetBuildFailureSummaryIncludesJobFailureReasons(t *testing.T) {
 	buildsClient := &MockBuildsClient{
 		GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
 			return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{}, nil
@@ -20,7 +20,10 @@ func TestGetBuildFailureSummaryIncludesBrokenReasonOnBrokenJobs(t *testing.T) {
 		ListByBuildFunc: func(_ context.Context, _, _, _ string, options *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
 			switch {
 			case options.State[0] == "failed":
-				return buildkite.JobsList{Items: []buildkite.Job{{ID: "tests", State: "failed"}}}, &buildkite.Response{}, nil
+				return buildkite.JobsList{Items: []buildkite.Job{
+					{ID: "tests", State: "failed"},
+					{ID: "trigger", Type: "trigger", State: "failed", TriggerFailedReason: `Pipeline "deploy" does not exist`},
+				}}, &buildkite.Response{}, nil
 			case slices.Contains(options.State, "broken"):
 				return buildkite.JobsList{Items: []buildkite.Job{{ID: "deploy", State: "broken", BrokenReason: "branch_mismatch"}}}, &buildkite.Response{}, nil
 			default:
@@ -42,8 +45,12 @@ func TestGetBuildFailureSummaryIncludesBrokenReasonOnBrokenJobs(t *testing.T) {
 	text := getTextResult(t, callResult).Text
 	var summary BuildFailureSummary
 	require.NoError(t, json.Unmarshal([]byte(text), &summary))
-	require.Equal(t, []string{"tests", "deploy"}, []string{summary.Jobs[0].ID, summary.Jobs[1].ID})
+	require.Len(t, summary.Jobs, 3)
+	require.Equal(t, []string{"tests", "trigger", "deploy"}, []string{summary.Jobs[0].ID, summary.Jobs[1].ID, summary.Jobs[2].ID})
 	require.Empty(t, summary.Jobs[0].BrokenReason)
-	require.Equal(t, "branch_mismatch", summary.Jobs[1].BrokenReason)
+	require.Empty(t, summary.Jobs[0].TriggerFailedReason)
+	require.Equal(t, `Pipeline "deploy" does not exist`, summary.Jobs[1].TriggerFailedReason)
+	requireJSONPathEqual(t, text, `Pipeline "deploy" does not exist`, "jobs", 1, "trigger_failed_reason")
+	require.Equal(t, "branch_mismatch", summary.Jobs[2].BrokenReason)
 	require.Contains(t, text, `"broken_reason": "branch_mismatch"`)
 }

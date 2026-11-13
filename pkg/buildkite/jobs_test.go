@@ -468,6 +468,48 @@ func TestListJobs(t *testing.T) {
 		}, response.Items[0])
 	})
 
+	t.Run("TriggerFailureReasonFromWire", func(t *testing.T) {
+		const payload = `{"items":[
+			{"id":"missing-pipeline","type":"trigger","state":"failed","trigger_failed_reason":"Pipeline \"deploy\" does not exist"},
+			{"id":"permission","type":"trigger","state":"failed","trigger_failed_reason":"Trigger permission denied"},
+			{"id":"creator","type":"trigger","state":"failed","trigger_failed_reason":"Build creation failed:\ninvalid branch"},
+			{"id":"no-reason","type":"trigger","state":"failed","trigger_failed_reason":null},
+			{"id":"script","type":"script","state":"passed"}
+		],"links":{}}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "/v2/organizations/org/pipelines/pipeline/builds/123/jobs", r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(payload))
+		}))
+		t.Cleanup(srv.Close)
+		client, err := buildkite.NewOpts(buildkite.WithBaseURL(srv.URL))
+		require.NoError(t, err)
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: client.Jobs})
+
+		for _, level := range []string{"", "summary", "detailed", "full"} {
+			t.Run("DetailLevel="+level, func(t *testing.T) {
+				_, handler, _ := ListJobs()
+				result, _, err := handler(ctx, createMCPRequest(t, nil), ListJobsArgs{
+					OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "123", DetailLevel: level,
+				})
+				require.NoError(t, err)
+				require.False(t, result.IsError)
+				text := getTextResult(t, result).Text
+				requireJSONPathEqual(t, text, `Pipeline "deploy" does not exist`, "items", 0, "trigger_failed_reason")
+				requireJSONPathEqual(t, text, "Trigger permission denied", "items", 1, "trigger_failed_reason")
+				requireJSONPathEqual(t, text, "Build creation failed:\ninvalid branch", "items", 2, "trigger_failed_reason")
+				var response struct {
+					Items []map[string]any `json:"items"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(text), &response))
+				require.Len(t, response.Items, 5)
+				require.NotContains(t, response.Items[3], "trigger_failed_reason")
+				require.NotContains(t, response.Items[4], "trigger_failed_reason")
+			})
+		}
+	})
+
 	t.Run("NamesFromWire", func(t *testing.T) {
 		const payload = `{"items":[
 			{"id":"manual-job","type":"manual","label":"Update branch or run CI anyway","state":"blocked","step_key":"branch-freshness-override","unblockable":true},
@@ -941,8 +983,9 @@ func TestGetJobConcurrency(t *testing.T) {
 	const metadata = `"order":["scheduled_at","position","id"],"scope":"subset_of_active_jobs_ahead_within_callers_scope_and_internal_limit","notice":"Submission order is not execution order. This is not a complete list of jobs holding up this job because of concurrency limits; an empty list does not establish that there are no blockers."`
 	const group = `{"id":"fe954d1d-cd44-4264-9d64-2d6e9c783076","key":"deploy/prod","scope":"custom","cluster_id":null}`
 	const items = `[
-		{"id":"019a0000-0000-7000-8000-000000000002","name":"Deploy production","state":"running","web_url":"https://buildkite.com/acme/deploy/builds/41#019a0000-0000-7000-8000-000000000002","pipeline_name":"Deploy","build_number":41,"current_state_since":"2026-11-01T13:00:26.051Z"},
-		{"id":"019a0000-0000-7000-8000-000000000001","name":"Release","state":"limited","web_url":"https://buildkite.com/acme/release/builds/73#019a0000-0000-7000-8000-000000000001","pipeline_name":"Release","build_number":73,"current_state_since":null}
+		{"id":"019a0000-0000-7000-8000-000000000002","name":"Deploy production","state":"running","web_url":"https://buildkite.com/acme/deploy/builds/41#019a0000-0000-7000-8000-000000000002","pipeline_name":"Deploy","build_number":41,"current_state_since":"2026-11-01T13:00:26.051Z","concurrency_limit":7,"concurrency_method":"eager","priority":{"number":-4}},
+		{"id":"019a0000-0000-7000-8000-000000000001","name":"Release","state":"limited","web_url":"https://buildkite.com/acme/release/builds/73#019a0000-0000-7000-8000-000000000001","pipeline_name":"Release","build_number":73,"current_state_since":null,"concurrency_limit":2,"concurrency_method":"ordered","priority":{"number":8}},
+		{"id":"019a0000-0000-7000-8000-000000000004","name":"Historical deploy","state":"waiting","web_url":"https://buildkite.com/acme/deploy/builds/40#019a0000-0000-7000-8000-000000000004","pipeline_name":"Deploy","build_number":40,"current_state_since":null,"concurrency_limit":null,"concurrency_method":null,"priority":{"number":0}}
 	]`
 	for _, tt := range []struct{ name, payload string }{
 		{"limited with visible predecessors", `{"concurrency_group":` + group + `,"concurrency_limit":3,"state":"limited","jobs_ahead":{"items":` + items + `,` + metadata + `}}`},
