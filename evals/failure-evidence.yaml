@@ -1,0 +1,47 @@
+# Synthetic pre-deployment replay. No Test Engine coverage or production latency claims.
+# Set BUILDKITE_REPLAY=/workspace/fixtures/failure-evidence.har in CI.
+matrix:
+  - id: annotated-summary
+    agent: claude
+    model: claude-opus-4-8
+    prompt: failure-evidence
+    evaluator: klaren
+    scenario:
+      id: annotated
+      vars:
+        BUILD_NUMBER: "1"
+        FIRST_TOOL: get_build_failure_summary
+    mcp_version: source
+  - id: annotated-evidence
+    agent: claude
+    model: claude-opus-4-8
+    prompt: failure-evidence
+    evaluator: klaren
+    scenario:
+      id: annotated
+      vars:
+        BUILD_NUMBER: "1"
+        FIRST_TOOL: get_build_failure_evidence
+    mcp_version: source
+  - id: log-only-summary
+    agent: claude
+    model: claude-opus-4-8
+    prompt: failure-evidence
+    evaluator: klaren
+    scenario:
+      id: log-only
+      vars:
+        BUILD_NUMBER: "2"
+        FIRST_TOOL: get_build_failure_summary
+    mcp_version: source
+  - id: log-only-evidence
+    agent: claude
+    model: claude-opus-4-8
+    prompt: failure-evidence
+    evaluator: klaren
+    scenario:
+      id: log-only
+      vars:
+        BUILD_NUMBER: "2"
+        FIRST_TOOL: get_build_failure_evidence
+    mcp_version: source

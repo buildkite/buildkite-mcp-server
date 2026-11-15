@@ -259,6 +259,7 @@ func TestMinimumAccessWarning(t *testing.T) {
 func TestMinimumAccessRegistration(t *testing.T) {
 	inspection := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job", "get_job_concurrency"}
 	all := append(append([]string{}, inspection...),
+		"get_build_failure_evidence",
 		"get_build_test_engine_runs", "list_step_uploads", "get_step_upload",
 		"get_pipeline", "list_pipelines", "validate_pipeline", "list_pipeline_schedules", "get_pipeline_schedule", "get_pipeline_github_webhook_processing",
 		"list_annotations", "current_user", "access_token", "list_skills", "load_skill")
@@ -272,7 +273,7 @@ func TestMinimumAccessRegistration(t *testing.T) {
 		{name: "all", enabled: []string{"all"}, expected: all},
 		{name: "also read-only", enabled: []string{"all"}, readOnly: true, expected: all},
 		{name: "overlapping toolsets", enabled: []string{"retries", "logs"}, expected: inspection},
-		{name: "additional scopes only", enabled: []string{"clusters", "investigations"}},
+		{name: "optional enrichment scope", enabled: []string{"clusters", "investigations"}, expected: []string{"get_build_failure_evidence"}},
 		{name: "exclusions still apply", enabled: []string{"retries"}, disabled: []string{"builds"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

@@ -3,6 +3,7 @@ package buildkite
 import (
 	"context"
 
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -13,6 +14,7 @@ type FailureSummaryConfig struct {
 
 // ToolDependencies holds all client interfaces needed by tool handlers.
 type ToolDependencies struct {
+	APIClient                   *buildkite.Client
 	BuildsClient                BuildsClient
 	PipelinesClient             PipelinesClient
 	PipelineSchedulesClient     PipelineSchedulesClient

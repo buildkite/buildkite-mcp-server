@@ -5,6 +5,8 @@
             "args": ["stdio", "--read-only"],
             "env": {
                 "BUILDKITE_API_TOKEN": "${BUILDKITE_API_TOKEN}",
+                "BUILDKITE_REPLAY": "${BUILDKITE_REPLAY:-}",
+                "BKLOG_CACHE_URL": "${BKLOG_CACHE_URL:-}",
                 "BUILDKITE_REQUEST_LOG": "${BUILDKITE_REQUEST_LOG:-}"
             }
         }
