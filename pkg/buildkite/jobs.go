@@ -51,18 +51,19 @@ type ListJobsArgs struct {
 
 // JobSummary contains the fields normally needed to identify a build failure.
 type JobSummary struct {
-	ID           string                    `json:"id"`
-	Name         string                    `json:"name"`
-	State        string                    `json:"state"`
-	Command      string                    `json:"command"`
-	ExitStatus   *int                      `json:"exit_status"`
-	SoftFailed   bool                      `json:"soft_failed,omitempty"`
-	SignalReason string                    `json:"signal_reason,omitempty"`
-	BrokenReason string                    `json:"broken_reason,omitempty"`
-	StepKey      string                    `json:"step_key,omitempty"`
-	StepID       string                    `json:"step_id,omitempty"`
-	RetriesCount int                       `json:"retries_count,omitempty"`
-	RetrySource  *buildkite.JobRetrySource `json:"retry_source,omitempty"`
+	ID                  string                    `json:"id"`
+	Name                string                    `json:"name"`
+	State               string                    `json:"state"`
+	Command             string                    `json:"command"`
+	ExitStatus          *int                      `json:"exit_status"`
+	SoftFailed          bool                      `json:"soft_failed,omitempty"`
+	SignalReason        string                    `json:"signal_reason,omitempty"`
+	BrokenReason        string                    `json:"broken_reason,omitempty"`
+	TriggerFailedReason string                    `json:"trigger_failed_reason,omitempty"`
+	StepKey             string                    `json:"step_key,omitempty"`
+	StepID              string                    `json:"step_id,omitempty"`
+	RetriesCount        int                       `json:"retries_count,omitempty"`
+	RetrySource         *buildkite.JobRetrySource `json:"retry_source,omitempty"`
 }
 
 // JobDetail adds actionable job metadata while excluding repeated build,
@@ -89,31 +90,34 @@ type JobListResult[T any] struct {
 	Links buildkite.JobsListLinks `json:"links"`
 }
 
+func jobDisplayName(job buildkite.Job) string {
+	if job.Name != "" {
+		return job.Name
+	}
+	// Manual jobs expose their display name as label rather than name.
+	return job.Label
+}
+
 func summarizeJob(job buildkite.Job) JobSummary {
 	var stepID string
 	if job.Step != nil {
 		stepID = job.Step.ID
 	}
 
-	name := job.Name
-	if name == "" {
-		// Manual jobs expose their display name as label rather than name.
-		name = job.Label
-	}
-
 	return JobSummary{
-		ID:           job.ID,
-		Name:         name,
-		State:        job.State,
-		Command:      job.Command,
-		ExitStatus:   job.ExitStatus,
-		SoftFailed:   job.SoftFailed,
-		SignalReason: job.SignalReason,
-		BrokenReason: job.BrokenReason,
-		StepKey:      job.StepKey,
-		StepID:       stepID,
-		RetriesCount: job.RetriesCount,
-		RetrySource:  job.RetrySource,
+		ID:                  job.ID,
+		Name:                jobDisplayName(job),
+		State:               job.State,
+		Command:             job.Command,
+		ExitStatus:          job.ExitStatus,
+		SoftFailed:          job.SoftFailed,
+		SignalReason:        job.SignalReason,
+		BrokenReason:        job.BrokenReason,
+		TriggerFailedReason: job.TriggerFailedReason,
+		StepKey:             job.StepKey,
+		StepID:              stepID,
+		RetriesCount:        job.RetriesCount,
+		RetrySource:         job.RetrySource,
 	}
 }
 
