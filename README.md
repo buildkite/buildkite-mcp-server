@@ -10,31 +10,30 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ## Reading Releases
 
-The `releases` toolset reads organization-owned targets, component registrations,
-observed component status and observation history, plus the deployment-artifact
-catalog, versions, version comparisons and publisher-supplied pull requests in a
-comparison range. It does not publish versions, report observations or deploy
-software. Existing `artifacts` tools still read files attached to build jobs.
+The `releases` toolset reads Targets, organization-owned catalog Components,
+per-Target Component Instances, observed Instance status and observation history,
+and deployment artifacts with their published SHA-256 digests and provenance.
+Existing `artifacts` tools read files attached to build jobs.
 
 ```bash
 buildkite-mcp-server stdio --enabled-toolsets releases --read-only
 ```
 
-Target, component, status and observation tools require `read_release_targets`;
-catalog tools require `read_deployment_artifacts`. Organization access, the
-`DeploymentArtifacts` feature flag and server permissions still apply. Tools are excluded from
-minimum-access mode. Hosted use requires a server release containing these tools
-and OAuth consent granting the required scopes; changing toolset headers cannot add
-scopes to an existing grant.
+All Releases tools require `read_deployment_artifacts`. The API also requires
+organization access, organization-admin permission and the `DeploymentArtifacts`
+feature flag. Hosted use requires OAuth consent granting that scope.
 
 Select registrations explicitly by name or UUID, for example
-`target: {"name": "production"}` or `target: {"id": "<target UUID>"}`.
-Names are literal, even when UUID-shaped. Collections return `items` and cursor
-`links`; pass the opaque `after` or `before` value from those links, not a page
-number. Version listing defaults to registration order, not version precedence.
-Comparison reports left relative to right; unknown precedence is a valid result,
-not a statement that deployment is safe. Published pull requests are claims from
-publishers, not a complete change inventory.
+`target: {"name": "production"}` or `target: {"id": "<Target UUID>"}`.
+`list_release_component_instances` accepts an optional `target`; omit it to
+search across the organization. Its `label: {"environment": "production"}` filter
+matches Target labels. Components include their artifact binding; Instances
+include their Target and Component IDs.
+
+Collections return `items` and cursor `links`; pass the opaque `after` or `before`
+value from those links. Digests are listed newest publication first and include
+yank state and publisher-supplied pull requests. Instance status includes nullable
+presence, active and last-active digests, and read-time catalog resolution.
 
 ---
 
