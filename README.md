@@ -8,6 +8,38 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Reading Releases
+
+The `releases` toolset reads Targets, organization-owned catalog Components,
+per-Target Component Instances, observed Instance status and observation history,
+and deployment artifacts with their published SHA-256 digests and provenance.
+Existing `artifacts` tools read files attached to build jobs.
+
+```bash
+buildkite-mcp-server stdio --enabled-toolsets releases --read-only
+```
+
+All Releases tools require `read_deployment_artifacts`. The API also requires
+organization access, organization-admin permission and the `DeploymentArtifacts`
+feature flag. Hosted use requires OAuth consent granting that scope.
+
+Select registrations explicitly by name or UUID, for example
+`target: {"name": "production"}` or `target: {"id": "<Target UUID>"}`.
+`list_release_component_instances` accepts an optional `target`; omit it to
+search across the organization. Its `label: {"environment": "production"}` filter
+matches Target labels. Components include their artifact binding; Instances
+include their Target and Component IDs.
+
+Collections return `items` and cursor `links`; pass the opaque `after` or `before`
+value from those links. Versions are listed newest publication first and include
+digests, yank state and publisher-supplied pull requests. Read a Version by its UUID;
+several Versions can share a digest, and legacy Versions can have a null digest.
+Instance status includes nullable presence, active and last-active digests, and
+read-time catalog resolution indicating whether matching content is registered,
+not which Version produced it.
+
+---
+
 ## Retrying builds with limited permissions
 
 The `retries` toolset supports investigating failures and retrying jobs without

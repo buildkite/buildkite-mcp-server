@@ -273,6 +273,7 @@ func TestMinimumAccessRegistration(t *testing.T) {
 		{name: "also read-only", enabled: []string{"all"}, readOnly: true, expected: all},
 		{name: "overlapping toolsets", enabled: []string{"retries", "logs"}, expected: inspection},
 		{name: "additional scopes only", enabled: []string{"clusters", "investigations"}},
+		{name: "releases excluded from minimum access", enabled: []string{"releases"}},
 		{name: "exclusions still apply", enabled: []string{"retries"}, disabled: []string{"builds"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
