@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/buildkite/buildkite-logs v0.13.1
-	github.com/buildkite/go-buildkite/v5 v5.30.1-0.20261116064041-3ef83b3b0722
+	github.com/buildkite/go-buildkite/v5 v5.30.1-0.20261116225955-78fdd5933e86
 	github.com/google/jsonschema-go v0.4.3
 	github.com/mattn/go-isatty v0.0.24
 	github.com/microcosm-cc/bluemonday v1.0.27

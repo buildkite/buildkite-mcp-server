@@ -124,7 +124,7 @@ func GetReleaseComponent() (mcp.Tool, mcp.ToolHandlerFor[GetReleaseComponentArgs
 type ListReleaseComponentInstancesArgs struct {
 	ReleasesListArgs
 	Target *buildkite.ReleaseTargetRef         `json:"target,omitempty" jsonschema:"Omit for organization-wide discovery; otherwise exactly one of name or id (Target UUID)"`
-	Label  buildkite.ReleaseTargetLabelFilters `json:"label,omitempty" jsonschema:"Match all supplied label pairs on the Instance's Target"`
+	Label  buildkite.ReleaseTargetLabelFilters `json:"label,omitempty" jsonschema:"Match all supplied label pairs on the Component Instance's Target"`
 }
 
 func ListReleaseComponentInstances() (mcp.Tool, mcp.ToolHandlerFor[ListReleaseComponentInstancesArgs, any], []string) {
@@ -156,7 +156,7 @@ func ListReleaseComponentInstances() (mcp.Tool, mcp.ToolHandlerFor[ListReleaseCo
 type GetReleaseComponentInstanceArgs struct {
 	ToolInput
 	OrgSlug  string                                `json:"org_slug"`
-	Instance buildkite.ReleaseComponentInstanceRef `json:"instance" jsonschema:"Either id (Instance UUID), or name plus target with exactly one of name or id; do not combine forms"`
+	Instance buildkite.ReleaseComponentInstanceRef `json:"instance" jsonschema:"Either id (Component Instance UUID), or name plus target with exactly one of name or id; do not combine forms"`
 }
 
 func GetReleaseComponentInstance() (mcp.Tool, mcp.ToolHandlerFor[GetReleaseComponentInstanceArgs, any], []string) {
@@ -181,7 +181,7 @@ type ReleasesTargetListArgs struct {
 
 func ListReleaseComponentInstanceStatuses() (mcp.Tool, mcp.ToolHandlerFor[ReleasesTargetListArgs, any], []string) {
 	return mcp.Tool{
-		Name: "list_release_component_instance_statuses", Description: "List observed Instance state and digest catalog resolution on a Target. Null state means never observed, not absent. Returns items and cursor pagination links",
+		Name: "list_release_component_instance_statuses", Description: "List observed Component Instance state and digest catalog resolution on a Target. Null state means never observed, not absent. Returns items and cursor pagination links",
 		Annotations: &mcp.ToolAnnotations{Title: "List Release Component Instance Statuses", ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ReleasesTargetListArgs) (*mcp.CallToolResult, any, error) {
 		ctx, span := trace.Start(ctx, "buildkite.ListReleaseComponentInstanceStatuses")
@@ -202,12 +202,12 @@ type GetReleaseComponentInstanceStatusArgs struct {
 	ToolInput
 	OrgSlug  string                     `json:"org_slug"`
 	Target   buildkite.ReleaseTargetRef `json:"target" jsonschema:"Exactly one of name or id (Target UUID)"`
-	Instance string                     `json:"instance" jsonschema:"Instance name within the Target"`
+	Instance string                     `json:"instance" jsonschema:"Component Instance name within the Target"`
 }
 
 func GetReleaseComponentInstanceStatus() (mcp.Tool, mcp.ToolHandlerFor[GetReleaseComponentInstanceStatusArgs, any], []string) {
 	return mcp.Tool{
-		Name: "get_release_component_instance_status", Description: "Get an Instance's observed presence, active and last-active digests, and read-time catalog resolution. Null state means never observed",
+		Name: "get_release_component_instance_status", Description: "Get a Component Instance's observed presence, active and last-active digests, and read-time catalog resolution. Null state means never observed",
 		Annotations: &mcp.ToolAnnotations{Title: "Get Release Component Instance Status", ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetReleaseComponentInstanceStatusArgs) (*mcp.CallToolResult, any, error) {
 		ctx, span := trace.Start(ctx, "buildkite.GetReleaseComponentInstanceStatus")
@@ -222,7 +222,7 @@ func GetReleaseComponentInstanceStatus() (mcp.Tool, mcp.ToolHandlerFor[GetReleas
 
 type ListReleaseObservationsArgs struct {
 	ReleasesTargetListArgs
-	Instance string `json:"instance,omitempty" jsonschema:"Exact Instance name"`
+	Instance string `json:"instance,omitempty" jsonschema:"Exact Component Instance name"`
 	Type     string `json:"type,omitempty" jsonschema:"Comma-separated event types: ComponentInstanceAppeared, ComponentInstanceDisappeared, ComponentInstanceVersionObserved"`
 }
 
