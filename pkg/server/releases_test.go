@@ -26,11 +26,11 @@ func TestReleasesReadToolsThroughMCP(t *testing.T) {
 		target      = `{"id":"` + targetID + `","graphql_id":"opaque-target","name":"prod","labels":{"region":"au"},"url":"https://api.buildkite.com/targets/prod","id_url":"https://api.buildkite.com/targets/by-id/` + targetID + `","created_at":"2026-11-08T00:00:00Z","archived_at":null}`
 		component   = `{"id":"` + componentID + `","graphql_id":"opaque-component","name":"api","artifact":{"id":"` + artifactID + `","graphql_id":"opaque-artifact","name":"payments-api"},"url":"https://api.buildkite.com/components/api","id_url":"https://api.buildkite.com/components/by-id/` + componentID + `","created_at":"2026-11-08T00:00:00Z","archived_at":null}`
 		instance    = `{"id":"` + instanceID + `","graphql_id":"opaque-instance","name":"api-blue","target_id":"` + targetID + `","component_id":"` + componentID + `","url":"https://api.buildkite.com/targets/prod/instances/api-blue","id_url":"https://api.buildkite.com/component_instance/by-id/` + instanceID + `","created_at":"2026-11-08T00:00:00Z","archived_at":null}`
-		status      = `{"target_id":"` + targetID + `","instance":"api-blue","instance_id":"` + instanceID + `","present":false,"active_digest":null,"last_active_digest":"` + sha + `","first_seen_at":"2026-11-08T00:00:00Z","last_seen_at":"2026-11-08T01:00:00Z","sequence":4,"catalog_resolution":{"status":"unknown","artifact_digest_id":null,"reason":"instance_absent"}}`
-		unobserved  = `{"target_id":"` + targetID + `","instance":"api-blue","instance_id":"` + instanceID + `","present":null,"active_digest":null,"last_active_digest":null,"first_seen_at":null,"last_seen_at":null,"sequence":null,"catalog_resolution":{"status":"unknown","artifact_digest_id":null,"reason":"no_active_digest"}}`
-		observation = `{"id":"` + componentID + `","graphql_id":"opaque-observation","target_id":"` + targetID + `","sequence":1,"event_id":"` + digestID + `","type":"ComponentInstanceDigestObserved","instance":"api-blue","observed_tag":"stable","digest":"` + sha + `","occurred_at":"2026-11-08T00:00:00Z","recorded_at":"2026-11-08T01:00:00Z","catalog_resolution":{"status":"resolved","artifact_digest_id":"` + digestID + `","reason":null}}`
+		status      = `{"target_id":"` + targetID + `","instance":"api-blue","instance_id":"` + instanceID + `","present":false,"active_digest":null,"last_active_digest":"` + sha + `","first_seen_at":"2026-11-08T00:00:00Z","last_seen_at":"2026-11-08T01:00:00Z","sequence":4,"catalog_resolution":{"status":"unknown","reason":"instance_absent"}}`
+		unobserved  = `{"target_id":"` + targetID + `","instance":"api-blue","instance_id":"` + instanceID + `","present":null,"active_digest":null,"last_active_digest":null,"first_seen_at":null,"last_seen_at":null,"sequence":null,"catalog_resolution":{"status":"unknown","reason":"no_active_digest"}}`
+		observation = `{"id":"` + componentID + `","graphql_id":"opaque-observation","target_id":"` + targetID + `","sequence":1,"event_id":"` + digestID + `","type":"ComponentInstanceDigestObserved","instance":"api-blue","digest":"` + sha + `","occurred_at":"2026-11-08T00:00:00Z","recorded_at":"2026-11-08T01:00:00Z","catalog_resolution":{"status":"resolved","reason":null}}`
 		artifact    = `{"id":"` + artifactID + `","graphql_id":"opaque-artifact","name":"payments-api","url":"https://api.buildkite.com/artifacts/payments-api","id_url":"https://api.buildkite.com/artifacts/by-id/` + artifactID + `","created_at":"2026-11-08T00:00:00Z","archived_at":null}`
-		digest      = `{"id":"` + digestID + `","graphql_id":"opaque-digest","digest":"` + sha + `","source_url":null,"source_build":null,"pull_requests":[{"url":"https://github.com/acme/api/pull/2"}],"created_by":null,"url":"https://api.buildkite.com/artifacts/payments-api/digests/` + sha + `","id_url":"https://api.buildkite.com/artifact-digests/by-id/` + digestID + `","created_at":"2026-11-08T00:00:00Z","yanked":true,"yanked_at":"2026-11-08T01:00:00Z","yank_reason":"withdrawn"}`
+		version     = `{"id":"` + digestID + `","graphql_id":"opaque-version","digest":null,"source_url":null,"source_build":null,"pull_requests":[{"url":"https://github.com/acme/api/pull/2"}],"created_by":null,"url":"https://api.buildkite.com/artifact-versions/by-id/` + digestID + `","id_url":"https://api.buildkite.com/artifact-versions/by-id/` + digestID + `","created_at":"2026-11-08T00:00:00Z","yanked":true,"yanked_at":"2026-11-08T01:00:00Z","yank_reason":"withdrawn"}`
 	)
 	page := func(item string) string {
 		return `{"items":[` + item + `],"links":{"self":"https://api.buildkite.com/current","next":"https://api.buildkite.com/current?after=next-cursor"}}`
@@ -56,9 +56,8 @@ func TestReleasesReadToolsThroughMCP(t *testing.T) {
 		{"list_release_observations", map[string]any{"target": map[string]any{"id": targetID}, "instance": "api-blue", "type": "ComponentInstanceAppeared,ComponentInstanceDigestObserved", "before": "cursor-two"}, "targets/by-id/" + targetID + "/observations", url.Values{"instance": {"api-blue"}, "type": {"ComponentInstanceAppeared,ComponentInstanceDigestObserved"}, "before": {"cursor-two"}}, page(observation)},
 		{"list_deployment_artifacts", nil, "artifacts", nil, page(artifact)},
 		{"get_deployment_artifact", map[string]any{"artifact": map[string]any{"id": artifactID}}, "artifacts/by-id/" + artifactID, nil, artifact},
-		{"list_deployment_artifact_digests", map[string]any{"artifact": map[string]any{"name": "payments-api"}, "before": "prior"}, "artifacts/payments-api/digests", url.Values{"before": {"prior"}}, page(digest)},
-		{"get_deployment_artifact_digest", map[string]any{"digest": map[string]any{"artifact": map[string]any{"id": artifactID}, "digest": sha}}, "artifacts/by-id/" + artifactID + "/digests/" + sha, nil, digest},
-		{"get_deployment_artifact_digest", map[string]any{"digest": map[string]any{"id": digestID}}, "artifact-digests/by-id/" + digestID, nil, digest},
+		{"list_deployment_artifact_versions", map[string]any{"artifact": map[string]any{"name": "payments-api"}, "before": "prior"}, "artifacts/payments-api/versions", url.Values{"before": {"prior"}}, page(version)},
+		{"get_deployment_artifact_version", map[string]any{"version": map[string]any{"id": digestID}}, "artifact-versions/by-id/" + digestID, nil, version},
 	}
 	for _, tt := range tests {
 		t.Run(tt.tool, func(t *testing.T) {
@@ -101,7 +100,7 @@ func TestReleasesMCPRejectsInvalidSelectorsAndCursors(t *testing.T) {
 		{"get_release_target", map[string]any{"target": map[string]any{"name": "prod", "id": "target-id"}}},
 		{"get_release_component", map[string]any{"component": map[string]any{"name": "api", "id": "component-id"}}},
 		{"get_release_component_instance", map[string]any{"instance": map[string]any{"name": "api-blue"}}},
-		{"get_deployment_artifact_digest", map[string]any{"digest": map[string]any{"id": "digest-id", "digest": "sha256:abc"}}},
+		{"get_deployment_artifact_version", map[string]any{"version": map[string]any{}}},
 		{"list_release_targets", map[string]any{"after": "a", "before": "b"}},
 		{"list_release_component_instances", map[string]any{"target": map[string]any{}}},
 	} {

@@ -472,8 +472,8 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.ListReleaseObservations),
 				newToolDef(buildkite.ListDeploymentArtifacts),
 				newToolDef(buildkite.GetDeploymentArtifact),
-				newToolDef(buildkite.ListDeploymentArtifactDigests),
-				newToolDef(buildkite.GetDeploymentArtifactDigest),
+				newToolDef(buildkite.ListDeploymentArtifactVersions),
+				newToolDef(buildkite.GetDeploymentArtifactVersion),
 			},
 		},
 		ToolsetTests: {

@@ -31,9 +31,12 @@ matches Target labels. Components include their artifact binding; Instances
 include their Target and Component IDs.
 
 Collections return `items` and cursor `links`; pass the opaque `after` or `before`
-value from those links. Digests are listed newest publication first and include
-yank state and publisher-supplied pull requests. Instance status includes nullable
-presence, active and last-active digests, and read-time catalog resolution.
+value from those links. Versions are listed newest publication first and include
+digests, yank state and publisher-supplied pull requests. Read a Version by its UUID;
+several Versions can share a digest, and legacy Versions can have a null digest.
+Instance status includes nullable presence, active and last-active digests, and
+read-time catalog resolution indicating whether matching content is registered,
+not which Version produced it.
 
 ---
 

@@ -1024,7 +1024,7 @@ func TestReleasesToolset(t *testing.T) {
 		require.True(t, tool.IsReadOnly(), tool.Tool.Name)
 		require.False(t, tool.IsMinimumAccess(), tool.Tool.Name)
 		require.NotContains(t, tool.Tool.Name, "installation")
-		require.NotContains(t, tool.Tool.Name, "version")
+		require.NotContains(t, tool.Tool.Name, "digest")
 		require.Equal(t, []string{"read_deployment_artifacts"}, tool.RequiredScopes, tool.Tool.Name)
 	}
 	artifacts := registry.GetEnabledTools([]string{ToolsetArtifacts}, false)

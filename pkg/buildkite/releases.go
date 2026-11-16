@@ -22,8 +22,8 @@ type ReleasesClient interface {
 	ListObservations(context.Context, string, buildkite.ReleaseTargetRef, *buildkite.ReleasesObservationListOptions) (buildkite.ReleasesPage[buildkite.ReleaseObservation], *buildkite.Response, error)
 	ListArtifacts(context.Context, string, *buildkite.ReleasesListOptions) (buildkite.ReleasesPage[buildkite.ReleaseArtifact], *buildkite.Response, error)
 	GetArtifact(context.Context, string, buildkite.ReleaseArtifactRef) (buildkite.ReleaseArtifact, *buildkite.Response, error)
-	ListDigests(context.Context, string, buildkite.ReleaseArtifactRef, *buildkite.ReleasesListOptions) (buildkite.ReleasesPage[buildkite.ReleaseArtifactDigest], *buildkite.Response, error)
-	GetDigest(context.Context, string, buildkite.ReleaseDigestRef) (buildkite.ReleaseArtifactDigest, *buildkite.Response, error)
+	ListVersions(context.Context, string, buildkite.ReleaseArtifactRef, *buildkite.ReleasesListOptions) (buildkite.ReleasesPage[buildkite.ReleaseArtifactVersion], *buildkite.Response, error)
+	GetVersion(context.Context, string, buildkite.ReleaseVersionRef) (buildkite.ReleaseArtifactVersion, *buildkite.Response, error)
 }
 
 type ReleasesListArgs struct {
@@ -287,23 +287,23 @@ func GetDeploymentArtifact() (mcp.Tool, mcp.ToolHandlerFor[GetDeploymentArtifact
 	}, []string{"read_deployment_artifacts"}
 }
 
-type ListDeploymentArtifactDigestsArgs struct {
+type ListDeploymentArtifactVersionsArgs struct {
 	ReleasesListArgs
 	Artifact buildkite.ReleaseArtifactRef `json:"artifact" jsonschema:"Exactly one of name or id (deployment-artifact UUID)"`
 }
 
-func ListDeploymentArtifactDigests() (mcp.Tool, mcp.ToolHandlerFor[ListDeploymentArtifactDigestsArgs, any], []string) {
+func ListDeploymentArtifactVersions() (mcp.Tool, mcp.ToolHandlerFor[ListDeploymentArtifactVersionsArgs, any], []string) {
 	return mcp.Tool{
-		Name: "list_deployment_artifact_digests", Description: "List published SHA-256 digests newest publication first, including provenance and yank state. Returns items and cursor pagination links",
-		Annotations: &mcp.ToolAnnotations{Title: "List Deployment Artifact Digests", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListDeploymentArtifactDigestsArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.ListDeploymentArtifactDigests")
+		Name: "list_deployment_artifact_versions", Description: "List Versions newest publication first, including repeated digests, legacy digestless publications, provenance and yank state. Returns items and cursor pagination links",
+		Annotations: &mcp.ToolAnnotations{Title: "List Deployment Artifact Versions", ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args ListDeploymentArtifactVersionsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.ListDeploymentArtifactVersions")
 		defer span.End()
 		opt, err := args.options()
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
-		result, _, err := DepsFromContext(ctx).ReleasesClient.ListDigests(ctx, args.OrgSlug, args.Artifact, opt)
+		result, _, err := DepsFromContext(ctx).ReleasesClient.ListVersions(ctx, args.OrgSlug, args.Artifact, opt)
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
@@ -311,20 +311,20 @@ func ListDeploymentArtifactDigests() (mcp.Tool, mcp.ToolHandlerFor[ListDeploymen
 	}, []string{"read_deployment_artifacts"}
 }
 
-type GetDeploymentArtifactDigestArgs struct {
+type GetDeploymentArtifactVersionArgs struct {
 	ToolInput
-	OrgSlug string                     `json:"org_slug"`
-	Digest  buildkite.ReleaseDigestRef `json:"digest" jsonschema:"Either id (catalog Digest UUID), or exact sha256 digest plus artifact with exactly one of name or id; do not combine forms"`
+	OrgSlug string                      `json:"org_slug"`
+	Version buildkite.ReleaseVersionRef `json:"version" jsonschema:"Publication UUID in id; Versions are addressed only by UUID, not by digest or version label"`
 }
 
-func GetDeploymentArtifactDigest() (mcp.Tool, mcp.ToolHandlerFor[GetDeploymentArtifactDigestArgs, any], []string) {
+func GetDeploymentArtifactVersion() (mcp.Tool, mcp.ToolHandlerFor[GetDeploymentArtifactVersionArgs, any], []string) {
 	return mcp.Tool{
-		Name: "get_deployment_artifact_digest", Description: "Get an immutable published digest by UUID or Artifact and exact SHA-256 digest, including provenance and yank state",
-		Annotations: &mcp.ToolAnnotations{Title: "Get Deployment Artifact Digest", ReadOnlyHint: true},
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetDeploymentArtifactDigestArgs) (*mcp.CallToolResult, any, error) {
-		ctx, span := trace.Start(ctx, "buildkite.GetDeploymentArtifactDigest")
+		Name: "get_deployment_artifact_version", Description: "Get one Version publication by UUID, including its nullable digest, provenance and yank state. Matching observed content does not identify a producing Version",
+		Annotations: &mcp.ToolAnnotations{Title: "Get Deployment Artifact Version", ReadOnlyHint: true},
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args GetDeploymentArtifactVersionArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetDeploymentArtifactVersion")
 		defer span.End()
-		result, _, err := DepsFromContext(ctx).ReleasesClient.GetDigest(ctx, args.OrgSlug, args.Digest)
+		result, _, err := DepsFromContext(ctx).ReleasesClient.GetVersion(ctx, args.OrgSlug, args.Version)
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
