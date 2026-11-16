@@ -223,7 +223,7 @@ func GetReleaseComponentInstanceStatus() (mcp.Tool, mcp.ToolHandlerFor[GetReleas
 type ListReleaseObservationsArgs struct {
 	ReleasesTargetListArgs
 	Instance string `json:"instance,omitempty" jsonschema:"Exact Instance name"`
-	Type     string `json:"type,omitempty" jsonschema:"Comma-separated event types: ComponentInstanceAppeared, ComponentInstanceDisappeared, ComponentInstanceDigestObserved"`
+	Type     string `json:"type,omitempty" jsonschema:"Comma-separated event types: ComponentInstanceAppeared, ComponentInstanceDisappeared, ComponentInstanceVersionObserved"`
 }
 
 func ListReleaseObservations() (mcp.Tool, mcp.ToolHandlerFor[ListReleaseObservationsArgs, any], []string) {
