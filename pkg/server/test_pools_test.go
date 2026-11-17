@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -77,7 +78,9 @@ func TestSchedulerToolsThroughMCP(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, result.IsError, "%v", result.Content)
 		var body map[string]any
-		require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), &body))
+		decoder := json.NewDecoder(strings.NewReader(result.Content[0].(*mcp.TextContent).Text))
+		decoder.UseNumber()
+		require.NoError(t, decoder.Decode(&body))
 		return body
 	}
 	args := map[string]any{"org_slug": "acme", "pipeline_uuid": pipelineID, "build_uuid": buildID, "key": "Ruby"}
@@ -85,7 +88,7 @@ func TestSchedulerToolsThroughMCP(t *testing.T) {
 	require.Equal(t, int64(1), calls.Load(), "list must not follow continuation links automatically")
 	item := page["items"].([]any)[0].(map[string]any)
 	require.Equal(t, "planning failed", item["error"].(map[string]any)["message"])
-	require.Equal(t, float64(0), item["parallelism"], "zero is a useful planning result, not an absent value")
+	require.Equal(t, json.Number("0"), item["parallelism"], "zero is a useful planning result, not an absent value")
 	require.NotContains(t, item, "muted_tests", "discovery pages must stay compact")
 	require.Equal(t, next, page["links"].(map[string]any)["next"])
 	u, err := url.Parse(next)
@@ -96,12 +99,12 @@ func TestSchedulerToolsThroughMCP(t *testing.T) {
 
 	detailArgs := map[string]any{"org_slug": "acme", "pool_uuid": poolID, "build_uuid": buildID}
 	detail := call("get_test_pool", detailArgs)
-	require.Equal(t, float64(3), detail["attempt_policy"].(map[string]any)["max_attempts"])
+	require.Equal(t, json.Number("3"), detail["attempt_policy"].(map[string]any)["max_attempts"])
 	require.Len(t, detail["muted_tests"], 1, "explicit detail preserves the planning snapshot")
 	metrics := call("get_test_pool_metrics", detailArgs)
 	require.Equal(t, "2026-11-16T12:00:00Z", metrics["observed_at"])
 	require.True(t, metrics["pool"].(map[string]any)["drained"].(bool))
-	require.Equal(t, float64(7), metrics["attempts"].(map[string]any)["states"].(map[string]any)["waiting"].(map[string]any)["count"])
+	require.Equal(t, json.Number("7"), metrics["attempts"].(map[string]any)["states"].(map[string]any)["waiting"].(map[string]any)["count"])
 	require.NotContains(t, metrics, "success", "tools return evidence, not a completion verdict")
 
 	for _, invalid := range []map[string]any{
