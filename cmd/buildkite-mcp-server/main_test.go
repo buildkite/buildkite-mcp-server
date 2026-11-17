@@ -215,6 +215,7 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 		waiting, leased, completed int64
 		failed, errored            int64
 		errorMessage               string
+		callError                  string
 	}{
 		{fixture: "completed", pools: 3, completed: 41},
 		{fixture: "planning-failure", pools: 2, completed: 11},
@@ -223,7 +224,7 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 		{fixture: "idle-waiting", pools: 1, waiting: 7},
 		{fixture: "errored-drained", pools: 1, waiting: 7},
 		{fixture: "mixed-pages", pools: 31, waiting: 7, completed: 330},
-		{fixture: "unauthorized", errorMessage: "Unauthorized"},
+		{fixture: "unauthorized", callError: "buildkite: unauthorized"},
 		{fixture: "forbidden", errorMessage: "read_test_pool"},
 		{fixture: "unavailable", errorMessage: "No test pool found"},
 		{fixture: "empty"},
@@ -260,6 +261,12 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 			var build buildkitetools.BuildDetail
 			require.False(t, call("get_build", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901"}, &build).IsError)
 			args := map[string]any{"org_slug": "scheduler-evals", "pipeline_uuid": pipeline.ID, "build_uuid": build.ID}
+			if tc.callError != "" {
+				// Authentication failures propagate as MCP call errors, not tool-result content.
+				_, callErr := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_test_pools", Arguments: args})
+				require.ErrorContains(t, callErr, tc.callError)
+				return
+			}
 			var pools int
 			var waiting, leased, completed, failed, errored int64
 			for {
