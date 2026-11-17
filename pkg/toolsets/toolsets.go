@@ -474,6 +474,9 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.ListTestSuitesForPipeline),
 				newToolDef(buildkite.ListTestWorkflows),
 				newToolDef(buildkite.GetTestWorkflow),
+				newToolDef(buildkite.ListTestPools),
+				newToolDef(buildkite.GetTestPool),
+				newToolDef(buildkite.GetTestPoolMetrics),
 			},
 		},
 		ToolsetLogs: {

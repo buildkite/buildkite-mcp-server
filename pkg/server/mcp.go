@@ -113,7 +113,7 @@ var instructionSections = []instructionSection{
 		text:     "Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill, call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below. Guides cover the full server; only follow steps for tools advertised in this session. Never call tools excluded by minimum-access mode or toolset settings.",
 	},
 	{text: "Authorization: Tools available depend on the scopes and organization access granted to the configured API token. A 401 response means the token is invalid, expired, or revoked and requires reauthentication. A 403 response means the credentials were accepted but access was denied, commonly because the token lacks a required scope or organization access, or the user lacks permission."},
-	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field."},
+	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Tools with a build_number parameter require this identifier, not the build's UUID id field. Parameters named build_uuid require the UUID instead."},
 	{
 		toolsets: []string{toolsets.ToolsetInvestigations},
 		tools:    []string{"get_build_failure_summary"},
@@ -127,6 +127,11 @@ var instructionSections = []instructionSection{
 		toolsets: []string{toolsets.ToolsetInvestigations},
 		tools:    []string{"compare_builds"},
 		text:     "Build comparison: use compare_builds when asked what changed since a build worked, or to compare two builds. Without an explicit baseline it selects an earlier successful build on the same pipeline and branch. Report the selected baseline and unmatched steps; shared failing steps do not establish a shared cause or justify a retry. Timings cover final attempts, not total retry cost or build wall-clock duration.",
+	},
+	{
+		toolsets: []string{toolsets.ToolsetTests},
+		tools:    []string{"list_test_pools"},
+		text:     "Scheduler pools: use list_test_pools for scheduler planning or workload questions, get_test_pool for planning errors/policies, and get_test_pool_metrics for aggregate progress, not historical test reports. From a build URL, use get_build's id and get_pipeline's id when those tools are advertised; otherwise ask for the build and pipeline UUIDs. Scheduler inputs require UUIDs, not build numbers or pipeline slugs. Follow cursor links with unchanged filters only as needed; inspect all pools/pages before a build-wide conclusion, limited to scheduler-managed tests. Metrics are replica-backed snapshots at observed_at. Neither drained nor zero active leases proves all work completed or passed; an errored/drained pool can retain waiting attempts. Aggregates cannot name stuck tests or prove a cause, and muted_tests is not a pending-work list. Empty results and ambiguous 404s do not prove tests passed or that a build never used the scheduler. Reads require read_test_pool, not read_suites; read_builds/read_pipelines are needed only for separate discovery calls.",
 	},
 	{
 		toolsets: []string{toolsets.ToolsetBuilds, toolsets.ToolsetRetries},

@@ -52,7 +52,13 @@ func TestBuildkiteServerInstructions(t *testing.T) {
 			name:    "builds alone",
 			enabled: []string{"builds"},
 			want:    append(append([]string{}, always...), softFailures, jobStateBroken, jobOutputLinks, buildSelection, dynamicUploads, jobConcurrency, "an empty list does not establish that there are no blockers", "without reading further to replace omitted jobs", "Preserve jobs_ahead items, order, scope, and notice", "preserves UI behavior"),
-			notWant: []string{startHere, skillDiscovery, failureSummary, logInvestigation, annotationScope},
+			notWant: []string{startHere, skillDiscovery, failureSummary, logInvestigation, annotationScope, "Scheduler pools:"},
+		},
+		{
+			name:    "tests alone explains scheduler discovery without assuming build tools",
+			enabled: []string{"tests"},
+			want:    []string{"Scheduler pools:", "when those tools are advertised; otherwise ask", "read_test_pool, not read_suites", "observed_at", "Neither drained nor zero active leases"},
+			notWant: []string{buildSelection, logInvestigation},
 		},
 		{
 			name:    "retries alone",
@@ -296,7 +302,7 @@ func TestMinimumAccessInstructionsAndPrompts(t *testing.T) {
 	t.Cleanup(func() { _ = session.Close() })
 
 	instructions := session.InitializeResult().Instructions
-	for _, text := range []string{"user_token_organization", "get_build_failure_summary", "compare_builds", "search_logs", "Log investigation order:", "Annotation scope:"} {
+	for _, text := range []string{"user_token_organization", "get_build_failure_summary", "compare_builds", "search_logs", "Log investigation order:", "Annotation scope:", "Scheduler pools:"} {
 		require.NotContains(t, instructions, text)
 	}
 	for _, text := range []string{"Skill discovery:", "Pipeline authoring:", "Build selection after a push:"} {

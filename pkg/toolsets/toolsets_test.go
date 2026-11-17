@@ -770,6 +770,18 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 		}
 		assert.True(enabled, "%s should be available in read-only mode", name)
 	}
+	for _, name := range []string{"list_test_pools", "get_test_pool", "get_test_pool_metrics"} {
+		assert.Contains(toolNames, name)
+		var enabled bool
+		for _, tool := range registry.GetEnabledTools([]string{ToolsetTests}, true) {
+			if tool.Tool.Name == name {
+				enabled = true
+				assert.Equal([]string{"read_test_pool"}, tool.RequiredScopes)
+				assert.False(tool.IsMinimumAccess())
+			}
+		}
+		assert.True(enabled, "%s should be available in read-only mode", name)
+	}
 
 	pipelines, exists := registry.Get(ToolsetPipelines)
 	assert.True(exists)
