@@ -388,6 +388,7 @@ run_claude() {
         # cli mode: an empty MCP config, made --strict so MCP servers from the
         # caller's own Claude settings (e.g. a Buildkite one) can't leak in.
         local mcp_args=(--mcp-config "$ROOT_DIR/mcp.json")
+        [[ -n "${BUILDKITE_REPLAY:-}" ]] && mcp_args+=(--strict-mcp-config)
         [[ "${EVAL_MODE:-mcp}" == "cli" ]] && mcp_args=(--mcp-config "$ROOT_DIR/mcp_none.json" --strict-mcp-config)
         if ! claude -p "$(cat "$prompt_file")" "${mcp_args[@]}" "${args[@]}" | tee "$log"; then
             return 1
@@ -638,6 +639,21 @@ run_entry() {
         echo "WARNING: entry '$ENTRY_ID' has unknown mode_params for mode '$MODE': $UNKNOWN_PARAMS; skipping." >&2
         return 0
     fi
+    # Replay is entry-scoped: a new MCP process reloads the HAR for every run.
+    # Other runners do not yet pass this setting to their MCP configurations.
+    local REPLAY_FILE=""
+    REPLAY_FILE=$(jq -r '.scenario.replay // ""' <<<"$entry")
+    if [[ -n "$REPLAY_FILE" ]]; then
+        if [[ "$MODE" != "mcp" || "$AGENT" != "claude" ]]; then
+            echo "ERROR: [$ENTRY_ID] scenario.replay requires mode mcp and agent claude" >&2
+            return 1
+        fi
+        REPLAY_FILE="$ROOT_DIR/$REPLAY_FILE"
+        if [[ ! -f "$REPLAY_FILE" ]]; then
+            echo "ERROR: [$ENTRY_ID] replay fixture not found: $REPLAY_FILE" >&2
+            return 1
+        fi
+    fi
     if [[ "$MODE" == "cli" && -n "$MCP_VERSION" && "$MCP_VERSION" != "source" ]]; then
         echo "NOTICE: entry '$ENTRY_ID' sets mcp_version '$MCP_VERSION', which mode 'cli' ignores (no MCP server)." >&2
     elif [[ -n "$MCP_VERSION" && "$MCP_VERSION" != "source" ]]; then
@@ -653,7 +669,9 @@ run_entry() {
     # (see mcp.json / mcp_in_ci.json) — for this entry's run only. Without
     # token_env the ambient BUILDKITE_API_TOKEN is used, as before.
     local ENTRY_TOKEN="${BUILDKITE_API_TOKEN:-}"
-    if [[ -n "$TOKEN_ENV" ]]; then
+    if [[ -n "$REPLAY_FILE" ]]; then
+        ENTRY_TOKEN=""
+    elif [[ -n "$TOKEN_ENV" ]]; then
         if [[ ! "$TOKEN_ENV" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
             echo "WARNING: entry '$ENTRY_ID' has an invalid token_env name '$TOKEN_ENV'; skipping." >&2
             return 0
@@ -732,11 +750,12 @@ run_entry() {
     local RUN_INFO
     RUN_INFO="$(jq -n \
         --arg mode "$MODE" --argjson params "$MODE_PARAMS" \
+        --arg replay "$(jq -r '.scenario.replay // ""' <<<"$entry")" \
         --arg agent "$AGENT" --arg harness "$HARNESS_VERSION" --arg model "${MODEL:-default}" \
         --arg bk_bin "$BK_CLI_BIN" --arg bk_ver "$BK_CLI_VERSION" --arg bk_org "$BK_CLI_ORG" \
         --arg mcp_req "$MCP_VERSION" --arg mcp_ver "$MCP_SERVER_VERSION" --arg mcp_sha "$MCP_SOURCE_SHA" \
         --arg req_log "$REQUEST_LOG" --arg bk_shim "$BK_SHIM_DIR" \
-        '{mode: $mode, mode_params: $params,
+        '{mode: $mode, mode_params: $params, replay: (if $replay == "" then null else $replay end),
           api_request_log: {mcp_server: ($req_log != "" and $mode == "mcp"), bk_cli: ($bk_shim != "")},
           harness: {agent: $agent, version: $harness, model: $model},
           bk_cli: (if $mode == "cli" then
@@ -840,7 +859,7 @@ run_entry() {
     [[ -n "$BK_SHIM_DIR" ]] && AGENT_PATH="$BK_SHIM_DIR:$AGENT_PATH"
     if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" EVAL_MODE="$MODE" PATH="$AGENT_PATH" \
             BUILDKITE_ORGANIZATION_SLUG="$AGENT_ORG" BK_TELEMETRY=false \
-            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" \
+            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" BUILDKITE_REPLAY="$REPLAY_FILE" \
             run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
@@ -1140,6 +1159,15 @@ run_entry() {
 
 # --- Drive the matrix -------------------------------------------------------
 MATRIX_JSON="$(yq -o=json '.matrix' "$EVALS_CONFIG")"
+if [[ -n "${EVAL_ENTRY:-}" ]]; then
+    MATRIX_JSON="$(jq --arg id "$EVAL_ENTRY" \
+        '[.[] | select(if ($id | endswith("*")) then (.id | startswith($id[:-1])) else .id == $id end)]' \
+        <<<"$MATRIX_JSON")"
+    if [[ "$(jq 'length' <<<"$MATRIX_JSON")" -eq 0 ]]; then
+        echo "babystand: unknown EVAL_ENTRY '$EVAL_ENTRY'" >&2
+        exit 1
+    fi
+fi
 ENTRY_COUNT="$(jq 'length' <<<"$MATRIX_JSON")"
 echo "*** Matrix entries: $ENTRY_COUNT"
 [[ "$ENTRY_COUNT" -gt 0 ]] || { echo "babystand: matrix is empty; nothing to run." >&2; exit 0; }

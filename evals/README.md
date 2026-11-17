@@ -279,6 +279,72 @@ Locally there is no container sandbox, so the posture is a conscious choice via 
 * `false`: restricted mode — the agent gets `Edit`, `go`/`make`/`git` Bash, and the MCP server's tools (server name derived from `mcp.json`, override with `MCP_SERVER_NAME`). Safe on a host machine, but NOT comparable to CI runs since the agent's tool choice is constrained. Claude-only: cursor entries are skipped in this mode (see "Supported agents").
 * `true`: CI parity — `bypassPermissions` / `--force`, i.e. the agent has unrestricted Bash ON YOUR MACHINE. Use with care.
 
+## Test Scheduler candidate evals
+
+The `scheduler-*` entries exercise the real candidate MCP server and Go SDK
+using synthetic HAR responses, not live pools. They cover planning errors,
+backlog, completion versus passing results, per-test-detail limits, and
+authentication/permission/availability errors. The completed-success scenario
+also supplies the successful-access control; the detail-boundary task reuses
+the backlog fixture. The 31-pool case puts waiting work beyond the first page.
+
+In the [eval pipeline](https://buildkite.com/buildkite/buildkite-mcp-server-evals-framework),
+create a build against the **candidate branch and exact commit**, not `main`.
+Set this build environment variable for a first focused run:
+
+```text
+EVAL_ENTRY=scheduler-completed
+```
+
+After inspecting that run, use `EVAL_ENTRY=scheduler-*` for all Scheduler
+entries. `EVAL_ENTRY` accepts an exact matrix ID or a prefix ending in `*`;
+an unknown selector fails rather than silently running nothing. Unset means
+the entire matrix, including the existing live scenarios. No merge or
+published MCP release is needed: `mcp_version: source` uses the binary built
+from this commit. A non-source `mcp_version` does not currently select a
+different binary. Manual eval builds incur model usage and require approval.
+
+`scenario.replay` is a HAR path relative to `evals/`, supported for
+`agent: claude`, `mode: mcp`. The harness checks the file, passes it as
+`BUILDKITE_REPLAY`, clears the entry's Buildkite API token, and records the
+fixture path alongside the model and MCP source SHA in run metadata. Each
+agent starts a new MCP process, resetting replay state. Entries without
+`replay` retain normal live token behavior; replay is not inherited by them.
+The standard pipeline still uses its existing credentials for cloning,
+comparison and model access; this change does not remove those requirements.
+
+Fixtures are synthetic historical snapshots at `2026-11-17T03:00:00Z`, with
+invented organization/build/pool identities and no credentials. They include
+build/pipeline discovery, including get_build's annotation-summary request.
+HAR matching is exact on method, path and query. The fixtures support list
+page sizes 30 and 100, the returned cursors, and the planning comparison's
+`features` key filter. Each recorded request has three responses for limited
+re-reading. Missing/exhausted requests fail offline; they never fall back to
+the real API. A legitimate request absent from a fixture is a scenario gap,
+not evidence of a product/API defect or a passing eval. Extend that fixture
+and rerun rather than grading around the gap.
+
+Review the proposed reference answers under
+`expected/scheduler-investigation/<scenario.id>/root_cause.md` with the PR.
+Only conclusion and investigation have references; no code fix is requested,
+so fix grading is n/a. Review annotations, full tool results and final answers
+for every case; a successful pipeline or a favorable judge alone is not a
+correctness verdict. Reading fixture files or reference answers invalidates
+the investigation. References are excluded from the CI agent image, but HAR
+files must be readable by the MCP process in the same container; the prompt
+restriction and transcript review are not a filesystem isolation guarantee.
+
+Use existing audit/comparison reports for unnecessary calls, pagination,
+API fan-out, payload bytes, latency and tokens where reported. A first run may
+have no matching baseline. Do not treat unavailable baseline Scheduler tools
+as an API failure. These evals do not verify hosted OAuth or production access;
+those remain separate checks.
+
+PR CI checks the fixtures through MCP discovery/list/detail/metrics and tests
+the harness's entry selection and replay/token scoping without a model or live
+API. Those checks are not executed agent evals. The model run and human review
+must be recorded separately before release.
+
 ## Setup
 
 ### Code

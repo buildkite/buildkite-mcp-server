@@ -43,6 +43,9 @@
 #                 No id means no reference lookup and n/a rubric grades.
 #                 Letters, digits, dot, underscore and hyphen only; excludes
 #                 the path components '.' and '..'.
+#     replay      Optional HAR path relative to evals/. Runs the real MCP/SDK
+#                 offline, with fresh replay state and no Buildkite API token.
+#                 Currently supported by agent: claude with mode: mcp only.
 #     setup       Optional bash run BEFORE the prompt to establish state (e.g.
 #                 create a branch, push it). It runs inside babystand.sh's clone
 #                 of the EVAL repo (EVAL_REPO_SLUG), under `set -euo pipefail`
@@ -146,6 +149,153 @@
 # DATETIME, ORG_SLUG, PIPELINE_SLUG, WAIT_STATUS, DEBUG_STRING.
 
 matrix:
+  # Read-only Scheduler investigations. EVAL_ENTRY=scheduler-* selects this
+  # suite without running the existing live scenarios. References are keyed
+  # by scenario.id; the successful access control reuses scheduler-completed.
+  - id: scheduler-completed
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: completed
+      replay: fixtures/test-scheduler/completed.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
+
+  - id: scheduler-planning-failure
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: planning-failure
+      replay: fixtures/test-scheduler/planning-failure.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Did test planning fail for this build? Compare with build 900, but distinguish which error belongs to which build.
+
+  - id: scheduler-backlog
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: backlog
+      replay: fixtures/test-scheduler/backlog.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Why hasn't this build finished testing? What does the Scheduler evidence establish?
+
+  - id: scheduler-completed-failures
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: completed-failures
+      replay: fixtures/test-scheduler/completed-failures.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
+
+  - id: scheduler-idle-waiting
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: idle-waiting
+      replay: fixtures/test-scheduler/idle-waiting.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
+
+  - id: scheduler-errored-drained
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: errored-drained
+      replay: fixtures/test-scheduler/errored-drained.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
+
+  - id: scheduler-mixed-pages
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: mixed-pages
+      replay: fixtures/test-scheduler/mixed-pages.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass? Keep pool list pages at 30 items.
+
+  - id: scheduler-detail-boundary
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: detail-boundary
+      replay: fixtures/test-scheduler/backlog.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Which individual tests are stuck in the Scheduler, and what evidence identifies them?
+
+  - id: scheduler-unauthorized
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: unauthorized
+      replay: fixtures/test-scheduler/unauthorized.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Check this build's Scheduler and tell me what you can establish.
+
+  - id: scheduler-forbidden
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: forbidden
+      replay: fixtures/test-scheduler/forbidden.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Check this build's Scheduler and tell me what you can establish.
+
+  - id: scheduler-unavailable
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: unavailable
+      replay: fixtures/test-scheduler/unavailable.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Check this build's Scheduler and tell me what you can establish.
+
+  - id: scheduler-empty
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: empty
+      replay: fixtures/test-scheduler/empty.har
+      vars:
+        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
+        QUESTION: Check this build's Scheduler and tell me what you can establish.
+
   # The original babystand scenario: drive a red CI branch to green.
   #- id: red-to-green-complete
   #  agent: claude
