@@ -325,6 +325,11 @@ requests observed in eval #450 for the relevant scenarios.
 The backlog also covers eval #451's default get_build_failure_summary call:
 all four filtered job tiers return empty pages (the only job is running without
 a promised failure), and the raw, all-scope annotations request returns no data.
+For eval #452's legitimate worker-log exploration it also supplies the log-access
+HEAD, job-status GET and raw text log GET used by buildkite-logs v0.13.1.
+The three synthetic worker-startup lines contain no pending-test identities,
+lease history or bottleneck evidence. The existing public-MCP test reads those
+lines through the real log client and parser with an isolated cold cache.
 The public-MCP fixture test exercises the whole call so one repaired request
 cannot merely expose the next replay miss. Invented pool UUID probes are not
 legitimate fixture gaps and are deliberately not given fabricated responses.

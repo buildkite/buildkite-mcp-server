@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	buildkitelogs "github.com/buildkite/buildkite-logs"
 	"github.com/buildkite/buildkite-mcp-server/internal/headerpassthrough"
 	buildkitetools "github.com/buildkite/buildkite-mcp-server/pkg/buildkite"
 	"github.com/buildkite/buildkite-mcp-server/pkg/recording"
@@ -237,12 +238,16 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 			require.NoError(t, err)
 			client, err := gobuildkite.NewOpts(gobuildkite.WithHTTPClient(&http.Client{Transport: transport}))
 			require.NoError(t, err)
+			logClient, err := buildkitelogs.NewClient(context.Background(), client, "file://"+t.TempDir())
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = logClient.Close() })
 			srv := server.NewMCPServer("test", buildkitetools.ToolDependencies{
 				BuildsClient: client.Builds, PipelinesClient: client.Pipelines,
 				AnnotationsClient: client.Annotations, TestPoolsClient: client.TestPools,
 				OrganizationsClient: client.Organizations, JobsClient: client.Jobs,
 				BuildTestsClient: client.BuildTests, AccessTokensClient: client.AccessTokens,
-			}, server.WithToolsets("builds", "pipelines", "tests", "user", "annotations", "investigations"), server.WithReadOnly(true))
+				BuildkiteLogsClient: logClient,
+			}, server.WithToolsets("builds", "pipelines", "tests", "user", "annotations", "investigations", "logs"), server.WithReadOnly(true))
 			ctx := context.Background()
 			st, ct := mcp.NewInMemoryTransports()
 			ss, err := srv.Connect(ctx, st, nil)
@@ -329,12 +334,24 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 				require.Equal(t, "running", summary.Build.State)
 				require.Empty(t, summary.Jobs)
 				require.Empty(t, summary.Warnings)
+				var jobID string
 				for _, perPage := range []int{0, 100} {
 					var jobs buildkitetools.JobListResult[buildkitetools.JobDetail]
 					require.False(t, call("list_jobs", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901", "detail_level": "detailed", "per_page": perPage}, &jobs).IsError)
 					require.Len(t, jobs.Items, 1)
 					require.Equal(t, "running", jobs.Items[0].State)
+					jobID = jobs.Items[0].ID
 				}
+				// An isolated cold cache exercises HEAD, job status, raw log retrieval and parsing.
+				var logs struct {
+					Entries []buildkitetools.TerseLogEntry `json:"entries"`
+				}
+				require.False(t, call("read_logs", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901", "job_id": jobID, "limit": 0}, &logs).IsError)
+				require.Equal(t, []buildkitetools.TerseLogEntry{
+					{C: "Starting test worker", RN: 0},
+					{C: "Test environment loaded", RN: 1},
+					{C: "Test worker process running", RN: 2},
+				}, logs.Entries)
 				var annotations buildkitetools.PaginatedResult[gobuildkite.Annotation]
 				require.False(t, call("list_annotations", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901"}, &annotations).IsError)
 				require.Empty(t, annotations.Items)
