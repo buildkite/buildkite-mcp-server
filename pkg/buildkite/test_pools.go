@@ -30,7 +30,7 @@ type ListTestPoolsArgs struct {
 type GetTestPoolArgs struct {
 	ToolInput
 	OrgSlug   string `json:"org_slug"`
-	PoolUUID  string `json:"pool_uuid" jsonschema:"Pool id returned by list_test_pools"`
+	PoolUUID  string `json:"pool_uuid" jsonschema:"Pool id returned by list_test_pools or supplied by the user; never invent a placeholder id to probe access errors"`
 	BuildUUID string `json:"build_uuid" jsonschema:"UUID of the pool's build, not its sequential build number"`
 }
 
@@ -54,7 +54,7 @@ type TestPoolsPage struct {
 func ListTestPools() (mcp.Tool, mcp.ToolHandlerFor[ListTestPoolsArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "list_test_pools",
-		Description: "Find Test Scheduler pools for one pipeline/build before inspecting planning failures or workload progress. Returns one page of summaries and cursor links; use get_test_pool for policies and planning detail, get_test_pool_metrics for progress. No automatic pagination. An empty list means no accessible, unexpired pools were returned, not that tests passed. Requires read_test_pool and scheduler API enablement; 404 does not distinguish missing, inaccessible, expired or gated resources.",
+		Description: "Find Test Scheduler pools for one pipeline/build before inspecting pool errors or workload progress. Returns one page of summaries and cursor links; use get_test_pool for policies and optional planning detail, get_test_pool_metrics for progress. No automatic pagination. A successful empty list means no accessible, unexpired pools were returned, not that tests passed or access was denied. Requires read_test_pool and scheduler API enablement; 403 can explicitly report a missing scope, while 404 does not distinguish missing, inaccessible, expired or gated resources.",
 		Annotations: &mcp.ToolAnnotations{Title: "List Test Pools", ReadOnlyHint: true},
 	}, func(ctx context.Context, request *mcp.CallToolRequest, args ListTestPoolsArgs) (*mcp.CallToolResult, any, error) {
 		ctx, span := trace.Start(ctx, "buildkite.ListTestPools")
@@ -94,7 +94,7 @@ func ListTestPools() (mcp.Tool, mcp.ToolHandlerFor[ListTestPoolsArgs, any], []st
 func GetTestPool() (mcp.Tool, mcp.ToolHandlerFor[GetTestPoolArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_test_pool",
-		Description: "Inspect one Test Scheduler pool's state, planning error, retry/lease policy, expiry and optional parallelism/muted-test planning snapshot. Muted tests are not the pending backlog. Use get_test_pool_metrics for aggregate workload progress; individual pending tests and lease operations are not exposed. Requires read_test_pool and build/suite access. A 404 can mean missing, inaccessible, expired or feature-gated data.",
+		Description: "Inspect one Test Scheduler pool's state, error, retry/lease policy, expiry and optional parallelism/muted-test planning snapshot. A generic 'Test pool failed.' error does not identify the failure phase or cause; do not label it a confirmed planning failure. max_attempts limits policy-created attempts, not how often an attempt was leased or executed. Muted tests are not the pending backlog. Use get_test_pool_metrics for aggregate workload progress; individual pending tests and lease operations are not exposed. Requires read_test_pool and build/suite access. A 404 can mean missing, inaccessible, expired or feature-gated data.",
 		Annotations: &mcp.ToolAnnotations{Title: "Get Test Pool", ReadOnlyHint: true},
 	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetTestPoolArgs) (*mcp.CallToolResult, any, error) {
 		ctx, span := trace.Start(ctx, "buildkite.GetTestPool")
@@ -112,7 +112,7 @@ func GetTestPool() (mcp.Tool, mcp.ToolHandlerFor[GetTestPoolArgs, any], []string
 func GetTestPoolMetrics() (mcp.Tool, mcp.ToolHandlerFor[GetTestPoolArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_test_pool_metrics",
-		Description: "Inspect aggregate Test Scheduler workload: entry/attempt totals, waiting/leased/completed/canceled counts and costs, passed/failed/errored results, active/expired leases and timing. Metrics are replica-backed snapshots at observed_at and may lag writes; unavailable for expired pools. Neither drained=true nor zero active leases alone proves completion or success: an errored/drained pool can retain waiting work. Scope conclusions to this pool and snapshot; for build-wide claims inspect every pool and continuation page. Counts cannot identify individual stuck tests or prove a root cause. Requires read_test_pool; 404 remains ambiguous among missing, inaccessible, expired or gated data.",
+		Description: "Inspect one Test Scheduler pool's aggregate entry/attempt totals, state/result counts, estimated workload, current lease holds and timing. Waiting attempts may have been requeued: current counts cannot prove never leased, never ran, stuck work, worker failure or ongoing progress. Leased attempts include holds under active AND expired leases; expired counts are not historical totals or proof of worker death. Summed p50 workload is neither elapsed duration nor ETA; lease workload budgets are not lease ages. The oldest waiting timestamp is attempt creation, not every attempt's age or uninterrupted wait. Scope findings and expiry claims to observed_at, not guaranteed current state or freshness; separate reads are not atomic. Neither drained=true nor zero active leases alone proves completion or success: an errored/drained pool can retain waiting work, with null timing. Aggregates cannot name individual pending tests. Requires read_test_pool; 404 can mean missing, inaccessible, expired or gated data.",
 		Annotations: &mcp.ToolAnnotations{Title: "Get Test Pool Metrics", ReadOnlyHint: true},
 	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetTestPoolArgs) (*mcp.CallToolResult, any, error) {
 		ctx, span := trace.Start(ctx, "buildkite.GetTestPoolMetrics")
