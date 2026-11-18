@@ -378,8 +378,10 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 				var page buildkitetools.TestPoolsPage
 				require.False(t, call("list_test_pools", map[string]any{"org_slug": "scheduler-evals", "pipeline_uuid": pipeline.ID, "build_uuid": other.ID, "key": "features"}, &page).IsError)
 				require.Len(t, page.Items, 1)
-				require.Equal(t, other.ID, page.Items[0].BuildID)
 				require.Equal(t, "33333333-3333-4333-8333-000000000099", page.Items[0].ID)
+				var detail gobuildkite.TestPool
+				require.False(t, call("get_test_pool", map[string]any{"org_slug": "scheduler-evals", "build_uuid": other.ID, "pool_uuid": page.Items[0].ID}, &detail).IsError)
+				require.Equal(t, other.ID, detail.BuildID)
 				require.NotNil(t, page.Items[0].Error)
 				require.Equal(t, "Test pool failed.", page.Items[0].Error.Message)
 			}
