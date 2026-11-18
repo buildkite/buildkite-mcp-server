@@ -238,7 +238,8 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 			srv := server.NewMCPServer("test", buildkitetools.ToolDependencies{
 				BuildsClient: client.Builds, PipelinesClient: client.Pipelines,
 				AnnotationsClient: client.Annotations, TestPoolsClient: client.TestPools,
-			}, server.WithToolsets("builds", "pipelines", "tests"), server.WithReadOnly(true))
+				OrganizationsClient: client.Organizations,
+			}, server.WithToolsets("builds", "pipelines", "tests", "user"), server.WithReadOnly(true))
 			ctx := context.Background()
 			st, ct := mcp.NewInMemoryTransports()
 			ss, err := srv.Connect(ctx, st, nil)
@@ -256,6 +257,9 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 				}
 				return result
 			}
+			var organization gobuildkite.Organization
+			require.False(t, call("user_token_organization", map[string]any{}, &organization).IsError)
+			require.Equal(t, "scheduler-evals", organization.Slug)
 			var pipeline gobuildkite.Pipeline
 			require.False(t, call("get_pipeline", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample"}, &pipeline).IsError)
 			var build buildkitetools.BuildDetail
