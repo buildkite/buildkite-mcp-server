@@ -164,6 +164,26 @@ matrix:
         BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
         QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
 
+  # A sanitized real recording, not a replacement for the synthetic cases.
+  # Only detail/metrics are recorded; the user supplies the resource IDs.
+  - id: scheduler-recorded-completed-pool
+    agent: claude
+    model: claude-opus-4-8
+    mcp_version: source
+    prompt: scheduler-investigation
+    scenario:
+      id: recorded-completed-pool
+      replay: fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har
+      vars:
+        BUILD_URL: not supplied (pool-scoped request with supplied UUIDs)
+        QUESTION: >-
+          Inspect this Scheduler pool using the supplied identifiers:
+          org_slug=example-org, build_uuid=00000000-0000-4000-8000-000000000003,
+          pool_uuid=00000000-0000-4000-8000-000000000004.
+          Did this pool's recorded attempts finish and pass? What can and
+          cannot be concluded from its detail and metrics? This request is
+          about this pool only; no build URL or discovery is needed.
+
   - id: scheduler-planning-failure
     agent: claude
     model: claude-opus-4-8

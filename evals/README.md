@@ -282,11 +282,15 @@ Locally there is no container sandbox, so the posture is a conscious choice via 
 ## Test Scheduler candidate evals
 
 The `scheduler-*` entries exercise the real candidate MCP server and Go SDK
-using synthetic HAR responses, not live pools. They cover planning errors,
+offline using synthetic HAR responses and one sanitized recorded-pool baseline.
+The synthetic cases cover planning errors,
 backlog, completion versus passing results, per-test-detail limits, and
 authentication/permission/availability errors. The completed-success scenario
 also supplies the successful-access control; the detail-boundary task reuses
 the backlog fixture. The 31-pool case puts waiting work beyond the first page.
+`scheduler-recorded-completed-pool` separately checks a supplied pool/build UUID
+against recorded detail and metrics. It does not exercise discovery or establish
+anything about other pools or a whole build. All synthetic cases are retained.
 
 In the [eval pipeline](https://buildkite.com/buildkite/buildkite-mcp-server-evals-framework),
 create a build against the **candidate branch and exact commit**, not `main`.
@@ -313,7 +317,7 @@ agent starts a new MCP process, resetting replay state. Entries without
 The standard pipeline still uses its existing credentials for cloning,
 comparison and model access; this change does not remove those requirements.
 
-Fixtures are synthetic historical snapshots at `2026-11-17T03:00:00Z`, with
+The synthetic fixtures are historical snapshots at `2026-11-17T03:00:00Z`, with
 invented organization/build/pool identities and no credentials. They include
 build/pipeline discovery, including get_build's annotation-summary request,
 and the jobs, raw annotations, build tests and token-metadata exploration
@@ -337,8 +341,51 @@ of the returned observation, not as a claim about the time the eval runs.
 Review the entire answer for unsupported history even when the headline and
 arithmetic are correct. In particular, zero current leases and max_attempts=1
 do not prove never leased, never ran, or exactly one execution per entry.
-Full investigation credit also requires resource IDs grounded in discovery;
+Full investigation credit also requires resource IDs supplied by the user or grounded in discovery;
 a correct final headline does not erase an invented-ID error probe.
+
+### Recorded completed-pool baseline provenance
+
+`fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har` was supplied by
+Katie after capturing one real completed pool through her local candidate MCP
+on 2026-11-18. Its SHA256 is
+`d8243394e1c74555e85cd0d0f29d10f13407172d216333aa0f368b23ec3c042b`;
+the uploaded sanitized bytes and chosen filename are retained unchanged.
+The HAR creator reports `dev`, not a verified binary source SHA. The raw HAR
+and confidential mapping remain on her Mac; reviewers inspected the sanitized
+file and cannot independently attest equivalence with the original raw file.
+
+Second review covered all six requests/responses, headers, URLs, query values
+and decoded JSON bodies. Request headers are empty; response headers contain
+only Date and Content-Type. There are no redirects, request bodies, encoded
+bodies or extra metadata payloads. Organization/resource identifiers and the
+pool key use coherent pseudonyms; all 120 muted-test name/path/scope values are
+explicit redactions. Counts, policies, timestamps, nullability and workload
+are retained. No apparent credentials or private strings were found in the
+supplied file. Do not treat automatic Authorization omission as sanitization
+for future recordings.
+
+The six entries are three real detail reads and three real metrics reads,
+not duplicated synthetic responses. Metrics observations are
+`2026-11-18T20:25:11.046Z`, `20:25:21.954Z` and `20:25:23.866Z` on the same
+UTC date; all report 145 total/completed/passed attempts in this pool, with
+zero other states/results/lease holds and null timings. Expiry is
+`2026-11-19T01:05:27.372Z`. Preserve these historical dates rather than moving
+them to imply freshness. The muted planning records do not mean additional
+tests ran or no muted tests exist; 145 attempts is not proof of all possible
+tests or whole-build success.
+
+The baseline uses the supplied pseudonymous organization/build/pool IDs and
+only detail/metrics calls; no organization/build/list responses are fabricated.
+Each endpoint has three consumable responses. Missing or exhausted requests
+remain replay errors, not evidence of production absence. The existing
+public-MCP fixture check exercises all three response pairs in CI; that is
+deterministic replay validation, not a paid model run or a live API check.
+`EVAL_ENTRY=scheduler-recorded-completed-pool` selects this case, and
+`EVAL_ENTRY=scheduler-*` now includes it alongside the 12 synthetic cases.
+An agent run still needs explicit approval and per-case answer/grade review.
+
+### Contract and grading limits
 
 The fixtures were checked against the Rails/bkgo contract at
 [`9304bc182aaccb83623cb3b904f3fe4455313f52`](https://github.com/buildkite/buildkite/commit/9304bc182aaccb83623cb3b904f3fe4455313f52),

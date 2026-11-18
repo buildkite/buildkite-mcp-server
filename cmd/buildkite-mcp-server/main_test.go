@@ -229,6 +229,7 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 		{fixture: "forbidden", errorMessage: "read_test_pool"},
 		{fixture: "unavailable", errorMessage: "No test pool found"},
 		{fixture: "empty"},
+		{fixture: "ed656de2-completed-pool.sanitised"},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
 			harPath := filepath.Join("..", "..", "evals", "fixtures", "test-scheduler", tc.fixture+".har")
@@ -258,6 +259,60 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 					require.NoError(t, json.Unmarshal([]byte(result.Content[0].(*mcp.TextContent).Text), out))
 				}
 				return result
+			}
+			if tc.fixture == "ed656de2-completed-pool.sanitised" {
+				// This recording has only supplied-ID detail and metrics reads;
+				// do not manufacture organization, build or list responses.
+				input := map[string]any{
+					"org_slug":   "example-org",
+					"build_uuid": "00000000-0000-4000-8000-000000000003",
+					"pool_uuid":  "00000000-0000-4000-8000-000000000004",
+				}
+				for _, observedAt := range []string{
+					"2026-11-18T20:25:11.046Z",
+					"2026-11-18T20:25:21.954Z",
+					"2026-11-18T20:25:23.866Z",
+				} {
+					var detail gobuildkite.TestPool
+					require.False(t, call("get_test_pool", input, &detail).IsError)
+					require.Equal(t, input["pool_uuid"], detail.ID)
+					require.Equal(t, input["build_uuid"], detail.BuildID)
+					require.Equal(t, "00000000-0000-4000-8000-000000000001", detail.OrganizationID)
+					require.Equal(t, "00000000-0000-4000-8000-000000000002", detail.PipelineID)
+					require.Equal(t, "00000000-0000-4000-8000-000000000005", detail.SuiteID)
+					require.Equal(t, "consumed", detail.State)
+					require.Nil(t, detail.Error)
+					require.Len(t, detail.MutedTests, 120)
+					require.NotNil(t, detail.AttemptPolicy.Single)
+					require.Equal(t, 2, detail.AttemptPolicy.Single.MaxAttempts)
+					require.Nil(t, detail.AttemptPolicy.Single.MinFailed)
+					require.Nil(t, detail.AttemptPolicy.Single.InitialAttempts)
+					require.Equal(t, 300, detail.Lease.MaxAttempts)
+					require.Equal(t, float64(100000), detail.Lease.Costs["duration_p50_ms"])
+					require.NotNil(t, detail.Parallelism)
+					require.Equal(t, 61, *detail.Parallelism)
+					var metrics gobuildkite.TestPoolMetrics
+					require.False(t, call("get_test_pool_metrics", input, &metrics).IsError)
+					require.Equal(t, detail.ID, metrics.Pool.ID)
+					require.Equal(t, detail.State, metrics.Pool.State)
+					require.True(t, metrics.Pool.Drained)
+					require.NotNil(t, metrics.ObservedAt)
+					require.Equal(t, observedAt, metrics.ObservedAt.Format(time.RFC3339Nano))
+					require.NotNil(t, metrics.Pool.ExpiresAt)
+					require.Equal(t, "2026-11-19T01:05:27.372Z", metrics.Pool.ExpiresAt.Format(time.RFC3339Nano))
+					require.Equal(t, detail.ExpiresAt, metrics.Pool.ExpiresAt)
+					require.Equal(t, int64(145), metrics.Entries.Total)
+					require.Equal(t, int64(145), metrics.Attempts.Total)
+					require.Equal(t, int64(145), metrics.Attempts.States["completed"].Count)
+					for _, state := range []string{"waiting", "leased", "canceled"} {
+						require.Zero(t, metrics.Attempts.States[state].Count)
+					}
+					require.Equal(t, map[string]int64{"passed": 145, "failed": 0, "errored": 0}, metrics.Attempts.Results)
+					require.Equal(t, float64(6458672), metrics.Attempts.States["completed"].Costs["duration_p50_ms"])
+					require.Equal(t, gobuildkite.TestPoolMetricsLeases{}, metrics.Leases)
+					require.Equal(t, gobuildkite.TestPoolMetricsTiming{}, metrics.Timing)
+				}
+				return
 			}
 			var organization gobuildkite.Organization
 			require.False(t, call("user_token_organization", map[string]any{}, &organization).IsError)
