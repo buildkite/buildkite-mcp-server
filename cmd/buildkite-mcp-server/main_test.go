@@ -288,7 +288,7 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 					require.Nil(t, detail.AttemptPolicy.Single.MinFailed)
 					require.Nil(t, detail.AttemptPolicy.Single.InitialAttempts)
 					require.Equal(t, 300, detail.Lease.MaxAttempts)
-					require.Equal(t, float64(100000), detail.Lease.Costs["duration_p50_ms"])
+					require.InDelta(t, 100000, detail.Lease.Costs["duration_p50_ms"], 0)
 					require.NotNil(t, detail.Parallelism)
 					require.Equal(t, 61, *detail.Parallelism)
 					var metrics gobuildkite.TestPoolMetrics
@@ -308,7 +308,7 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 						require.Zero(t, metrics.Attempts.States[state].Count)
 					}
 					require.Equal(t, map[string]int64{"passed": 145, "failed": 0, "errored": 0}, metrics.Attempts.Results)
-					require.Equal(t, float64(6458672), metrics.Attempts.States["completed"].Costs["duration_p50_ms"])
+					require.InDelta(t, 6458672, metrics.Attempts.States["completed"].Costs["duration_p50_ms"], 0)
 					require.Equal(t, gobuildkite.TestPoolMetricsLeases{}, metrics.Leases)
 					require.Equal(t, gobuildkite.TestPoolMetricsTiming{}, metrics.Timing)
 				}
