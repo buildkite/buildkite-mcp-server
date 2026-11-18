@@ -412,6 +412,27 @@ the investigation. References are excluded from the CI agent image, but HAR
 files must be readable by the MCP process in the same container; the prompt
 restriction and transcript review are not a filesystem isolation guarantee.
 
+#### Grading calibration from eval #452
+
+[Eval #452](https://buildkite.com/buildkite/buildkite-mcp-server-evals-framework/builds/452)
+at `4c17fe3b689b4c1d55cf64f809002c7db926b32e` retains its original six
+full/full and six partial/partial conclusion/investigation awards. Review
+disputed two full/full awards: planning-failure asserted that the consumed
+core pool succeeded without its result metrics; unauthorized ruled out
+transience from repeated 401s. Both judges acknowledged those overclaims but
+excused them as minor. They change an outcome or exclude a plausible cause,
+so the clarified rubric and references treat them as material even when the
+main diagnosis is correct. The review-proposed assessment is four full/full
+and eight partial/partial, not an official regrade or a new model run.
+
+Judge evidence and meaning, not phrases. Reporting consumed state without
+claiming passing, reporting repeated failures without ruling out temporary
+causes, and qualified hypotheses remain valid. Forbidden's unexecuted next-check
+narration alone does not invalidate its supported scope-denial conclusion.
+The harness preserves reviewer verdicts; it does not rewrite historical scores
+or apply keyword-based downgrades. CI cannot prove a model will apply these
+judgment rules consistently; that requires a separately authorized review run.
+
 Use existing audit/comparison reports for unnecessary calls, pagination,
 API fan-out, payload bytes, latency and tokens where reported. A first run may
 have no matching baseline. Do not treat unavailable baseline Scheduler tools
