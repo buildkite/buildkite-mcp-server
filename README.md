@@ -174,9 +174,19 @@ pools/pages before making build-wide claims, limited to scheduler-managed
 tests. Aggregate counts cannot name individual stuck tests, and `muted_tests`
 is a planning snapshot, not the pending backlog.
 
+Consumed state alone does not establish passing results, even for a comparison
+pool. Current waiting/leased counts and retry policies do not establish execution
+history or a proven stall. State workload totals are neither elapsed time nor
+the per-lease `lease.costs` budget; planned parallelism is not a pool-wide lease
+cap. Pool `expires_at` controls availability, while
+`timing.next_active_lease_expires_at` is a lease deadline. Keep these observations
+separate from hypotheses about worker behavior or future completion.
+
 An empty list is not evidence that tests passed. A 404 can mean missing,
 inaccessible, expired, or gated data; missing `read_test_pool` returns 403.
-API errors remain errors rather than successful empty results.
+API errors remain errors rather than successful empty results. Repeated 401s
+do not rule out a temporary authentication failure. Failed or unqueried reads
+leave data unknown, not absent.
 
 ---
 
