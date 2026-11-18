@@ -72,6 +72,18 @@ func TestListBuildsArgsSchema(t *testing.T) {
 	require.Empty(t, s.Properties["org_slug"].Description)
 }
 
+func TestGetClusterQueueInsightsArgsSchema(t *testing.T) {
+	s := schemaFor[GetClusterQueueInsightsArgs](t)
+	require.Equal(t, []string{"cluster_id", "org_slug", "queue_id"}, sortedToolRequired(t, s))
+	require.Contains(t, s.Properties["include"].Description, "history_comparison")
+	require.Contains(t, s.Properties["include"].Description, "independently")
+	require.Contains(t, s.Properties["time_period"].Description, "1h")
+	require.Contains(t, s.Properties["time_period"].Description, "24h")
+	require.Contains(t, s.Properties["time_period"].Description, "7d")
+	require.Contains(t, s.Properties["time_period"].Description, "Requires history or history_comparison")
+	require.Contains(t, s.Properties["time_period"].Description, "does not affect hourly_changes")
+}
+
 func TestGetBuildArgsSchema(t *testing.T) {
 	req := sortedRequired[GetBuildArgs](t)
 	require.Equal(t, []string{"build_number", "org_slug", "pipeline_slug"}, req)

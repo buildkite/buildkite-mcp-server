@@ -719,6 +719,16 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Equal("compare_builds", investigations.Tools[1].Tool.Name)
 	assert.Equal([]string{"read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
 
+	var insightsEnabled bool
+	for _, tool := range registry.GetEnabledTools([]string{ToolsetClusters}, true) {
+		if tool.Tool.Name == "get_cluster_queue_insights" {
+			insightsEnabled = true
+			assert.Equal([]string{"read_clusters"}, tool.RequiredScopes)
+			assert.False(tool.IsMinimumAccess())
+		}
+	}
+	assert.True(insightsEnabled, "queue insights should be available in the read-only clusters toolset")
+
 	builds, exists := registry.Get(ToolsetBuilds)
 	assert.True(exists)
 	buildToolNames := make([]string, 0, len(builds.Tools))
