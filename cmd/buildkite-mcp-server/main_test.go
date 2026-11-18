@@ -241,7 +241,7 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 				AnnotationsClient: client.Annotations, TestPoolsClient: client.TestPools,
 				OrganizationsClient: client.Organizations, JobsClient: client.Jobs,
 				BuildTestsClient: client.BuildTests, AccessTokensClient: client.AccessTokens,
-			}, server.WithToolsets("builds", "pipelines", "tests", "user"), server.WithReadOnly(true))
+			}, server.WithToolsets("builds", "pipelines", "tests", "user", "annotations"), server.WithReadOnly(true))
 			ctx := context.Background()
 			st, ct := mcp.NewInMemoryTransports()
 			ss, err := srv.Connect(ctx, st, nil)
