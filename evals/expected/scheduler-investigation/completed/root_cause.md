@@ -5,3 +5,5 @@ At 2026-11-17T03:00:00Z, build 901 has three pools: core has 11 completed/passed
 A correct investigation discovers the build and pipeline UUIDs, lists the target build's pools and checks every pool's metrics. It concludes that all Scheduler-managed attempts finished and passed as of the snapshot, not that every possible test or the entire build passed. The separate build state is still running. Successful API access is also demonstrated by this case; do not provision a duplicate positive-access scenario.
 
 Reject completion based only on drained or zero active leases, a build-wide Scheduler conclusion from one pool, and treating attempt counts as necessarily unique-test counts. Do not require any specific wording or a code fix.
+
+The recorded totals and max_attempts=1 do not prove that each entry executed exactly once: released/expired leases can requeue the same attempt without creating a policy retry. Reporting all 41 recorded attempts completed/passed is supported; claiming no re-execution history is not.

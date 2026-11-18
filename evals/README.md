@@ -318,6 +318,12 @@ invented organization/build/pool identities and no credentials. They include
 build/pipeline discovery, including get_build's annotation-summary request,
 and the jobs, raw annotations, build tests and token-metadata exploration
 requests observed in eval #450 for the relevant scenarios.
+The backlog also covers eval #451's default get_build_failure_summary call:
+all four filtered job tiers return empty pages (the only job is running without
+a promised failure), and the raw, all-scope annotations request returns no data.
+The public-MCP fixture test exercises the whole call so one repaired request
+cannot merely expose the next replay miss. Invented pool UUID probes are not
+legitimate fixture gaps and are deliberately not given fabricated responses.
 HAR matching is exact on method, path and query. The fixtures support list
 page sizes 30 and 100, the returned cursors, and the planning comparison's
 `features` key filter. Each recorded request has three responses for limited
@@ -325,6 +331,14 @@ re-reading. Missing/exhausted requests fail offline; they never fall back to
 the real API. A legitimate request absent from a fixture is a scenario gap,
 not evidence of a product/API defect or a passing eval. Correct the fixture
 before an authorized rerun rather than grading around the gap.
+
+These dates do not move with the session clock. Judge expiry and progress as
+of the returned observation, not as a claim about the time the eval runs.
+Review the entire answer for unsupported history even when the headline and
+arithmetic are correct. In particular, zero current leases and max_attempts=1
+do not prove never leased, never ran, or exactly one execution per entry.
+Full investigation credit also requires resource IDs grounded in discovery;
+a correct final headline does not erase an invented-ID error probe.
 
 The fixtures were checked against the Rails/bkgo contract at
 [`9304bc182aaccb83623cb3b904f3fe4455313f52`](https://github.com/buildkite/buildkite/commit/9304bc182aaccb83623cb3b904f3fe4455313f52),

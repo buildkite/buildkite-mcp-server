@@ -241,7 +241,7 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 				AnnotationsClient: client.Annotations, TestPoolsClient: client.TestPools,
 				OrganizationsClient: client.Organizations, JobsClient: client.Jobs,
 				BuildTestsClient: client.BuildTests, AccessTokensClient: client.AccessTokens,
-			}, server.WithToolsets("builds", "pipelines", "tests", "user", "annotations"), server.WithReadOnly(true))
+			}, server.WithToolsets("builds", "pipelines", "tests", "user", "annotations", "investigations"), server.WithReadOnly(true))
 			ctx := context.Background()
 			st, ct := mcp.NewInMemoryTransports()
 			ss, err := srv.Connect(ctx, st, nil)
@@ -267,8 +267,13 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 			var build buildkitetools.BuildDetail
 			require.False(t, call("get_build", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901"}, &build).IsError)
 			args := map[string]any{"org_slug": "scheduler-evals", "pipeline_uuid": pipeline.ID, "build_uuid": build.ID}
-			// Exercise the exact exploration paths that missed replay data in #450.
+			// Exercise exploration paths that missed replay data in #450 and #451.
 			if tc.fixture == "backlog" {
+				var summary buildkitetools.BuildFailureSummary
+				require.False(t, call("get_build_failure_summary", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901"}, &summary).IsError)
+				require.Equal(t, "running", summary.Build.State)
+				require.Empty(t, summary.Jobs)
+				require.Empty(t, summary.Warnings)
 				for _, perPage := range []int{0, 100} {
 					var jobs buildkitetools.JobListResult[buildkitetools.JobDetail]
 					require.False(t, call("list_jobs", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901", "detail_level": "detailed", "per_page": perPage}, &jobs).IsError)
