@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/buildkite/buildkite-mcp-server/internal/headerpassthrough"
@@ -219,7 +220,7 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 	}{
 		{fixture: "completed", pools: 3, completed: 41},
 		{fixture: "planning-failure", pools: 2, completed: 11},
-		{fixture: "backlog", pools: 1, waiting: 11, leased: 3, completed: 23},
+		{fixture: "backlog", pools: 1, waiting: 11, leased: 8, completed: 23},
 		{fixture: "completed-failures", pools: 1, completed: 19, failed: 2, errored: 1},
 		{fixture: "idle-waiting", pools: 1, waiting: 7},
 		{fixture: "errored-drained", pools: 1, waiting: 7},
@@ -238,7 +239,8 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 			srv := server.NewMCPServer("test", buildkitetools.ToolDependencies{
 				BuildsClient: client.Builds, PipelinesClient: client.Pipelines,
 				AnnotationsClient: client.Annotations, TestPoolsClient: client.TestPools,
-				OrganizationsClient: client.Organizations,
+				OrganizationsClient: client.Organizations, JobsClient: client.Jobs,
+				BuildTestsClient: client.BuildTests, AccessTokensClient: client.AccessTokens,
 			}, server.WithToolsets("builds", "pipelines", "tests", "user"), server.WithReadOnly(true))
 			ctx := context.Background()
 			st, ct := mcp.NewInMemoryTransports()
@@ -265,10 +267,34 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 			var build buildkitetools.BuildDetail
 			require.False(t, call("get_build", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901"}, &build).IsError)
 			args := map[string]any{"org_slug": "scheduler-evals", "pipeline_uuid": pipeline.ID, "build_uuid": build.ID}
+			// Exercise the exact exploration paths that missed replay data in #450.
+			if tc.fixture == "backlog" {
+				for _, perPage := range []int{0, 100} {
+					var jobs buildkitetools.JobListResult[buildkitetools.JobDetail]
+					require.False(t, call("list_jobs", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901", "detail_level": "detailed", "per_page": perPage}, &jobs).IsError)
+					require.Len(t, jobs.Items, 1)
+					require.Equal(t, "running", jobs.Items[0].State)
+				}
+				var annotations buildkitetools.PaginatedResult[gobuildkite.Annotation]
+				require.False(t, call("list_annotations", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "901"}, &annotations).IsError)
+				require.Empty(t, annotations.Items)
+				var tests buildkitetools.PaginatedResult[gobuildkite.TestWithMetrics]
+				require.False(t, call("list_tests_for_build", map[string]any{"org_slug": "scheduler-evals", "build_uuid": build.ID, "per_page": 100}, &tests).IsError)
+				require.Empty(t, tests.Items)
+			}
+			if tc.fixture == "forbidden" {
+				var token gobuildkite.AccessToken
+				require.False(t, call("access_token", map[string]any{}, &token).IsError)
+				require.Contains(t, token.Scopes, "read_builds")
+				require.NotContains(t, token.Scopes, "read_test_pool")
+			}
 			if tc.callError != "" {
 				// Authentication failures propagate as MCP call errors, not tool-result content.
-				_, callErr := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_test_pools", Arguments: args})
-				require.ErrorContains(t, callErr, tc.callError)
+				for name, input := range map[string]map[string]any{"list_test_pools": args, "access_token": {}} {
+					_, callErr := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: input})
+					require.ErrorContains(t, callErr, tc.callError)
+					require.ErrorIs(t, callErr, buildkitetools.ErrUnauthorized)
+				}
 				return
 			}
 			var pools int
@@ -287,8 +313,51 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 					input := map[string]any{"org_slug": "scheduler-evals", "build_uuid": build.ID, "pool_uuid": p.ID}
 					var detail gobuildkite.TestPool
 					require.False(t, call("get_test_pool", input, &detail).IsError)
+					require.Equal(t, build.ID, detail.BuildID)
+					if detail.State == "errored" {
+						require.NotNil(t, detail.Error)
+						require.Equal(t, "Test pool failed.", detail.Error.Message)
+					}
 					var metrics gobuildkite.TestPoolMetrics
 					require.False(t, call("get_test_pool_metrics", input, &metrics).IsError)
+					require.Equal(t, p.ID, metrics.Pool.ID)
+					require.NotNil(t, metrics.ObservedAt)
+					// Rails/bkgo contract: states partition attempts; results classify
+					// completed attempts; both live and expired leases still hold leased work.
+					states := metrics.Attempts.States
+					require.Equal(t, metrics.Attempts.Total, states["waiting"].Count+states["leased"].Count+states["completed"].Count+states["canceled"].Count)
+					require.Equal(t, states["completed"].Count, metrics.Attempts.Results["passed"]+metrics.Attempts.Results["failed"]+metrics.Attempts.Results["errored"])
+					require.Equal(t, states["leased"].Count, metrics.Leases.Active.AttemptCount+metrics.Leases.Expired.AttemptCount)
+					finalized := metrics.Pool.State == "consumed" || (metrics.Pool.State == "errored" && metrics.Pool.Drained)
+					if states["waiting"].Count == 0 || finalized {
+						require.Nil(t, metrics.Timing.OldestWaitingAttemptCreatedAt)
+					} else {
+						require.NotNil(t, metrics.Timing.OldestWaitingAttemptCreatedAt)
+						require.False(t, metrics.Timing.OldestWaitingAttemptCreatedAt.After(metrics.ObservedAt.Time))
+					}
+					if metrics.Leases.Active.Count == 0 {
+						require.Zero(t, metrics.Leases.Active.AttemptCount)
+						require.Nil(t, metrics.Timing.OldestActiveLeaseStartedAt)
+						require.Nil(t, metrics.Timing.NextActiveLeaseExpiresAt)
+					} else {
+						require.GreaterOrEqual(t, metrics.Leases.Active.AttemptCount, metrics.Leases.Active.Count)
+						require.NotNil(t, metrics.Timing.OldestActiveLeaseStartedAt)
+						require.NotNil(t, metrics.Timing.NextActiveLeaseExpiresAt)
+						require.False(t, metrics.Timing.OldestActiveLeaseStartedAt.After(metrics.ObservedAt.Time))
+						require.True(t, metrics.Timing.NextActiveLeaseExpiresAt.After(metrics.ObservedAt.Time))
+					}
+					if metrics.Leases.Expired.Count == 0 {
+						require.Zero(t, metrics.Leases.Expired.AttemptCount)
+						require.Nil(t, metrics.Timing.OldestExpiredLeaseStartedAt)
+					} else {
+						require.GreaterOrEqual(t, metrics.Leases.Expired.AttemptCount, metrics.Leases.Expired.Count)
+						require.NotNil(t, metrics.Timing.OldestExpiredLeaseStartedAt)
+						require.False(t, metrics.Timing.OldestExpiredLeaseStartedAt.After(metrics.ObservedAt.Time))
+					}
+					if states["waiting"].Count+states["leased"].Count > 0 && metrics.Pool.State == "consuming" {
+						require.False(t, metrics.Pool.Drained)
+					}
+					require.Equal(t, time.Date(2026, time.November, 17, 3, 0, 0, 0, time.UTC), metrics.ObservedAt.Time)
 					waiting += metrics.Attempts.States["waiting"].Count
 					leased += metrics.Attempts.States["leased"].Count
 					completed += metrics.Attempts.States["completed"].Count
@@ -301,6 +370,18 @@ func TestSchedulerEvalReplayFixtures(t *testing.T) {
 				next, parseErr := url.Parse(string(page.Links.Next))
 				require.NoError(t, parseErr)
 				args["after"] = next.Query().Get("after")
+			}
+			if tc.fixture == "planning-failure" {
+				var other gobuildkite.Build
+				require.False(t, call("get_build", map[string]any{"org_slug": "scheduler-evals", "pipeline_slug": "sample", "build_number": "900"}, &other).IsError)
+				require.NotEqual(t, build.ID, other.ID)
+				var page buildkitetools.TestPoolsPage
+				require.False(t, call("list_test_pools", map[string]any{"org_slug": "scheduler-evals", "pipeline_uuid": pipeline.ID, "build_uuid": other.ID, "key": "features"}, &page).IsError)
+				require.Len(t, page.Items, 1)
+				require.Equal(t, other.ID, page.Items[0].BuildID)
+				require.Equal(t, "33333333-3333-4333-8333-000000000099", page.Items[0].ID)
+				require.NotNil(t, page.Items[0].Error)
+				require.Equal(t, "Test pool failed.", page.Items[0].Error.Message)
 			}
 			require.Equal(t, tc.pools, pools)
 			require.Equal(t, tc.waiting, waiting)

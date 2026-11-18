@@ -315,14 +315,31 @@ comparison and model access; this change does not remove those requirements.
 
 Fixtures are synthetic historical snapshots at `2026-11-17T03:00:00Z`, with
 invented organization/build/pool identities and no credentials. They include
-build/pipeline discovery, including get_build's annotation-summary request.
+build/pipeline discovery, including get_build's annotation-summary request,
+and the jobs, raw annotations, build tests and token-metadata exploration
+requests observed in eval #450 for the relevant scenarios.
 HAR matching is exact on method, path and query. The fixtures support list
 page sizes 30 and 100, the returned cursors, and the planning comparison's
 `features` key filter. Each recorded request has three responses for limited
 re-reading. Missing/exhausted requests fail offline; they never fall back to
 the real API. A legitimate request absent from a fixture is a scenario gap,
-not evidence of a product/API defect or a passing eval. Extend that fixture
-and rerun rather than grading around the gap.
+not evidence of a product/API defect or a passing eval. Correct the fixture
+before an authorized rerun rather than grading around the gap.
+
+The fixtures were checked against the Rails/bkgo contract at
+[`9304bc182aaccb83623cb3b904f3fe4455313f52`](https://github.com/buildkite/buildkite/commit/9304bc182aaccb83623cb3b904f3fe4455313f52),
+not a verified production deployment revision:
+
+- [`domain/scheduling.go:332–402`](https://github.com/buildkite/buildkite/blob/9304bc182aaccb83623cb3b904f3fe4455313f52/bkgo/internal/testscheduler/domain/scheduling.go#L332-L402) partitions attempts into waiting, leased, completed and canceled; results classify completed attempts. Attempt counts need not be unique-test counts.
+- [`domain/reads.go:155–212`](https://github.com/buildkite/buildkite/blob/9304bc182aaccb83623cb3b904f3fe4455313f52/bkgo/internal/testscheduler/domain/reads.go#L155-L212) reports active/expired leases' **current held attempts**, not historical expiry totals. The backlog has 8 leased attempts: 3 held by active leases plus 5 held by expired leases. Finalized pools suppress all four timing fields, including errored/drained pools with waiting work.
+- [`domain/leases.go:758–798`](https://github.com/buildkite/buildkite/blob/9304bc182aaccb83623cb3b904f3fe4455313f52/bkgo/internal/testscheduler/domain/leases.go#L758-L798) requeues released/expired attempts. Waiting with no leases is valid and does not mean never leased or never ran. Waiting age is since creation, not necessarily uninterrupted waiting.
+- [`TestPool#error`](https://github.com/buildkite/buildkite/blob/9304bc182aaccb83623cb3b904f3fe4455313f52/app/models/test_scheduler/test_pool.rb#L176-L179) exposes only `Test pool failed.`. The historical `planning-failure` scenario tests build attribution and admits that the error does not prove a planning phase or underlying cause.
+
+Counters in a metrics response are captured together, but separate pool/list/build
+reads are not atomic. Pool projection can advance after metric capture, and
+archived metrics reuse terminal summaries with a new observed_at. That timestamp
+is not a replica-freshness watermark. A snapshot does not prove a persistent
+stall, a worker bottleneck, or an ETA from estimated workload.
 
 Review the proposed reference answers under
 `expected/scheduler-investigation/<scenario.id>/root_cause.md` with the PR.
@@ -340,7 +357,8 @@ have no matching baseline. Do not treat unavailable baseline Scheduler tools
 as an API failure. These evals do not verify hosted OAuth or production access;
 those remain separate checks.
 
-PR CI checks the fixtures through MCP discovery/list/detail/metrics and tests
+PR CI checks the fixtures through MCP discovery/list/detail/metrics, the observed
+exploration requests, and counter/lease/timing consistency, and tests
 the harness's entry selection and replay/token scoping without a model or live
 API. Those checks are not executed agent evals. The model run and human review
 must be recorded separately before release.
