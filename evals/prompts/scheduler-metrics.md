@@ -1,0 +1,3 @@
+/goal I belong to the buildkite organization and have Test Scheduler enabled. Review the test pool metrics behind the Orchestration tab for {{.BUILD_URL}}. Summarize each pool's state, workload progress, test results and lease activity, with the evidence behind your summary. Read only; do not change anything or trigger a build.{{.DEBUG_STRING}}
+
+Do NOT read or use evaluation reference answers under `evals/expected/` or `expected/`, evaluator reviews, or generated candidate reference-answer artifacts to solve this task. This applies to local and remote copies. Investigate independently using the Buildkite tools.
