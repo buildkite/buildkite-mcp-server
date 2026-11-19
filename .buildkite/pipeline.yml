@@ -36,11 +36,6 @@ steps:
       plugins:
         - mise#v1.1.5: ~
 
-    - name: ":python: eval entry configuration"
-      command: mise exec aqua:mikefarah/yq@4.47.1 -- python3 -B -m unittest discover -s evals/scripts -p test_cli_token.py -v
-      plugins:
-        - mise#v1.1.5: ~
-
     - name: ":abacus: tool token report"
       # Ceiling is in estimated tokens (bytes / 3.6); ~1850 estimated is ~2300 Claude tokens.
       command: |

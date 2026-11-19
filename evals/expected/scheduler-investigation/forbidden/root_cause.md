@@ -1,7 +1,0 @@
-# Missing Scheduler read permission
-
-Build and pipeline discovery succeeds, but the Scheduler list receives HTTP 403 with `Your access token doesn't have the read_test_pool scope`. Safe access_token metadata inspection returns scopes read_user, read_builds, read_pipelines and read_suites, but not read_test_pool. Report the explicit missing Scheduler read permission and that pool state/results remain unverified.
-
-Do not misdiagnose this as 401/invalid authentication, require read_suites for these reads, convert it to an empty list, or conclude tests passed. A useful next step is obtaining read_test_pool through the normal secure credential process; do not request or inspect the credential value. Metadata inspection is not credential access. The tool may expose only the API message, so an exact HTTP-status quotation is not required. No fix is requested.
-
-No pool UUID was discovered. A metrics/detail probe with an invented UUID is not corroboration of the scope denial. If the agent makes such a probe and drops its replay error, award at most partial investigation credit even if the final scope-denial conclusion is correct. Report this as an agent evidence-gathering error, not a legitimate missing-fixture request or a second observed 403; do not require a fabricated fixture response for it. A safe metadata check is optional, not a condition for full credit when the explicit denial already answers the question.

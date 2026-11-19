@@ -1,5 +1,0 @@
-# Zero active leases does not establish completion
-
-At 2026-11-17T03:00:00Z the single core pool is consuming and not drained. All 7 attempts are waiting, none leased or completed, with zero active and expired leases and zero recorded results. Waiting estimated p50 workload is 420,000 ms; the oldest waiting attempt is ten minutes old at the observation time.
-
-Say testing is not finished: waiting work remains despite no active leases. This is a valid consuming, non-drained snapshot, including after released/expired work was requeued. Zero completed attempts does not establish that no attempt ever ran or was leased; the oldest waiting timestamp is attempt creation time, not uninterrupted waiting duration. The aggregate data cannot establish why no lease is currently held or prove a worker bottleneck/stall. Workload is not elapsed time or ETA, and observed_at does not establish replica freshness. Reject declaring finished/passed execution or a proven infrastructure cause. Clearly qualified hypotheses and next checks are allowed. No code fix is requested.

@@ -279,177 +279,6 @@ Locally there is no container sandbox, so the posture is a conscious choice via 
 * `false`: restricted mode — the agent gets `Edit`, `go`/`make`/`git` Bash, and the MCP server's tools (server name derived from `mcp.json`, override with `MCP_SERVER_NAME`). Safe on a host machine, but NOT comparable to CI runs since the agent's tool choice is constrained. Claude-only: cursor entries are skipped in this mode (see "Supported agents").
 * `true`: CI parity — `bypassPermissions` / `--force`, i.e. the agent has unrestricted Bash ON YOUR MACHINE. Use with care.
 
-## Test Scheduler candidate evals
-
-The `scheduler-*` entries exercise the real candidate MCP server and Go SDK
-offline using synthetic HAR responses and one sanitized recorded-pool baseline.
-The synthetic cases cover planning errors,
-backlog, completion versus passing results, per-test-detail limits, and
-authentication/permission/availability errors. The completed-success scenario
-also supplies the successful-access control; the detail-boundary task reuses
-the backlog fixture. The 31-pool case puts waiting work beyond the first page.
-`scheduler-recorded-completed-pool` separately checks a supplied pool/build UUID
-against recorded detail and metrics. It does not exercise discovery or establish
-anything about other pools or a whole build. All synthetic cases are retained.
-
-In the [eval pipeline](https://buildkite.com/buildkite/buildkite-mcp-server-evals-framework),
-create a build against the **candidate branch and exact commit**, not `main`.
-Set this build environment variable for a first focused run:
-
-```text
-EVAL_ENTRY=scheduler-completed
-```
-
-After inspecting that run, use `EVAL_ENTRY=scheduler-*` for all Scheduler
-entries. `EVAL_ENTRY` accepts an exact matrix ID or a prefix ending in `*`;
-an unknown selector fails rather than silently running nothing. Unset means
-the entire matrix, including the existing live scenarios. No merge or
-published MCP release is needed: `mcp_version: source` uses the binary built
-from this commit. A non-source `mcp_version` does not currently select a
-different binary. Manual eval builds incur model usage and require approval.
-
-`scenario.replay` is a HAR path relative to `evals/`, supported for
-`agent: claude`, `mode: mcp`. The harness checks the file, passes it as
-`BUILDKITE_REPLAY`, clears the entry's Buildkite API token, and records the
-fixture path alongside the model and MCP source SHA in run metadata. Each
-agent starts a new MCP process, resetting replay state. Entries without
-`replay` retain normal live token behavior; replay is not inherited by them.
-The standard pipeline still uses its existing credentials for cloning,
-comparison and model access; this change does not remove those requirements.
-
-The synthetic fixtures are historical snapshots at `2026-11-17T03:00:00Z`, with
-invented organization/build/pool identities and no credentials. They include
-build/pipeline discovery, including get_build's annotation-summary request,
-and the jobs, raw annotations, build tests and token-metadata exploration
-requests observed in eval #450 for the relevant scenarios.
-The backlog also covers eval #451's default get_build_failure_summary call:
-all four filtered job tiers return empty pages (the only job is running without
-a promised failure), and the raw, all-scope annotations request returns no data.
-For eval #452's legitimate worker-log exploration it also supplies the log-access
-HEAD, job-status GET and raw text log GET used by buildkite-logs v0.13.1.
-The three synthetic worker-startup lines contain no pending-test identities,
-lease history or bottleneck evidence. The existing public-MCP test reads those
-lines through the real log client and parser with an isolated cold cache.
-The public-MCP fixture test exercises the whole call so one repaired request
-cannot merely expose the next replay miss. Invented pool UUID probes are not
-legitimate fixture gaps and are deliberately not given fabricated responses.
-HAR matching is exact on method, path and query. The fixtures support list
-page sizes 30 and 100, the returned cursors, and the planning comparison's
-`features` key filter. Each recorded request has three responses for limited
-re-reading. Missing/exhausted requests fail offline; they never fall back to
-the real API. A legitimate request absent from a fixture is a scenario gap,
-not evidence of a product/API defect or a passing eval. Correct the fixture
-before an authorized rerun rather than grading around the gap.
-
-These dates do not move with the session clock. Judge expiry and progress as
-of the returned observation, not as a claim about the time the eval runs.
-Review the entire answer for unsupported history even when the headline and
-arithmetic are correct. In particular, zero current leases and max_attempts=1
-do not prove never leased, never ran, or exactly one execution per entry.
-Full investigation credit also requires resource IDs supplied by the user or grounded in discovery;
-a correct final headline does not erase an invented-ID error probe.
-
-### Recorded completed-pool baseline provenance
-
-`fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har` was supplied by
-Katie after capturing one real completed pool through her local candidate MCP
-on 2026-11-18. Its SHA256 is
-`d8243394e1c74555e85cd0d0f29d10f13407172d216333aa0f368b23ec3c042b`;
-the uploaded sanitized bytes and chosen filename are retained unchanged.
-The HAR creator reports `dev`, not a verified binary source SHA. The raw HAR
-and confidential mapping remain on her Mac; reviewers inspected the sanitized
-file and cannot independently attest equivalence with the original raw file.
-
-Second review covered all six requests/responses, headers, URLs, query values
-and decoded JSON bodies. Request headers are empty; response headers contain
-only Date and Content-Type. There are no redirects, request bodies, encoded
-bodies or extra metadata payloads. Organization/resource identifiers and the
-pool key use coherent pseudonyms; all 120 muted-test name/path/scope values are
-explicit redactions. Counts, policies, timestamps, nullability and workload
-are retained. No apparent credentials or private strings were found in the
-supplied file. Do not treat automatic Authorization omission as sanitization
-for future recordings.
-
-The six entries are three real detail reads and three real metrics reads,
-not duplicated synthetic responses. Metrics observations are
-`2026-11-18T20:25:11.046Z`, `20:25:21.954Z` and `20:25:23.866Z` on the same
-UTC date; all report 145 total/completed/passed attempts in this pool, with
-zero other states/results/lease holds and null timings. Expiry is
-`2026-11-19T01:05:27.372Z`. Preserve these historical dates rather than moving
-them to imply freshness. The muted planning records do not mean additional
-tests ran or no muted tests exist; 145 attempts is not proof of all possible
-tests or whole-build success.
-
-The baseline uses the supplied pseudonymous organization/build/pool IDs and
-only detail/metrics calls; no organization/build/list responses are fabricated.
-Each endpoint has three consumable responses. Missing or exhausted requests
-remain replay errors, not evidence of production absence. The existing
-public-MCP fixture check exercises all three response pairs in CI; that is
-deterministic replay validation, not a paid model run or a live API check.
-`EVAL_ENTRY=scheduler-recorded-completed-pool` selects this case, and
-`EVAL_ENTRY=scheduler-*` now includes it alongside the 12 synthetic cases.
-An agent run still needs explicit approval and per-case answer/grade review.
-
-### Contract and grading limits
-
-The fixtures were checked against the Rails/bkgo contract at
-[`9304bc182aaccb83623cb3b904f3fe4455313f52`](https://github.com/buildkite/buildkite/commit/9304bc182aaccb83623cb3b904f3fe4455313f52),
-not a verified production deployment revision:
-
-- [`domain/scheduling.go:332–402`](https://github.com/buildkite/buildkite/blob/9304bc182aaccb83623cb3b904f3fe4455313f52/bkgo/internal/testscheduler/domain/scheduling.go#L332-L402) partitions attempts into waiting, leased, completed and canceled; results classify completed attempts. Attempt counts need not be unique-test counts.
-- [`domain/reads.go:155–212`](https://github.com/buildkite/buildkite/blob/9304bc182aaccb83623cb3b904f3fe4455313f52/bkgo/internal/testscheduler/domain/reads.go#L155-L212) reports active/expired leases' **current held attempts**, not historical expiry totals. The backlog has 8 leased attempts: 3 held by active leases plus 5 held by expired leases. Finalized pools suppress all four timing fields, including errored/drained pools with waiting work.
-- [`domain/leases.go:758–798`](https://github.com/buildkite/buildkite/blob/9304bc182aaccb83623cb3b904f3fe4455313f52/bkgo/internal/testscheduler/domain/leases.go#L758-L798) requeues released/expired attempts. Waiting with no leases is valid and does not mean never leased or never ran. Waiting age is since creation, not necessarily uninterrupted waiting.
-- [`TestPool#error`](https://github.com/buildkite/buildkite/blob/9304bc182aaccb83623cb3b904f3fe4455313f52/app/models/test_scheduler/test_pool.rb#L176-L179) exposes only `Test pool failed.`. The historical `planning-failure` scenario tests build attribution and admits that the error does not prove a planning phase or underlying cause.
-
-Counters in a metrics response are captured together, but separate pool/list/build
-reads are not atomic. Pool projection can advance after metric capture, and
-archived metrics reuse terminal summaries with a new observed_at. That timestamp
-is not a replica-freshness watermark. A snapshot does not prove a persistent
-stall, a worker bottleneck, or an ETA from estimated workload.
-
-Review the proposed reference answers under
-`expected/scheduler-investigation/<scenario.id>/root_cause.md` with the PR.
-Only conclusion and investigation have references; no code fix is requested,
-so fix grading is n/a. Review annotations, full tool results and final answers
-for every case; a successful pipeline or a favorable judge alone is not a
-correctness verdict. Reading fixture files or reference answers invalidates
-the investigation. References are excluded from the CI agent image, but HAR
-files must be readable by the MCP process in the same container; the prompt
-restriction and transcript review are not a filesystem isolation guarantee.
-
-#### Grading calibration from eval #452
-
-[Eval #452](https://buildkite.com/buildkite/buildkite-mcp-server-evals-framework/builds/452)
-at `4c17fe3b689b4c1d55cf64f809002c7db926b32e` retains its original six
-full/full and six partial/partial conclusion/investigation awards. Review
-disputed two full/full awards: planning-failure asserted that the consumed
-core pool succeeded without its result metrics; unauthorized ruled out
-transience from repeated 401s. Both judges acknowledged those overclaims but
-excused them as minor. They change an outcome or exclude a plausible cause,
-so the clarified rubric and references treat them as material even when the
-main diagnosis is correct. The review-proposed assessment is four full/full
-and eight partial/partial, not an official regrade or a new model run.
-
-Judge evidence and meaning, not phrases. Reporting consumed state without
-claiming passing, reporting repeated failures without ruling out temporary
-causes, and qualified hypotheses remain valid. Forbidden's unexecuted next-check
-narration alone does not invalidate its supported scope-denial conclusion.
-The harness preserves reviewer verdicts; it does not rewrite historical scores
-or apply keyword-based downgrades. CI cannot prove a model will apply these
-judgment rules consistently; that requires a separately authorized review run.
-
-Use existing audit/comparison reports for unnecessary calls, pagination,
-API fan-out, payload bytes, latency and tokens where reported. A first run may
-have no matching baseline. Do not treat unavailable baseline Scheduler tools
-as an API failure. These evals do not verify hosted OAuth or production access;
-those remain separate checks.
-
-PR CI checks the fixtures through MCP discovery/list/detail/metrics, the observed
-exploration requests, and counter/lease/timing consistency, and tests
-the harness's entry selection and replay/token scoping without a model or live
-API. Those checks are not executed agent evals. The model run and human review
-must be recorded separately before release.
-
 ## Setup
 
 ### Code
@@ -587,3 +416,15 @@ All new code are mostly in `evals/` folder
       * Github to access scenarios (read/write) in external repo, e.g., where scnearios are, so we can access/create branches and push, etc.
       * Buildkite for bk org to retrieve the last successful build (read) to compare
       * Buildkite for orgs where the scenario pipelines (read) are (to monitor scenarios from red-to-green)
+
+### Supplied-ID Scheduler investigations
+
+The four active matrix entries use the existing [HAR replay](../DEVELOPMENT.md#recording-and-replaying-api-calls-for-offline-evals): one recorded success and edited 401, 403 and 404 variants. They share a task prompt and use the existing evaluator and rubric unchanged. Model runs remain on demand.
+
+`fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har` is the supplied sanitized recording, retained unchanged. It contains three detail/metrics pairs for one pool, observed on 2026-11-18. Organization/resource IDs and muted-test identities were redacted before it was supplied. Its creator version is `dev`; the recording binary's source SHA and equivalence to the private original are unverified.
+
+The three error HARs copy its requests and replace every response with the corresponding status and JSON error body, updating body sizes. They simulate failures; they are not recordings of real access failures. Both detail and metrics reads return the same error, with the original three responses per endpoint retained.
+
+`scenario.replay` selects a HAR relative to `evals/`, starts a fresh replay per entry and omits the entry's API token. This wiring supports Claude in MCP mode only. The Docker image includes fixtures but not expected answers. Select scenarios by editing the matrix, as with the existing examples; local runs can also use `EVALS_CONFIG`.
+
+Coverage is limited to supplied-ID detail/metrics reads. There are no discovery, pool-list, pagination, build/log, backlog or lease-expiry scenarios. Successful results describe the recorded pool at its observation time, not the whole build or current production state. Missing replay requests are fixture coverage limits, not evidence of a production failure.

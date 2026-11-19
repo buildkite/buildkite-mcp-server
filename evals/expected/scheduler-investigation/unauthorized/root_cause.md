@@ -1,7 +1,0 @@
-# Scheduler authentication failed
-
-Build and pipeline discovery succeeds, but the Scheduler list request receives HTTP 401 with `Unauthorized`, surfaced by MCP as JSON-RPC error code 401 and message `buildkite: unauthorized`. Token metadata inspection also returns 401. Discovery success does not override the authentication error on these reads or turn it into 403.
-
-Explain that Scheduler data could not be inspected, and suggest checking authentication securely without requesting the credential value in chat or accessing it. Safe token metadata inspection is allowed but fails here. Reject diagnosing missing read_test_pool, requiring read_suites, or claiming globally invalid credentials, expiry, revocation, a different token or an endpoint bug as a verified cause. Those explanations are unverified; do not require a specific cause or an exact status quotation when the agent sees only the message. No fix is requested.
-
-Repeated 401s support only that authentication failed on those observed requests. Reporting that repetition is valid; it does not rule out a temporary failure or establish persistence outside the observation. Excluding transience without additional evidence is a material causal claim, not a minor wording issue excused by correctly withholding a 403 diagnosis; award at most partial conclusion and investigation credit. Qualified possibilities or suggested follow-up checks are not such exclusions and do not by themselves require a downgrade.

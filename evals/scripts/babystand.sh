@@ -639,9 +639,7 @@ run_entry() {
         echo "WARNING: entry '$ENTRY_ID' has unknown mode_params for mode '$MODE': $UNKNOWN_PARAMS; skipping." >&2
         return 0
     fi
-    # Replay is entry-scoped: a new MCP process reloads the HAR for every run.
-    # Other runners do not yet pass this setting to their MCP configurations.
-    local REPLAY_FILE=""
+    local REPLAY_FILE
     REPLAY_FILE=$(jq -r '.scenario.replay // ""' <<<"$entry")
     if [[ -n "$REPLAY_FILE" ]]; then
         if [[ "$MODE" != "mcp" || "$AGENT" != "claude" ]]; then
@@ -750,12 +748,11 @@ run_entry() {
     local RUN_INFO
     RUN_INFO="$(jq -n \
         --arg mode "$MODE" --argjson params "$MODE_PARAMS" \
-        --arg replay "$(jq -r '.scenario.replay // ""' <<<"$entry")" \
         --arg agent "$AGENT" --arg harness "$HARNESS_VERSION" --arg model "${MODEL:-default}" \
         --arg bk_bin "$BK_CLI_BIN" --arg bk_ver "$BK_CLI_VERSION" --arg bk_org "$BK_CLI_ORG" \
         --arg mcp_req "$MCP_VERSION" --arg mcp_ver "$MCP_SERVER_VERSION" --arg mcp_sha "$MCP_SOURCE_SHA" \
         --arg req_log "$REQUEST_LOG" --arg bk_shim "$BK_SHIM_DIR" \
-        '{mode: $mode, mode_params: $params, replay: (if $replay == "" then null else $replay end),
+        '{mode: $mode, mode_params: $params,
           api_request_log: {mcp_server: ($req_log != "" and $mode == "mcp"), bk_cli: ($bk_shim != "")},
           harness: {agent: $agent, version: $harness, model: $model},
           bk_cli: (if $mode == "cli" then
@@ -1159,15 +1156,6 @@ run_entry() {
 
 # --- Drive the matrix -------------------------------------------------------
 MATRIX_JSON="$(yq -o=json '.matrix' "$EVALS_CONFIG")"
-if [[ -n "${EVAL_ENTRY:-}" ]]; then
-    MATRIX_JSON="$(jq --arg id "$EVAL_ENTRY" \
-        '[.[] | select(if ($id | endswith("*")) then (.id | startswith($id[:-1])) else .id == $id end)]' \
-        <<<"$MATRIX_JSON")"
-    if [[ "$(jq 'length' <<<"$MATRIX_JSON")" -eq 0 ]]; then
-        echo "babystand: unknown EVAL_ENTRY '$EVAL_ENTRY'" >&2
-        exit 1
-    fi
-fi
 ENTRY_COUNT="$(jq 'length' <<<"$MATRIX_JSON")"
 echo "*** Matrix entries: $ENTRY_COUNT"
 [[ "$ENTRY_COUNT" -gt 0 ]] || { echo "babystand: matrix is empty; nothing to run." >&2; exit 0; }

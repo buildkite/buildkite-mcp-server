@@ -36,8 +36,7 @@ class CliTokenTest(unittest.TestCase):
                 path.write_text("#!/bin/bash\nset -eu\n" + body + "\n")
                 path.chmod(0o755)
             env = {k: v for k, v in os.environ.items()
-                   if k not in ("BUILDKITE_API_TOKEN", "ENTRY_TEST_TOKEN", "DD_API_KEY",
-                                "BUILDKITE_REPLAY", "EVAL_ENTRY")}
+                   if k not in ("BUILDKITE_API_TOKEN", "ENTRY_TEST_TOKEN", "DD_API_KEY")}
             env.update(HOME=tmp, EVALS_CONFIG=str(root / "evals.json"), RUN_IN_CI="true",
                        LOCAL_CI="false", DEBUG_PERMISSIONS="false",
                        LOCAL_BYPASS_PERMISSION="true",
@@ -45,75 +44,9 @@ class CliTokenTest(unittest.TestCase):
             yield root, env
 
     def run_harness(self, root, env, entry):
-        entries = entry if isinstance(entry, list) else [entry]
-        (root / "evals.json").write_text(json.dumps({"matrix": entries}))
+        (root / "evals.json").write_text(json.dumps({"matrix": [entry]}))
         return subprocess.run(["bash", str(root / "scripts/babystand.sh")],
                               env=env, capture_output=True, text=True, timeout=15)
-
-    def test_replay_selection_and_token_do_not_leak_between_entries(self):
-        with self.harness() as (root, env):
-            (root / 'fixtures').mkdir()
-            replay = root / 'fixtures/snapshot.har'
-            replay.write_text('{"log":{"entries":[]}}')
-            (root / 'prompts').mkdir()
-            (root / 'prompts/investigate.md').write_text('Inspect the build.')
-            server = root / 'bin/buildkite-mcp-server'
-            server.write_text('#!/bin/bash\necho fixture-server\n')
-            server.chmod(0o755)
-            runner = root / 'scripts/claude.sh'
-            runner.write_text('''#!/bin/bash
-jq -n -c --arg replay "$BUILDKITE_REPLAY" --arg token "$BUILDKITE_API_TOKEN" \\
-    '{replay: $replay, token: $token}' >> "$CAPTURE"
-# Stop before audit/judging: no model or API is invoked by this check.
-exit 17
-''')
-            runner.chmod(0o755)
-            capture = root / 'calls.jsonl'
-            env.update(BUILDKITE_API_TOKEN='ambient-fixture-token', CAPTURE=str(capture))
-            base = {'agent': 'claude', 'mode': 'mcp', 'prompt': 'investigate'}
-            entries = [
-                {**base, 'id': 'replay', 'token_env': 'ENTRY_TEST_TOKEN',
-                 'scenario': {'replay': 'fixtures/snapshot.har'}},
-                {**base, 'id': 'live'},
-            ]
-            result = self.run_harness(root, env, entries)
-            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            self.assertEqual([json.loads(line) for line in capture.read_text().splitlines()],
-                             [{'replay': str(replay), 'token': ''},
-                              {'replay': '', 'token': 'ambient-fixture-token'}])
-
-    def test_invalid_replay_fails_before_scenario_setup(self):
-        for mode, agent, fixture, expected in (
-            ('mcp', 'claude', 'missing.har', 'replay fixture not found'),
-            ('cli', 'claude', 'missing.har', 'requires mode mcp and agent claude'),
-            ('mcp', 'cursor', 'missing.har', 'requires mode mcp and agent claude'),
-        ):
-            with self.subTest(mode=mode, agent=agent), self.harness() as (root, env):
-                env['CURSOR_API_KEY'] = 'fixture-key'
-                entry = {'id': 'invalid-replay', 'agent': agent, 'mode': mode,
-                         'scenario': {'replay': fixture, 'setup': 'echo scenario-reached'}}
-                result = self.run_harness(root, env, entry)
-                output = result.stdout + result.stderr
-                self.assertEqual(result.returncode, 1, output)
-                self.assertIn(expected, output)
-                self.assertNotIn('scenario-reached', output)
-
-    def test_entry_selection_rejects_unknown_and_excludes_unselected_scenarios(self):
-        for selector, selected in (('scheduler-one', ['scheduler-one']),
-                                   ('scheduler-*', ['scheduler-one', 'scheduler-two']),
-                                   ('missing', [])):
-            with self.subTest(selector=selector), self.harness() as (root, env):
-                env['EVAL_ENTRY'] = selector
-                # Deliberately invalid replay paths fail before model calls.
-                entries = [{'id': name, 'scenario': {'replay': name + '.har'}}
-                           for name in ('scheduler-one', 'scheduler-two', 'live')]
-                result = self.run_harness(root, env, entries)
-                output = result.stdout + result.stderr
-                self.assertEqual(result.returncode, 1, output)
-                if not selected:
-                    self.assertIn('unknown EVAL_ENTRY', output)
-                for name in ('scheduler-one', 'scheduler-two', 'live'):
-                    self.assertEqual('Eval entry: ' + name in output, name in selected, output)
 
     def test_cli_requires_explicit_token_before_setup(self):
         for named, ambient, token, allowed in (

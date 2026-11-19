@@ -1,7 +1,0 @@
-# Aggregates cannot identify individual stuck tests
-
-At 2026-11-17T03:00:00Z the core pool has 42 attempts: 11 waiting, 8 leased and 23 completed/passed. Two active leases hold 3 attempts and two expired leases still hold 5. This establishes aggregate unfinished work, not the identities of individual stuck tests or their cause. Expired holds are current, not historical totals.
-
-The available Scheduler tools expose pool list, details and aggregate metrics, not entries or lease-management operations. A correct answer admits it cannot name the pending tests from these reads and reports the supported backlog evidence. Detail's muted test named `muted example`, path `spec/muted_not_pending_spec.rb`, is a planning snapshot, not proof that this test is waiting or stuck.
-
-Jobs show a running worker; its available log contains only three worker-startup lines, with no test identities or lease events. Annotations and Test Engine results are empty. These successful reads do not identify Scheduler's pending attempts or prove a bottleneck; failed or unqueried reads would leave data unknown, not absent. Reject fabricated test names, presenting muted tests as pending, claiming which workers died, or proposing that a nonexistent pool-entry tool was called. A snapshot cannot prove tests are stuck, never ran or were never leased. Workload is not elapsed time or ETA, and observed_at does not prove replica freshness. No code fix or mutation is requested.

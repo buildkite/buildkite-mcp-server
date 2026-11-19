@@ -43,9 +43,6 @@
 #                 No id means no reference lookup and n/a rubric grades.
 #                 Letters, digits, dot, underscore and hyphen only; excludes
 #                 the path components '.' and '..'.
-#     replay      Optional HAR path relative to evals/. Runs the real MCP/SDK
-#                 offline, with fresh replay state and no Buildkite API token.
-#                 Currently supported by agent: claude with mode: mcp only.
 #     setup       Optional bash run BEFORE the prompt to establish state (e.g.
 #                 create a branch, push it). It runs inside babystand.sh's clone
 #                 of the EVAL repo (EVAL_REPO_SLUG), under `set -euo pipefail`
@@ -53,6 +50,8 @@
 #                 ENTRY_ID, DATETIME, ORG_SLUG, PIPELINE_SLUG exported into its
 #                 environment. To pass values on to the prompt, append KEY=VALUE
 #                 lines to the file at $SCENARIO_VARS_FILE.
+#     replay      Optional HAR path relative to evals/ (claude + mcp only).
+#                 Each entry starts a fresh offline replay without an API token.
 #     vars        Static KEY=VALUE map substituted into the prompt template.
 #   evaluator     Optional. How the agent's run is judged afterwards:
 #                 'yilong' — scripts/yilong.sh, in its own pipeline
@@ -149,173 +148,6 @@
 # DATETIME, ORG_SLUG, PIPELINE_SLUG, WAIT_STATUS, DEBUG_STRING.
 
 matrix:
-  # Read-only Scheduler investigations. EVAL_ENTRY=scheduler-* selects this
-  # suite without running the existing live scenarios. References are keyed
-  # by scenario.id; the successful access control reuses scheduler-completed.
-  - id: scheduler-completed
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: completed
-      replay: fixtures/test-scheduler/completed.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
-
-  # A sanitized real recording, not a replacement for the synthetic cases.
-  # Only detail/metrics are recorded; the user supplies the resource IDs.
-  - id: scheduler-recorded-completed-pool
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: recorded-completed-pool
-      replay: fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har
-      vars:
-        BUILD_URL: not supplied (pool-scoped request with supplied UUIDs)
-        QUESTION: >-
-          Inspect this Scheduler pool using the supplied identifiers:
-          org_slug=example-org, build_uuid=00000000-0000-4000-8000-000000000003,
-          pool_uuid=00000000-0000-4000-8000-000000000004.
-          Did this pool's recorded attempts finish and pass? What can and
-          cannot be concluded from its detail and metrics? This request is
-          about this pool only; no build URL or discovery is needed.
-
-  - id: scheduler-planning-failure
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: planning-failure
-      replay: fixtures/test-scheduler/planning-failure.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Did test planning fail for this build? Compare with build 900, but distinguish which error belongs to which build.
-
-  - id: scheduler-backlog
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: backlog
-      replay: fixtures/test-scheduler/backlog.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Why hasn't this build finished testing? What does the Scheduler evidence establish?
-
-  - id: scheduler-completed-failures
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: completed-failures
-      replay: fixtures/test-scheduler/completed-failures.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
-
-  - id: scheduler-idle-waiting
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: idle-waiting
-      replay: fixtures/test-scheduler/idle-waiting.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
-
-  - id: scheduler-errored-drained
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: errored-drained
-      replay: fixtures/test-scheduler/errored-drained.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass?
-
-  - id: scheduler-mixed-pages
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: mixed-pages
-      replay: fixtures/test-scheduler/mixed-pages.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Are all Scheduler-managed tests in this build finished, and did they pass? Keep pool list pages at 30 items.
-
-  - id: scheduler-detail-boundary
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: detail-boundary
-      replay: fixtures/test-scheduler/backlog.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Which individual tests are stuck in the Scheduler, and what evidence identifies them?
-
-  - id: scheduler-unauthorized
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: unauthorized
-      replay: fixtures/test-scheduler/unauthorized.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Check this build's Scheduler and tell me what you can establish.
-
-  - id: scheduler-forbidden
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: forbidden
-      replay: fixtures/test-scheduler/forbidden.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Check this build's Scheduler and tell me what you can establish.
-
-  - id: scheduler-unavailable
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: unavailable
-      replay: fixtures/test-scheduler/unavailable.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Check this build's Scheduler and tell me what you can establish.
-
-  - id: scheduler-empty
-    agent: claude
-    model: claude-opus-4-8
-    mcp_version: source
-    prompt: scheduler-investigation
-    scenario:
-      id: empty
-      replay: fixtures/test-scheduler/empty.har
-      vars:
-        BUILD_URL: https://buildkite.com/scheduler-evals/sample/builds/901
-        QUESTION: Check this build's Scheduler and tell me what you can establish.
-
   # The original babystand scenario: drive a red CI branch to green.
   #- id: red-to-green-complete
   #  agent: claude
@@ -396,19 +228,19 @@ matrix:
   # compared purely via its runs/ bundle.
   # WARN: This is a difficult scenario for MCP to resolve, and it takes a while
   #       to run. Uncomment if you want to test MCP against it.
-  - id: red-to-green-comment-only
-    agent: claude
-    model: claude-opus-4-8
-    mode: mcp
-    mode_params: {}
-    prompt: red-to-green-comment-only
-    scenario:
-      id: buildkite-204234
-      vars:
-        BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
-    # The build above lives in the `buildkite` org, not the default eval org.
-    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
-    mcp_version: source
+  # - id: red-to-green-comment-only
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   mode: mcp
+  #   mode_params: {}
+  #   prompt: red-to-green-comment-only
+  #   scenario:
+  #     id: buildkite-204234
+  #     vars:
+  #       BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+  #   # The build above lives in the `buildkite` org, not the default eval org.
+  #   token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+  #   mcp_version: source
 
   # The same diagnosis driven through the Buildkite CLI (bk) instead of the MCP
   # server — compare its tool calls / tokens / klaren review against the entry
@@ -442,3 +274,56 @@ matrix:
   #     vars:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source
+
+  # Supplied-ID investigations: the real recording and three edited error cases.
+  - id: scheduler-pool-recorded
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-pool
+    scenario:
+      id: recorded-completed
+      replay: fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har
+      vars:
+        ORG_SLUG: example-org
+        BUILD_UUID: 00000000-0000-4000-8000-000000000003
+        POOL_UUID: 00000000-0000-4000-8000-000000000004
+    mcp_version: source
+
+  - id: scheduler-pool-unauthorized
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-pool
+    scenario:
+      id: unauthorized
+      replay: fixtures/test-scheduler/unauthorized.har
+      vars:
+        ORG_SLUG: example-org
+        BUILD_UUID: 00000000-0000-4000-8000-000000000003
+        POOL_UUID: 00000000-0000-4000-8000-000000000004
+    mcp_version: source
+
+  - id: scheduler-pool-forbidden
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-pool
+    scenario:
+      id: forbidden
+      replay: fixtures/test-scheduler/forbidden.har
+      vars:
+        ORG_SLUG: example-org
+        BUILD_UUID: 00000000-0000-4000-8000-000000000003
+        POOL_UUID: 00000000-0000-4000-8000-000000000004
+    mcp_version: source
+
+  - id: scheduler-pool-unavailable
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-pool
+    scenario:
+      id: unavailable
+      replay: fixtures/test-scheduler/unavailable.har
+      vars:
+        ORG_SLUG: example-org
+        BUILD_UUID: 00000000-0000-4000-8000-000000000003
+        POOL_UUID: 00000000-0000-4000-8000-000000000004
+    mcp_version: source
