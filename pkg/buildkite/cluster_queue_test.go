@@ -34,6 +34,10 @@ func (m *mockClusterQueuesClient) Get(ctx context.Context, org, clusterID, queue
 	return buildkite.ClusterQueue{}, nil, nil
 }
 
+func (m *mockClusterQueuesClient) Insights(context.Context, string, string, string, *buildkite.ClusterQueueInsightsOptions) (buildkite.ClusterQueueInsights, *buildkite.Response, error) {
+	return buildkite.ClusterQueueInsights{}, nil, fmt.Errorf("unexpected insights call")
+}
+
 func (m *mockClusterQueuesClient) Create(ctx context.Context, org, clusterID string, qc buildkite.ClusterQueueCreate) (buildkite.ClusterQueue, *buildkite.Response, error) {
 	if m.CreateFunc != nil {
 		return m.CreateFunc(ctx, org, clusterID, qc)
