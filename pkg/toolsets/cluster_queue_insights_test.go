@@ -163,14 +163,14 @@ const queueInsightsResponse = `{
     "selected_period":{
       "window":{"from":"2026-11-12T07:30:00Z","to":"2026-11-12T08:30:00Z","interval_seconds":1800},
       "counts":{"aggregation":"last","agents":{"values":{"connected":[0,null]},"limitations":{"missing_publication":[1]}},"jobs":{"values":{"awaiting_execution":[3,null],"in_progress":[0,null]},"limitations":{"missing_publication":[1]}}},
-      "job_completions":{"values":{"total":[4,0],"passed":[3,0],"failed":[1,0]},"limitations":{}},
-      "wait_times":{"unit":"seconds","values":{"min":[1.25,null],"p50":[2.5,null],"p95":[4.75,null],"max":[8.5,null]},"samples":{"valid_count":[4,0],"incomplete_count":[1,0]},"limitations":{"no_samples":[1]}}
+      "job_completions":{"publication_covered_seconds":[1800,1800],"values":{"total":[4,0],"passed":[3,0],"failed":[1,0]},"limitations":{}},
+      "wait_times":{"unit":"seconds","publication_covered_seconds":[1800,17.25],"values":{"min":[1.25,null],"p50":[2.5,null],"p95":[4.75,null],"max":[8.5,null]},"samples":{"valid_count":[4,null],"unusable_duration_count":[1,null]},"limitations":{"partial_bucket":[1],"unusable_wait_durations":[0]}}
     },
     "previous_period":{
       "window":{"from":"2026-11-12T06:30:00Z","to":"2026-11-12T07:30:00Z","interval_seconds":1800},
       "counts":{"aggregation":"last","agents":{"values":{"connected":[1,0]},"limitations":{}},"jobs":{"values":{"awaiting_execution":[1,1],"in_progress":[0,0]},"limitations":{}}},
-      "job_completions":{"values":{"total":[2,0],"passed":[1,0],"failed":[1,0]},"limitations":{}},
-      "wait_times":{"unit":"seconds","values":{"min":[1,1],"p50":[2,2],"p95":[4,4],"max":[6,6]},"samples":{"valid_count":[2,1],"incomplete_count":[0,0]},"limitations":{}}
+      "job_completions":{"publication_covered_seconds":[1800,1800],"values":{"total":[2,0],"passed":[1,0],"failed":[1,0]},"limitations":{}},
+      "wait_times":{"unit":"seconds","publication_covered_seconds":[0,1800],"values":{"min":[null,1],"p50":[null,2],"p95":[null,4],"max":[null,6]},"samples":{"valid_count":[null,1],"unusable_duration_count":[null,0]},"limitations":{"missing_publication":[0]}}
     },
     "changes":{
       "counts":{"basis":"last_bucket","agents":{"connected":{"selected":null,"previous":0,"difference":null,"relative_change_percent":null,"limitations":{"selected_value_unavailable":true}}},"jobs":{"awaiting_execution":{"selected":null,"previous":1,"difference":null,"relative_change_percent":null,"limitations":{"selected_value_unavailable":true}},"in_progress":{"selected":null,"previous":0,"difference":null,"relative_change_percent":null,"limitations":{"selected_value_unavailable":true}}}},

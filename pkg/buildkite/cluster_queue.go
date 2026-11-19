@@ -150,7 +150,7 @@ func GetClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[GetClusterQueueArgs, any], 
 func GetClusterQueueInsights() (mcp.Tool, mcp.ToolHandlerFor[GetClusterQueueInsightsArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_cluster_queue_insights",
-		Description: "Inspect queue capacity and job demand using current agent/job counts, recent completions and wait times, and optional history and comparisons. Current counts are snapshots; history counts are last values per bucket; hourly_changes uses time-weighted averages. Null means unavailable, not zero; check timestamps, coverage and limitations before drawing conclusions. Requires Cluster Insights entitlement and the Queue Insights REST API feature enabled.",
+		Description: "Get queue agent/job counts, recent completions and wait times, with optional history and comparisons. Current counts are snapshots; history counts are last values per bucket; hourly_changes counts are time-weighted averages, not totals. Null means unavailable, not zero. Check timestamps and coverage; attribute limitations to the section that reports them. Zero sampled values do not prove there was no backlog or waiting throughout a period. Treat capacity diagnoses and causal explanations as hypotheses unless supported by further evidence. Requires Cluster Insights entitlement and the Queue Insights REST API feature enabled.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Cluster Queue Insights",
 			ReadOnlyHint: true,
