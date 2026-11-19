@@ -228,19 +228,19 @@ matrix:
   # compared purely via its runs/ bundle.
   # WARN: This is a difficult scenario for MCP to resolve, and it takes a while
   #       to run. Uncomment if you want to test MCP against it.
-  # - id: red-to-green-comment-only
-  #   agent: claude
-  #   model: claude-opus-4-8
-  #   mode: mcp
-  #   mode_params: {}
-  #   prompt: red-to-green-comment-only
-  #   scenario:
-  #     id: buildkite-204234
-  #     vars:
-  #       BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
-  #   # The build above lives in the `buildkite` org, not the default eval org.
-  #   token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
-  #   mcp_version: source
+  - id: red-to-green-comment-only
+    agent: claude
+    model: claude-opus-4-8
+    mode: mcp
+    mode_params: {}
+    prompt: red-to-green-comment-only
+    scenario:
+      id: buildkite-204234
+      vars:
+        BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/204234
+    # The build above lives in the `buildkite` org, not the default eval org.
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    mcp_version: source
 
   # The same diagnosis driven through the Buildkite CLI (bk) instead of the MCP
   # server — compare its tool calls / tokens / klaren review against the entry
@@ -275,55 +275,55 @@ matrix:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source
 
-  # Supplied-ID investigations: the real recording and three edited error cases.
-  - id: scheduler-pool-recorded
-    agent: claude
-    model: claude-opus-4-8
-    prompt: scheduler-pool
-    scenario:
-      id: recorded-completed
-      replay: fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har
-      vars:
-        ORG_SLUG: example-org
-        BUILD_UUID: 00000000-0000-4000-8000-000000000003
-        POOL_UUID: 00000000-0000-4000-8000-000000000004
-    mcp_version: source
+  # Supplied-ID investigations: uncomment the desired cases to run offline.
+  # - id: scheduler-pool-recorded
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   prompt: scheduler-pool
+  #   scenario:
+  #     id: recorded-completed
+  #     replay: fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har
+  #     vars:
+  #       ORG_SLUG: example-org
+  #       BUILD_UUID: 00000000-0000-4000-8000-000000000003
+  #       POOL_UUID: 00000000-0000-4000-8000-000000000004
+  #   mcp_version: source
 
-  - id: scheduler-pool-unauthorized
-    agent: claude
-    model: claude-opus-4-8
-    prompt: scheduler-pool
-    scenario:
-      id: unauthorized
-      replay: fixtures/test-scheduler/unauthorized.har
-      vars:
-        ORG_SLUG: example-org
-        BUILD_UUID: 00000000-0000-4000-8000-000000000003
-        POOL_UUID: 00000000-0000-4000-8000-000000000004
-    mcp_version: source
+  # - id: scheduler-pool-unauthorized
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   prompt: scheduler-pool
+  #   scenario:
+  #     id: unauthorized
+  #     replay: fixtures/test-scheduler/unauthorized.har
+  #     vars:
+  #       ORG_SLUG: example-org
+  #       BUILD_UUID: 00000000-0000-4000-8000-000000000003
+  #       POOL_UUID: 00000000-0000-4000-8000-000000000004
+  #   mcp_version: source
 
-  - id: scheduler-pool-forbidden
-    agent: claude
-    model: claude-opus-4-8
-    prompt: scheduler-pool
-    scenario:
-      id: forbidden
-      replay: fixtures/test-scheduler/forbidden.har
-      vars:
-        ORG_SLUG: example-org
-        BUILD_UUID: 00000000-0000-4000-8000-000000000003
-        POOL_UUID: 00000000-0000-4000-8000-000000000004
-    mcp_version: source
+  # - id: scheduler-pool-forbidden
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   prompt: scheduler-pool
+  #   scenario:
+  #     id: forbidden
+  #     replay: fixtures/test-scheduler/forbidden.har
+  #     vars:
+  #       ORG_SLUG: example-org
+  #       BUILD_UUID: 00000000-0000-4000-8000-000000000003
+  #       POOL_UUID: 00000000-0000-4000-8000-000000000004
+  #   mcp_version: source
 
-  - id: scheduler-pool-unavailable
-    agent: claude
-    model: claude-opus-4-8
-    prompt: scheduler-pool
-    scenario:
-      id: unavailable
-      replay: fixtures/test-scheduler/unavailable.har
-      vars:
-        ORG_SLUG: example-org
-        BUILD_UUID: 00000000-0000-4000-8000-000000000003
-        POOL_UUID: 00000000-0000-4000-8000-000000000004
-    mcp_version: source
+  # - id: scheduler-pool-unavailable
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   prompt: scheduler-pool
+  #   scenario:
+  #     id: unavailable
+  #     replay: fixtures/test-scheduler/unavailable.har
+  #     vars:
+  #       ORG_SLUG: example-org
+  #       BUILD_UUID: 00000000-0000-4000-8000-000000000003
+  #       POOL_UUID: 00000000-0000-4000-8000-000000000004
+  #   mcp_version: source

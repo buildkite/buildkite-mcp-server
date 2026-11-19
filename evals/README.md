@@ -416,15 +416,3 @@ All new code are mostly in `evals/` folder
       * Github to access scenarios (read/write) in external repo, e.g., where scnearios are, so we can access/create branches and push, etc.
       * Buildkite for bk org to retrieve the last successful build (read) to compare
       * Buildkite for orgs where the scenario pipelines (read) are (to monitor scenarios from red-to-green)
-
-### Supplied-ID Scheduler investigations
-
-The four active matrix entries use the existing [HAR replay](../DEVELOPMENT.md#recording-and-replaying-api-calls-for-offline-evals): one recorded success and edited 401, 403 and 404 variants. They share a task prompt and use the existing evaluator and rubric unchanged. Model runs remain on demand.
-
-`fixtures/test-scheduler/ed656de2-completed-pool.sanitised.har` is the supplied sanitized recording, retained unchanged. It contains three detail/metrics pairs for one pool, observed on 2026-11-18. Organization/resource IDs and muted-test identities were redacted before it was supplied. Its creator version is `dev`; the recording binary's source SHA and equivalence to the private original are unverified.
-
-The three error HARs copy its requests and replace every response with the corresponding status and JSON error body, updating body sizes. They simulate failures; they are not recordings of real access failures. Both detail and metrics reads return the same error, with the original three responses per endpoint retained.
-
-`scenario.replay` selects a HAR relative to `evals/`, starts a fresh replay per entry and omits the entry's API token. This wiring supports Claude in MCP mode only. The Docker image includes fixtures but not expected answers. Select scenarios by editing the matrix, as with the existing examples; local runs can also use `EVALS_CONFIG`.
-
-Coverage is limited to supplied-ID detail/metrics reads. There are no discovery, pool-list, pagination, build/log, backlog or lease-expiry scenarios. Successful results describe the recorded pool at its observation time, not the whole build or current production state. Missing replay requests are fixture coverage limits, not evidence of a production failure.
