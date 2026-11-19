@@ -275,6 +275,20 @@ matrix:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source
 
+  # Live Scheduler investigation: uncomment to run against production.
+  # Refresh BUILD_URL, scenario.id and its reference when pools expire. Requires
+  # a buildkite-org token with read_test_pool and access to the build's suites.
+  # - id: scheduler-build-live
+  #   agent: claude
+  #   model: claude-opus-4-8
+  #   prompt: scheduler-build
+  #   scenario:
+  #     id: buildkite-251943
+  #     vars:
+  #       BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/251943
+  #   token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+  #   mcp_version: source
+
   # Supplied-ID investigations: uncomment the desired cases to run offline.
   # - id: scheduler-pool-recorded
   #   agent: claude
