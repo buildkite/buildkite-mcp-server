@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -364,6 +365,44 @@ func TestFailedTestStems(t *testing.T) {
 		{FileName: "spec/features/admin/search_records_spec.rb"},
 		{FileName: ""},
 	}))
+}
+
+func TestGetBuildFailureSummaryNeverShortensArtifactIDs(t *testing.T) {
+	client, _ := perJobArtifactsClient(t, map[string]int{"job-failed": 40, "job-timed-out": 40, "job-canceled": 40}, nil)
+	wantIDs := map[string]bool{}
+	for _, jobID := range []string{"job-failed", "job-timed-out", "job-canceled"} {
+		for _, artifact := range failureSummaryTestArtifacts(jobID, 40) {
+			wantIDs[artifact.ID] = true
+		}
+	}
+
+	// Tight limits force the generic limiter to shorten strings below an
+	// artifact ID's length; every artifact that survives must keep its whole
+	// id, and its job its whole id, so get_artifact can fetch it.
+	for limit := 2000; limit <= 8000; limit += 500 {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			_, handler, _ := GetBuildFailureSummary()
+			callResult, _, err := handler(ContextWithDeps(context.Background(), failureSummaryArtifactsTestDeps(client)), createMCPRequest(t, map[string]any{}), GetBuildFailureSummaryArgs{
+				OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+				MaxArtifacts: maxFailureSummaryArtifacts, ContentLimitBytes: limit,
+			})
+			require.NoError(t, err)
+			require.False(t, callResult.IsError, getTextResult(t, callResult).Text)
+			text := getTextResult(t, callResult).Text
+			require.LessOrEqual(t, len(text), limit)
+
+			var summary BuildFailureSummary
+			require.NoError(t, json.Unmarshal([]byte(text), &summary))
+			require.True(t, summary.ContentTruncated)
+			for _, job := range summary.Jobs {
+				for _, artifact := range job.Artifacts {
+					require.Contains(t, []string{"job-failed", "job-timed-out", "job-canceled"}, job.ID, "job id was shortened")
+					require.True(t, wantIDs[artifact.ID], "artifact id %q was shortened", artifact.ID)
+					require.True(t, strings.HasPrefix(artifact.ID, job.ID+"-"), "artifact %q listed on the wrong job %q", artifact.ID, job.ID)
+				}
+			}
+		})
+	}
 }
 
 func TestLimitFailureSummaryCollectionsDropsArtifactsBeforeAnnotations(t *testing.T) {
