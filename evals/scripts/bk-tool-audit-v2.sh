@@ -649,7 +649,7 @@ struggles_markdown() {
     if (.implemented // false) | not then
       "> ⚠️ **Struggles report not implemented for this agent yet** (\(.reason // "unknown reason")). Failed tool calls are not counted."
     else
-      "**Tool calls: \(.tool_calls), failed: \(.failed_calls)** (likely harmless: \(.likely_harmless), e.g. grep with no match)",
+      "**Tool calls: \(.tool_calls), explicitly flagged failures: \(.failed_calls)** (likely harmless: \(.likely_harmless), e.g. grep with no match)",
       "",
       (if (.errors_by_type | length) > 0 then
         "**Failed tool calls by type** (type → tool → failed calls):", "", "```",

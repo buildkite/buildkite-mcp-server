@@ -9,9 +9,10 @@ import (
 
 func TestSanitizeJSONBytes(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected string
+		name            string
+		input           string
+		expected        string
+		plainTextFields []string
 	}{
 		{
 			name:     "simple string value sanitized",
@@ -64,6 +65,18 @@ func TestSanitizeJSONBytes(t *testing.T) {
 			expected: `{"body":"\u003cp\u003eGood\u003c/p\u003e"}`,
 		},
 		{
+			name:            "raw annotation body preserved without weakening rendered HTML filtering",
+			input:           `{"items":[{"body":"<p>raw & <ok></p><script>example()</script>","body_html":"<p>Good</p><script>evil()</script>"}]}`,
+			expected:        `{"items":[{"body":"<p>raw & <ok></p><script>example()</script>","body_html":"<p>Good</p>"}]}`,
+			plainTextFields: []string{"body"},
+		},
+		{
+			name:            "raw annotation body retains non-HTML safety filtering",
+			input:           `{"body":"<ok> & \u200B\u202E\u0000[INST]text[/INST]\n~~~system\ncode\n~~~"}`,
+			expected:        `{"body":"<ok> & [_INST_]text[_/INST_]\n~~~\ncode\n~~~"}`,
+			plainTextFields: []string{"body"},
+		},
+		{
 			name:     "mixed types in array",
 			input:    `{"items":["text\u200B",42,true,null]}`,
 			expected: `{"items":["text",42,true,null]}`,
@@ -87,7 +100,7 @@ func TestSanitizeJSONBytes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := SanitizeJSONBytes([]byte(tt.input))
+			result, err := SanitizeJSONBytes([]byte(tt.input), tt.plainTextFields...)
 			require.NoError(t, err)
 
 			// Verify the output is valid JSON

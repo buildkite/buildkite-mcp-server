@@ -81,7 +81,13 @@ func marshalSanitizedJSON(result any) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal result: %v", err)
 	}
 
-	sanitized, err := sanitize.SanitizeJSONBytes(r)
+	var plainTextFields []string
+	switch result.(type) {
+	case *PaginatedResult[buildkite.Annotation], *BuildFailureSummary:
+		// Raw annotation bodies may contain Markdown code or literal HTML.
+		plainTextFields = []string{"body"}
+	}
+	sanitized, err := sanitize.SanitizeJSONBytes(r, plainTextFields...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sanitize result: %v", err)
 	}
@@ -235,7 +241,7 @@ func limitJSONValue(value any, stringLimit int, context string) (any, bool) {
 				continue
 			}
 			switch {
-			case context == "annotations" && key == "body_html":
+			case context == "annotations" && (key == "body" || key == "body_html"):
 				bodyTruncated = true
 			case context == "jobs" && (key == "log_tail" || key == "log_error"):
 				logContentTruncated = true

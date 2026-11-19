@@ -16,6 +16,7 @@ type JobsClient interface {
 	ListByBuild(ctx context.Context, org string, pipeline string, buildNumber string, opt *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error)
 	GetJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobByOrg(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error)
+	GetJobConcurrencyByOrg(ctx context.Context, org string, jobID string) (buildkite.JobConcurrency, *buildkite.Response, error)
 	UnblockJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string, opt *buildkite.JobUnblockOptions) (buildkite.Job, *buildkite.Response, error)
 	RetryJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobEnvironmentVariables(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.JobEnvs, *buildkite.Response, error)
@@ -50,18 +51,19 @@ type ListJobsArgs struct {
 
 // JobSummary contains the fields normally needed to identify a build failure.
 type JobSummary struct {
-	ID           string                    `json:"id"`
-	Name         string                    `json:"name"`
-	State        string                    `json:"state"`
-	Command      string                    `json:"command"`
-	ExitStatus   *int                      `json:"exit_status"`
-	SoftFailed   bool                      `json:"soft_failed,omitempty"`
-	SignalReason string                    `json:"signal_reason,omitempty"`
-	BrokenReason string                    `json:"broken_reason,omitempty"`
-	StepKey      string                    `json:"step_key,omitempty"`
-	StepID       string                    `json:"step_id,omitempty"`
-	RetriesCount int                       `json:"retries_count,omitempty"`
-	RetrySource  *buildkite.JobRetrySource `json:"retry_source,omitempty"`
+	ID                  string                    `json:"id"`
+	Name                string                    `json:"name"`
+	State               string                    `json:"state"`
+	Command             string                    `json:"command"`
+	ExitStatus          *int                      `json:"exit_status"`
+	SoftFailed          bool                      `json:"soft_failed,omitempty"`
+	SignalReason        string                    `json:"signal_reason,omitempty"`
+	BrokenReason        string                    `json:"broken_reason,omitempty"`
+	TriggerFailedReason string                    `json:"trigger_failed_reason,omitempty"`
+	StepKey             string                    `json:"step_key,omitempty"`
+	StepID              string                    `json:"step_id,omitempty"`
+	RetriesCount        int                       `json:"retries_count,omitempty"`
+	RetrySource         *buildkite.JobRetrySource `json:"retry_source,omitempty"`
 }
 
 // JobDetail adds actionable job metadata while excluding repeated build,
@@ -88,6 +90,14 @@ type JobListResult[T any] struct {
 	Links buildkite.JobsListLinks `json:"links"`
 }
 
+func jobDisplayName(job buildkite.Job) string {
+	if job.Name != "" {
+		return job.Name
+	}
+	// Manual jobs expose their display name as label rather than name.
+	return job.Label
+}
+
 func summarizeJob(job buildkite.Job) JobSummary {
 	var stepID string
 	if job.Step != nil {
@@ -95,18 +105,19 @@ func summarizeJob(job buildkite.Job) JobSummary {
 	}
 
 	return JobSummary{
-		ID:           job.ID,
-		Name:         job.Name,
-		State:        job.State,
-		Command:      job.Command,
-		ExitStatus:   job.ExitStatus,
-		SoftFailed:   job.SoftFailed,
-		SignalReason: job.SignalReason,
-		BrokenReason: job.BrokenReason,
-		StepKey:      job.StepKey,
-		StepID:       stepID,
-		RetriesCount: job.RetriesCount,
-		RetrySource:  job.RetrySource,
+		ID:                  job.ID,
+		Name:                jobDisplayName(job),
+		State:               job.State,
+		Command:             job.Command,
+		ExitStatus:          job.ExitStatus,
+		SoftFailed:          job.SoftFailed,
+		SignalReason:        job.SignalReason,
+		BrokenReason:        job.BrokenReason,
+		TriggerFailedReason: job.TriggerFailedReason,
+		StepKey:             job.StepKey,
+		StepID:              stepID,
+		RetriesCount:        job.RetriesCount,
+		RetrySource:         job.RetrySource,
 	}
 }
 
@@ -287,6 +298,40 @@ func GetJob() (mcp.Tool, mcp.ToolHandlerFor[GetJobArgs, any], []string) {
 			}
 
 			return mcpTextResult(span, &job)
+		}, []string{"read_builds"}
+}
+
+type GetJobConcurrencyArgs struct {
+	ToolInput
+	OrgSlug string `json:"org_slug"`
+	JobID   string `json:"job_id"`
+}
+
+func GetJobConcurrency() (mcp.Tool, mcp.ToolHandlerFor[GetJobConcurrencyArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "get_job_concurrency",
+			Description: "Get concurrency configuration and stored state for a job UUID, plus visible jobs from a bounded set of active predecessors of a limited target in submission order. Not a complete blocker list or an execution-order guarantee; empty items do not establish that there are no blockers",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "Get Job Concurrency",
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetJobConcurrencyArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.GetJobConcurrency")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("job_id", args.JobID),
+			)
+
+			deps := DepsFromContext(ctx)
+			concurrency, _, err := deps.JobsClient.GetJobConcurrencyByOrg(ctx, args.OrgSlug, args.JobID)
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			return mcpTextResult(span, &concurrency)
 		}, []string{"read_builds"}
 }
 

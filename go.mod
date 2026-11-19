@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/buildkite/buildkite-logs v0.13.1
-	github.com/buildkite/go-buildkite/v5 v5.23.0
+	github.com/buildkite/go-buildkite/v5 v5.30.0
 	github.com/google/jsonschema-go v0.4.3
 	github.com/mattn/go-isatty v0.0.24
 	github.com/microcosm-cc/bluemonday v1.0.27
@@ -25,7 +25,7 @@ require (
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.2 // indirect
+	github.com/andybalholm/brotli v1.3.0 // indirect
 	github.com/apache/arrow-go/v18 v18.6.0 // indirect
 	github.com/apache/thrift v0.24.0 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.42.1 // indirect

@@ -9,11 +9,11 @@ import (
 
 const reportIssuePromptName = "report_issue"
 
-const reportIssuePromptDescription = "Generate a structured, copy-pasteable report of a problem with this MCP server (failed tool calls, unexpected results, or missing capabilities) that the user can submit as a GitHub issue"
+const reportIssuePromptDescription = "Generate a structured, copy-pasteable report of a problem with this MCP server (failed tool calls, unexpected results, or missing capabilities). If an authenticated `gh` session is available, offer to submit the Issue on the user's behalf, else provide them with the generated output and advise they open it."
 
 const reportIssuePromptTemplate = `You are helping the user report a problem with the Buildkite MCP server (buildkite-mcp-server).
 
-Review this conversation for Buildkite MCP tool calls that failed, returned errors, or behaved differently than the user expected, then produce an issue report the user can copy and paste.
+Review this conversation for Buildkite MCP tool calls that failed, returned errors, or behaved differently than the user expected, then produce an issue report, which you should offer to the user that you attempt to post on their behalf, or the user can copy and paste.
 
 Rules:
 - Redact all secrets before including anything in the report: API tokens, credentials, environment variable values, and signed or private URLs. Replace each with [REDACTED].
@@ -42,7 +42,7 @@ The user's goal, in one or two sentences.
 ## Additional context
 Anything else relevant, or "none".
 
-After the report, tell the user they can submit it by opening an issue at https://github.com/buildkite/buildkite-mcp-server/issues/new and pasting the report into the body, or by sharing it with Buildkite support.`
+After generating the report, offer to attempt to post it on the user's behalf, if an authenticated GH CLI session is available, else tell the user they can submit it by opening an issue at https://github.com/buildkite/buildkite-mcp-server/issues/new and pasting the report into the body, or by sharing it with Buildkite support.`
 
 // NewReportIssuePrompt returns the report_issue prompt and its handler. The
 // handler embeds the server version and, when available, the connected MCP

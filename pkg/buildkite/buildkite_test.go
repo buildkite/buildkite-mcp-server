@@ -177,9 +177,10 @@ func TestLimitSanitizedJSONPayloadUpdatesNestedTruncationMetadata(t *testing.T) 
 	payload, err := json.Marshal(map[string]any{
 		"content_bytes":       0,
 		"content_limit_bytes": 512,
-		"annotations": []any{map[string]any{
-			"body_html": content,
-		}},
+		"annotations": []any{
+			map[string]any{"body": content},
+			map[string]any{"body_html": content},
+		},
 		"jobs": []any{map[string]any{
 			"log_tail": []any{map[string]any{"c": content, "rn": 1}},
 		}},
@@ -196,6 +197,7 @@ func TestLimitSanitizedJSONPayloadUpdatesNestedTruncationMetadata(t *testing.T) 
 	var result struct {
 		ContentTruncated bool `json:"content_truncated"`
 		Annotations      []struct {
+			Body          string `json:"body"`
 			BodyHTML      string `json:"body_html"`
 			BodyTruncated bool   `json:"body_truncated"`
 		} `json:"annotations"`
@@ -215,7 +217,9 @@ func TestLimitSanitizedJSONPayloadUpdatesNestedTruncationMetadata(t *testing.T) 
 	require.NoError(t, json.Unmarshal(limited, &result))
 	require.True(t, result.ContentTruncated)
 	require.True(t, result.Annotations[0].BodyTruncated)
-	require.Less(t, len(result.Annotations[0].BodyHTML), len(content))
+	require.Less(t, len(result.Annotations[0].Body), len(content))
+	require.True(t, result.Annotations[1].BodyTruncated)
+	require.Less(t, len(result.Annotations[1].BodyHTML), len(content))
 	require.True(t, result.Jobs[0].LogContentTruncated)
 	require.True(t, result.Jobs[0].LogTail[0].ContentTruncated)
 	require.True(t, result.TestRuns[0].ContentTruncated)

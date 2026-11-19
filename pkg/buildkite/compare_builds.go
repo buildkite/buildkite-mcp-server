@@ -84,7 +84,7 @@ func comparisonJob(job buildkite.Job, build BuildSummary) *ComparisonJob {
 		webURL = fmt.Sprintf("%s/list?sid=%s&tab=output", build.WebURL, job.Step.ID)
 	}
 	return &ComparisonJob{
-		ID: job.ID, Name: job.Name, State: job.State, SoftFailed: job.SoftFailed,
+		ID: job.ID, Name: jobDisplayName(job), State: job.State, SoftFailed: job.SoftFailed,
 		ExitStatus: job.ExitStatus, SignalReason: job.SignalReason, RetriesCount: job.RetriesCount,
 		WebURL:            webURL,
 		ExecutionSeconds:  comparisonDuration(job.StartedAt, job.FinishedAt),
@@ -98,10 +98,11 @@ func comparisonJob(job buildkite.Job, build BuildSummary) *ComparisonJob {
 func comparisonIdentity(job buildkite.Job) string {
 	method, identifier, group := "step_key", job.StepKey, ""
 	if identifier == "" {
-		if strings.TrimSpace(job.Name) == "" {
+		name := jobDisplayName(job)
+		if strings.TrimSpace(name) == "" {
 			return ""
 		}
-		method, identifier, group = "name_fallback", job.Name, job.GroupKey
+		method, identifier, group = "name_fallback", name, job.GroupKey
 	}
 	identity, err := json.Marshal([]any{method, identifier, group, job.Type, job.Matrix, job.ParallelGroupIndex, job.ParallelGroupTotal})
 	if err != nil {

@@ -86,7 +86,6 @@ type BuildFailureSummaryBuild struct {
 	JobStateCounts *FailureSummaryJobStateCounts `json:"job_state_counts,omitempty"`
 	ScheduledAt    *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
 	StartedAt      *buildkite.Timestamp          `json:"started_at,omitempty"`
-	FinishedAt     *buildkite.Timestamp          `json:"finished_at,omitempty"`
 }
 
 type FailureSummaryLogEntry struct {
@@ -146,7 +145,7 @@ func failureSummaryArtifacts(artifacts []buildkite.Artifact) []FailureSummaryArt
 
 type FailureSummaryAnnotation struct {
 	AnnotationSummary
-	BodyHTML      string `json:"body_html"`
+	Body          string `json:"body"`
 	BodyTruncated bool   `json:"body_truncated,omitempty"`
 }
 
@@ -265,7 +264,6 @@ func failureSummaryBuild(build buildkite.Build) BuildFailureSummaryBuild {
 		JobStateCounts: jobStateCounts,
 		ScheduledAt:    build.ScheduledAt,
 		StartedAt:      build.StartedAt,
-		FinishedAt:     build.FinishedAt,
 	}
 }
 
@@ -365,10 +363,10 @@ func failureSummaryAnnotations(annotations []buildkite.Annotation, limit int) ([
 			truncated = true
 			continue
 		}
-		body, bodyTruncated := truncateUTF8Bytes(annotation.BodyHTML, failureSummaryEntryContentByteLimit)
+		body, bodyTruncated := truncateUTF8Bytes(annotation.Body, failureSummaryEntryContentByteLimit)
 		results = append(results, FailureSummaryAnnotation{
 			AnnotationSummary: summarizeAnnotations([]buildkite.Annotation{annotation})[0],
-			BodyHTML:          body,
+			Body:              body,
 			BodyTruncated:     bodyTruncated,
 		})
 	}
@@ -383,6 +381,7 @@ func loadFailureAnnotations(ctx context.Context, client AnnotationsClient, args 
 		annotations, response, err := client.ListByBuild(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, &buildkite.AnnotationListOptions{
 			ListOptions: buildkite.ListOptions{Page: page, PerPage: failureSummaryAnnotationPageSize},
 			Scope:       "all",
+			BodyFormat:  annotationBodyFormatRaw,
 		})
 		if err != nil {
 			if isBuildkiteUnauthorized(err) {
@@ -1312,7 +1311,7 @@ func applyFailureSummaryContentLimits(result *BuildFailureSummary) {
 		annotation := &result.Annotations[i]
 		entryRemaining := failureSummaryEntryContentByteLimit
 		var truncated bool
-		annotation.BodyHTML, truncated = limitFailureSummaryString(annotation.BodyHTML, failureSummaryEntryContentByteLimit, &entryRemaining, &annotationRemaining)
+		annotation.Body, truncated = limitFailureSummaryString(annotation.Body, failureSummaryEntryContentByteLimit, &entryRemaining, &annotationRemaining)
 		annotation.BodyTruncated = annotation.BodyTruncated || truncated
 		result.ContentTruncated = result.ContentTruncated || annotation.BodyTruncated
 	}
@@ -1546,7 +1545,7 @@ func limitFailureSummaryCollections(result *BuildFailureSummary, limit int) erro
 func GetBuildFailureSummary() (mcp.Tool, mcp.ToolHandlerFor[GetBuildFailureSummaryArgs, any], []string) {
 	return mcp.Tool{
 		Name:        "get_build_failure_summary",
-		Description: "Diagnose a build failure in one call. Start here before job, log, annotation, test, or artifact tools. Returns build.state and build.job_state_counts (every job state tally; when present, is authoritative, making list_jobs calls unnecessary), failed, timed-out, and expired jobs (expired: no log), canceled jobs, promised failures from running jobs, soft-failed jobs (soft_failed true: failed, but the step's soft_fail setting allowed that exit status, not build failure cause; soft_failed is authoritative, making pipeline config reads unnecessary), and, unless include_never_ran_jobs is false, using the remaining max_jobs slots, jobs that never ran, so have no logs and never caused the build failure (waiting_failed/blocked_failed/unblocked_failed: stopped by a failed dependency; broken: excluded by pipeline config), and size-bounded content from logs, annotations, and failed Test Engine tests. Annotation content is in the body_html field. Each failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason from that job's newest failed execution, Test Engine labels such as 'flaky', and executions_count_by_result for its attempts within that job: {failed: 2, passed: 0} means the first run and a retry both failed, which is why the job log can report more failures than failed_tests lists) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'). An empty or absent failed_tests list does NOT mean the job's tests passed: follow the job's failed_tests_hint and use log_tail to investigate. A failed test with failure_detail_status 'not_retrieved' had no execution fetched for its job; call get_failed_executions, or list the runs with get_build_test_engine_runs and query each. Labels and counts are included, making get_test, list_tests_for_build, or get_failed_executions calls unnecessary for them. 'flaky' means the test has flaked before. If it also failed on retry (executions_count_by_result.failed >= 2), trace and report the root cause. If not, report it as likely flaky and stop, unless the user asks otherwise, e.g., to fix flaky tests (trace the root cause), or to make the build green (suggest a retry). Retry a job only when the user explicitly permits it. Each returned failed, timed-out, and canceled job carries the artifacts it uploaded (up to max_artifacts shared across jobs, most useful first: files named after a failed test, then screenshots, then logs; artifacts_truncated when the job has more). Uploaded test logs and screenshots often hold the server-side error a job log lacks.",
+		Description: "Diagnose a build failure in one call. Start here before job, log, annotation, test, or artifact tools. Returns build.state, build.job_state_counts (every job's state tally; when present, confirms whether returned jobs are the only problems without list_jobs), terminal problem jobs, canceled jobs, promised failures from running jobs, soft-failed jobs (soft_failed true: the step's soft_fail allowed that exit status, so they did not block the build; soft_failed is authoritative, no pipeline configuration read needed; listed after blocking failures and canceled jobs — not proof the problem is harmless, but do not dig into their logs, retry, or fix them unless the user asks or evidence links them to the reported failure), and, unless include_never_ran_jobs is false, jobs that never ran in the remaining max_jobs slots (waiting_failed/blocked_failed/unblocked_failed: failed dependency; broken: excluded by pipeline configuration — no logs, never the cause), and size-bounded logs, annotations, and failed Test Engine tests. Each terminal failed or timed-out job carries failed_tests (only enabled tests whose every execution within that job failed, with failure_reason from that job's newest failed execution) and failed_tests_status ('found', 'none_recorded', 'ingestion_pending', or 'unavailable'). Empty or absent failed_tests does NOT mean tests passed: follow failed_tests_hint and use log_tail as the authoritative fallback. A test with failure_detail_status 'not_retrieved' had no execution fetched for its job; call get_failed_executions with its test_suite_slug and run_id (page past 100 if needed). When run_id is absent, the suite has several runs for this build or none: list them with get_build_test_engine_runs and query each. Tests include Test Engine labels such as 'flaky' and executions_count_by_result within that job (failed: 2 means the first run and retry both failed, so logs can report more failures than failed_tests lists); no extra test calls are needed for these fields. If a failed test is labeled 'flaky', do not stop at the label: trace the actual error (failure_reason, failure_expanded, or the job log) and propose a permanent fix. Never conclude a failure is flaky from a PR or commit title alone. Retry the job with retry_job only when the user explicitly permits it. Each returned failed, timed-out, and canceled job carries its uploaded artifacts (max_artifacts shared across jobs; ranked: failed-test files, screenshots, then logs; artifacts_truncated when more exist). Uploaded test logs and screenshots often hold the server-side error a job log lacks. Unrendered annotation content is in body (Markdown or HTML; safety filtering applies); artifact:// references name artifacts of this build, fetchable with list_artifacts_for_build and get_artifact.",
 		Annotations: &mcp.ToolAnnotations{
 			Title:        "Get Build Failure Summary",
 			ReadOnlyHint: true,

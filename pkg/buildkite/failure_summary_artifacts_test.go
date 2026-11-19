@@ -371,7 +371,7 @@ func TestLimitFailureSummaryCollectionsDropsArtifactsBeforeAnnotations(t *testin
 	for i := range annotations {
 		annotations[i] = FailureSummaryAnnotation{
 			AnnotationSummary: AnnotationSummary{ID: fmt.Sprintf("annotation-%d", i), Style: "error"},
-			BodyHTML:          "failure",
+			Body:              "failure",
 		}
 	}
 	result := BuildFailureSummary{

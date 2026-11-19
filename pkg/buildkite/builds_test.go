@@ -2,6 +2,7 @@ package buildkite
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -101,6 +102,7 @@ func TestGetBuild(t *testing.T) {
 						Env:           map[string]any{"PIPELINE_SECRET": "redacted"},
 					},
 					CreatedAt: &buildkite.Timestamp{},
+					Creator:   buildkite.Creator{ID: "user-uuid", Name: "Jane", AvatarURL: "https://example.com/a.png"},
 				}, &buildkite.Response{
 					Response: &http.Response{StatusCode: 200},
 				}, nil
@@ -114,8 +116,8 @@ func TestGetBuild(t *testing.T) {
 				assert.Equal("pipeline", pipelineSlug)
 				assert.Equal("1", buildNumber)
 				return []buildkite.Annotation{
-					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, BodyHTML: "<p>large body</p>"},
-					{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, BodyHTML: "<p>another large body</p>"},
+					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Priority: 5, Body: "large body", BodyHTML: "<p>large body</p>"},
+					{ID: "annotation-2", Context: "lint", Style: "warning", Scope: "job", JobID: "job-2", Priority: 3, Body: "another large body", BodyHTML: "<p>another large body</p>"},
 				}, &buildkite.Response{
 					Response: &http.Response{StatusCode: 200},
 					NextPage: 2,
@@ -137,6 +139,9 @@ func TestGetBuild(t *testing.T) {
 		requireJSONPathEqual(t, text, "123", "id")
 		requireJSONPathEqual(t, text, 1, "number")
 		requireJSONPathEqual(t, text, "passed", "state")
+		// Build detail keeps the full creator, unlike list summaries.
+		requireJSONPathEqual(t, text, "user-uuid", "creator", "id")
+		requireJSONPathEqual(t, text, "https://example.com/a.png", "creator", "avatar_url")
 		// Job detail lives in list_jobs/get_job, not here.
 		assert.NotContains(text, `"jobs":`)
 		// Build env and pipeline config are intentionally omitted from read_builds.
@@ -151,6 +156,7 @@ func TestGetBuild(t *testing.T) {
 		requireJSONPathEqual(t, text, true, "annotations_truncated")
 		assert.NotContains(text, "large body")
 		assert.NotContains(text, "body_html")
+		assert.NotContains(text, `"body"`)
 
 		// The handler must exclude jobs and pipeline detail from the API request.
 		require.NotNil(t, capturedOptions)
@@ -171,7 +177,11 @@ func TestGetBuild(t *testing.T) {
 
 		buildsClient := &MockBuildsClient{
 			GetFunc: func(ctx context.Context, org string, pipeline string, id string, opt *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-				return buildkite.Build{ID: "123", Number: 1}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
+				return buildkite.Build{
+					ID:       "123",
+					Number:   1,
+					MetaData: map[string]string{"body": "<script>evil()</script>metadata"},
+				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
 			},
 		}
 		annotationsClient := &MockAnnotationsClient{
@@ -190,6 +200,7 @@ func TestGetBuild(t *testing.T) {
 		})
 		assert.NoError(err)
 		requireJSONPathEqual(t, getTextResult(t, result).Text, []any{}, "annotations")
+		requireJSONPathEqual(t, getTextResult(t, result).Text, "metadata", "meta_data", "body")
 		assert.NotContains(getTextResult(t, result).Text, `"annotations_truncated"`)
 	})
 
@@ -320,6 +331,9 @@ func TestListBuilds(t *testing.T) {
 			State:        "failed",
 			Commit:       "abc123",
 			Creator:      "user-1",
+			CreatedFrom:  "2026-10-01",
+			CreatedTo:    "2026-10-08T09:30:00+09:00",
+			FinishedFrom: "2026-10-02T00:00:00Z",
 			Page:         3,
 			PerPage:      50,
 		})
@@ -332,6 +346,42 @@ func TestListBuilds(t *testing.T) {
 		assert.Equal([]string{"failed"}, capturedOptions.State)
 		assert.Equal("abc123", capturedOptions.Commit)
 		assert.Equal("user-1", capturedOptions.Creator)
+		assert.True(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.CreatedFrom))
+		assert.True(time.Date(2026, 10, 8, 0, 30, 0, 0, time.UTC).Equal(capturedOptions.CreatedTo))
+		assert.True(time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.FinishedFrom))
+
+		// A date-only created_to covers that whole day, as it does in the API.
+		_, _, err = handler(ctx, createMCPRequest(t, map[string]any{}), ListBuildsArgs{
+			OrgSlug:      "org",
+			PipelineSlug: "pipeline",
+			CreatedFrom:  "2026-10-13",
+			CreatedTo:    "2026-10-13",
+		})
+		assert.NoError(err)
+		assert.True(time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.CreatedFrom))
+		assert.True(time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC).Equal(capturedOptions.CreatedTo))
+	})
+
+	t.Run("InvalidTimeFilter", func(t *testing.T) {
+		assert := require.New(t)
+
+		client := &MockBuildsClient{
+			ListByOrgFunc: func(ctx context.Context, org string, opt *buildkite.BuildsListOptions) ([]buildkite.Build, *buildkite.Response, error) {
+				t.Fatal("API should not be called with an invalid time filter")
+				return nil, nil, nil
+			},
+		}
+
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := ListBuilds()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), ListBuildsArgs{
+			OrgSlug:     "org",
+			CreatedFrom: "7 days ago",
+		})
+		assert.NoError(err)
+		assert.True(result.IsError)
+		assert.Contains(getTextResult(t, result).Text, `invalid created_from "7 days ago"`)
 	})
 
 	t.Run("OrgScopedWhenPipelineOmitted", func(t *testing.T) {
@@ -343,7 +393,13 @@ func TestListBuilds(t *testing.T) {
 				called = true
 				assert.Equal("org", org)
 				return []buildkite.Build{
-					{ID: "123", Number: 1, State: "passed", CreatedAt: &buildkite.Timestamp{}},
+					{
+						ID: "123", Number: 1, State: "passed", CreatedAt: &buildkite.Timestamp{},
+						URL:        "https://api.buildkite.com/v2/organizations/pipelines/pipelines/web-app/builds/1",
+						Creator:    buildkite.Creator{ID: "user-uuid", Name: "Jane", Email: "jane@example.com", AvatarURL: "https://example.com/a.png"},
+						FinishedAt: buildkite.NewTimestamp(time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)),
+					},
+					{ID: "456", Number: 2, State: "running", CreatedAt: &buildkite.Timestamp{}},
 				}, &buildkite.Response{
 					Response: &http.Response{StatusCode: 200},
 				}, nil
@@ -362,7 +418,23 @@ func TestListBuilds(t *testing.T) {
 		})
 		assert.NoError(err)
 		assert.True(called)
-		requireJSONPathEqual(t, getTextResult(t, result).Text, "123", "items", 0, "id")
+		text := getTextResult(t, result).Text
+		requireJSONPathEqual(t, text, "123", "items", 0, "id")
+		requireJSONPathEqual(t, text, "web-app", "items", 0, "pipeline_slug")
+		requireJSONPathEqual(t, text, "user-uuid", "items", 0, "creator", "id")
+		requireJSONPathEqual(t, text, "jane@example.com", "items", 0, "creator", "email")
+		requireJSONPathEqual(t, text, "2026-10-01T12:00:00Z", "items", 0, "finished_at")
+		assert.NotContains(text, "avatar_url")
+
+		// A build with no creator or finish time omits them rather than
+		// returning empty values.
+		var parsed struct {
+			Items []map[string]any `json:"items"`
+		}
+		assert.NoError(json.Unmarshal([]byte(text), &parsed))
+		assert.Len(parsed.Items, 2)
+		assert.NotContains(parsed.Items[1], "creator")
+		assert.NotContains(parsed.Items[1], "finished_at")
 	})
 
 	t.Run("APIError", func(t *testing.T) {
@@ -874,7 +946,7 @@ func TestWaitForBuild(t *testing.T) {
 			ListByBuildFunc: func(ctx context.Context, org, pipelineSlug, buildNumber string, opts *buildkite.AnnotationListOptions) ([]buildkite.Annotation, *buildkite.Response, error) {
 				annotationCalls++
 				return []buildkite.Annotation{
-					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", BodyHTML: "<p>large body</p>"},
+					{ID: "annotation-1", Context: "test-results", Style: "error", Scope: "build", Body: "large body", BodyHTML: "<p>large body</p>"},
 				}, &buildkite.Response{Response: &http.Response{StatusCode: 200}}, nil
 			},
 		}

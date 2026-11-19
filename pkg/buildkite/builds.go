@@ -2,9 +2,13 @@ package buildkite
 
 import (
 	"context"
+	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/rs/zerolog/log"
@@ -51,14 +55,25 @@ type BuildsClient interface {
 
 // BuildSummary - Essential build fields for list responses
 type BuildSummary struct {
-	ID        string               `json:"id"`
-	Number    int                  `json:"number"`
-	State     string               `json:"state"`
-	Branch    string               `json:"branch"`
-	Commit    string               `json:"commit"`
-	Message   string               `json:"message"`
-	WebURL    string               `json:"web_url"`
-	CreatedAt *buildkite.Timestamp `json:"created_at"`
+	ID           string               `json:"id"`
+	Number       int                  `json:"number"`
+	PipelineSlug string               `json:"pipeline_slug,omitempty"`
+	State        string               `json:"state"`
+	Branch       string               `json:"branch"`
+	Commit       string               `json:"commit"`
+	Message      string               `json:"message"`
+	WebURL       string               `json:"web_url"`
+	Creator      *BuildCreator        `json:"creator,omitempty"`
+	CreatedAt    *buildkite.Timestamp `json:"created_at"`
+	FinishedAt   *buildkite.Timestamp `json:"finished_at,omitempty"`
+}
+
+// BuildCreator is the user who created a build. ID is the UUID accepted by
+// list_builds' creator filter.
+type BuildCreator struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 // AnnotationSummary contains enough metadata to identify and fetch an
@@ -80,7 +95,6 @@ type BuildDetail struct {
 	Author               buildkite.Author              `json:"author"`
 	ScheduledAt          *buildkite.Timestamp          `json:"scheduled_at,omitempty"`
 	StartedAt            *buildkite.Timestamp          `json:"started_at,omitempty"`
-	FinishedAt           *buildkite.Timestamp          `json:"finished_at,omitempty"`
 	MetaData             map[string]string             `json:"meta_data,omitempty"`
 	Creator              buildkite.Creator             `json:"creator"`
 	Source               string                        `json:"source,omitempty"`
@@ -100,7 +114,10 @@ type ListBuildsArgs struct {
 	Branch       string `json:"branch,omitempty" jsonschema:"Filter builds by git branch name"`
 	State        string `json:"state,omitempty" jsonschema:"Filter builds by state (scheduled, running, passed, failed, canceled, skipped)"`
 	Commit       string `json:"commit,omitempty" jsonschema:"Full commit SHA"`
-	Creator      string `json:"creator,omitempty" jsonschema:"Filter builds by build creator"`
+	Creator      string `json:"creator,omitempty" jsonschema:"Creator's user UUID (a build's creator.id), or me"`
+	CreatedFrom  string `json:"created_from,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
+	CreatedTo    string `json:"created_to,omitempty" jsonschema:"RFC 3339 timestamp, or YYYY-MM-DD (UTC) to include that whole day"`
+	FinishedFrom string `json:"finished_from,omitempty" jsonschema:"RFC 3339 timestamp or YYYY-MM-DD (UTC)"`
 	Page         int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
 	PerPage      int    `json:"per_page,omitempty" jsonschema:"Results per page for pagination (min 1, max 100)"`
 }
@@ -125,16 +142,36 @@ type GetBuildTestEngineRunsArgs struct {
 
 // summarizeBuild converts a buildkite.Build to BuildSummary
 func summarizeBuild(build buildkite.Build) BuildSummary {
-	return BuildSummary{
-		ID:        build.ID,
-		Number:    build.Number,
-		State:     build.State,
-		Branch:    build.Branch,
-		Commit:    build.Commit,
-		Message:   build.Message,
-		WebURL:    build.WebURL,
-		CreatedAt: build.CreatedAt,
+	var creator *BuildCreator
+	if build.Creator.ID != "" {
+		creator = &BuildCreator{ID: build.Creator.ID, Name: build.Creator.Name, Email: build.Creator.Email}
 	}
+	return BuildSummary{
+		ID:           build.ID,
+		Number:       build.Number,
+		PipelineSlug: buildPipelineSlug(build),
+		State:        build.State,
+		Branch:       build.Branch,
+		Commit:       build.Commit,
+		Message:      build.Message,
+		WebURL:       build.WebURL,
+		Creator:      creator,
+		CreatedAt:    build.CreatedAt,
+		FinishedAt:   build.FinishedAt,
+	}
+}
+
+// buildPipelineSlug falls back to the build's API URL
+// (.../pipelines/{slug}/builds/{number}) when the pipeline is excluded.
+func buildPipelineSlug(build buildkite.Build) string {
+	if build.Pipeline != nil {
+		return build.Pipeline.Slug
+	}
+	i := strings.LastIndex(build.URL, "/builds/")
+	if i < 0 {
+		return ""
+	}
+	return path.Base(build.URL[:i])
 }
 
 func detailBuild(build buildkite.Build, annotations []buildkite.Annotation, annotationsTruncated bool) BuildDetail {
@@ -144,7 +181,6 @@ func detailBuild(build buildkite.Build, annotations []buildkite.Annotation, anno
 		Author:               build.Author,
 		ScheduledAt:          build.ScheduledAt,
 		StartedAt:            build.StartedAt,
-		FinishedAt:           build.FinishedAt,
 		MetaData:             build.MetaData,
 		Creator:              build.Creator,
 		Source:               build.Source,
@@ -188,7 +224,7 @@ func createPaginatedBuildResult[T any](builds []buildkite.Build, converter func(
 func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "list_builds",
-			Description: "List builds for a pipeline or across all pipelines in an organization, returning a lightweight summary of each build. When pipeline_slug is omitted, lists builds across all pipelines in the organization. Jobs are not included — use list_jobs or get_job for job detail",
+			Description: "List builds, newest first, for a pipeline or, when pipeline_slug is omitted, across all pipelines in an organization. Returns lightweight summaries including pipeline_slug, creator and finished_at; jobs are not included — use list_jobs or get_job for job detail. Org-wide listings without created_from can time out. For questions spanning many builds, filter by state, branch, creator and date with per_page 100 instead of calling get_build per build",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "List Builds",
 				ReadOnlyHint: true,
@@ -205,6 +241,9 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 				attribute.String("state", args.State),
 				attribute.String("commit", args.Commit),
 				attribute.String("creator", args.Creator),
+				attribute.String("created_from", args.CreatedFrom),
+				attribute.String("created_to", args.CreatedTo),
+				attribute.String("finished_from", args.FinishedFrom),
 				attribute.Int("page", args.Page),
 				attribute.Int("per_page", args.PerPage),
 			)
@@ -243,6 +282,9 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 			if args.Creator != "" {
 				options.Creator = args.Creator
 			}
+			if err := setBuildTimeFilters(options, args); err != nil {
+				return utils.NewToolResultError(err.Error()), nil, nil
+			}
 
 			deps := DepsFromContext(ctx)
 			var builds []buildkite.Build
@@ -265,6 +307,43 @@ func ListBuilds() (mcp.Tool, mcp.ToolHandlerFor[ListBuildsArgs, any], []string) 
 
 			return mcpTextResult(span, result)
 		}, []string{"read_builds"}
+}
+
+// setBuildTimeFilters parses the date filters in args into options.
+func setBuildTimeFilters(options *buildkite.BuildsListOptions, args ListBuildsArgs) error {
+	for _, f := range []struct {
+		name, value string
+		dest        *time.Time
+		endOfDay    bool
+	}{
+		{"created_from", args.CreatedFrom, &options.CreatedFrom, false},
+		{"created_to", args.CreatedTo, &options.CreatedTo, true},
+		{"finished_from", args.FinishedFrom, &options.FinishedFrom, false},
+	} {
+		if f.value == "" {
+			continue
+		}
+		t, err := parseBuildTime(f.value, f.endOfDay)
+		if err != nil {
+			return fmt.Errorf("invalid %s %q: use an RFC 3339 timestamp such as 2026-10-01T00:00:00Z or a date such as 2026-10-01", f.name, f.value)
+		}
+		*f.dest = t
+	}
+	return nil
+}
+
+// parseBuildTime parses an RFC 3339 timestamp or a UTC YYYY-MM-DD date. With
+// endOfDay, a date becomes the next midnight so that, as with the API's own
+// date-only created_to, the whole day is included.
+func parseBuildTime(value string, endOfDay bool) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	t, err := time.Parse(time.DateOnly, value)
+	if err == nil && endOfDay {
+		t = t.AddDate(0, 0, 1)
+	}
+	return t, err
 }
 
 func GetBuildTestEngineRuns() (mcp.Tool, mcp.ToolHandlerFor[GetBuildTestEngineRunsArgs, any], []string) {
