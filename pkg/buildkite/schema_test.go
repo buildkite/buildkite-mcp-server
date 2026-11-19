@@ -569,3 +569,15 @@ func TestLoadSkillArgsSchema(t *testing.T) {
 	req := sortedRequired[LoadSkillArgs](t)
 	require.Equal(t, []string{"skill_name"}, req)
 }
+
+func TestTestPoolArgsSchema(t *testing.T) {
+	s := schemaFor[ListTestPoolsArgs](t)
+	require.Equal(t, []string{"build_uuid", "org_slug", "pipeline_uuid"}, sortedToolRequired(t, s))
+	require.NotContains(t, s.Properties, "page", "scheduler pagination uses opaque cursors")
+	require.Contains(t, s.Properties["build_uuid"].Description, "not the sequential build number")
+	require.Contains(t, s.Properties["pipeline_uuid"].Description, "not its slug")
+	for _, cursor := range []string{"after", "before"} {
+		require.Contains(t, s.Properties[cursor].Description, "mutually exclusive")
+	}
+	require.Equal(t, []string{"build_uuid", "org_slug", "pool_uuid"}, sortedRequired[GetTestPoolArgs](t))
+}
