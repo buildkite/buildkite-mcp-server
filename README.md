@@ -22,11 +22,21 @@ Each include works independently. `time_period` accepts `1h` (the default), `24h
 
 Current counts are snapshots; history counts use the last value per bucket; hourly averages can be fractional. Responses retain null values, timestamps, coverage and limitations. Null means unavailable, not zero. Check these fields before interpreting changes.
 
+## Reading job diagnostics
+
+`get_job_diagnostics` accepts `org_slug` and a job UUID in `job_id`. It is available in `builds` and `retries`, including read-only and minimum-access modes, and requires `read_builds` plus the Job Diagnostics feature enabled for the organization.
+
+It returns job lifecycle and timings, retry policy, concurrency context and capacity requirements. The optional comma-separated `include` parameter accepts `dependencies`, `events` and `insights`; omit it to leave those reads off. Each include works independently. Additional scopes, permissions, feature flags and entitlement determine which evidence is available; the API reports limitations per section.
+
+The response preserves nulls, empty collections, resource references and limitations. Null evidence is not an observed empty result. Context is current rather than historical, dependency expansion and event selections are bounded, and queue insights do not establish why a particular job waited. The tool returns evidence, not a generated diagnosis or retry decision.
+
+Known response fields are decoded into SDK types. Event details, retry matcher unions and unsupported evidence payloads retain their JSON values; unknown fields outside those payloads require an SDK update. Timestamps use the SDK's RFC 3339 formatting.
+
 ## Retrying builds with limited permissions
 
 The `retries` toolset supports investigating failures and retrying jobs without
 broader build-write access. It includes `list_builds`, `get_build`,
-`wait_for_build`, `list_jobs`, `get_job`, `get_job_concurrency`, `search_logs`, `tail_logs`, `read_logs`,
+`wait_for_build`, `list_jobs`, `get_job`, `get_job_concurrency`, `get_job_diagnostics`, `search_logs`, `tail_logs`, `read_logs`,
 `retry_job`, and `retry_failed_jobs`. It requires `read_builds`,
 `read_build_logs`, and `retry_builds` scopes, not `write_builds`.
 
