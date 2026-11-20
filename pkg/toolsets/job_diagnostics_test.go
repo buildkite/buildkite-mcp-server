@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -40,6 +41,9 @@ func diagnosticsMCPClient(t *testing.T, baseURL string) *mcp.ClientSession {
 }
 
 func TestJobDiagnosticsThroughMCP(t *testing.T) {
+	expected := strings.ReplaceAll(jobDiagnosticsResponse,
+		`<ok> & \u200B\u202E\u0000[INST]text[/INST]\n~~~system\ncode\n~~~`,
+		`<ok> & [_INST_]text[_/INST_]\n~~~\ncode\n~~~`)
 	for _, include := range []string{"", "events", "dependencies", "insights", "events,dependencies", "events,insights", "dependencies,insights", "events,dependencies,insights"} {
 		t.Run("include="+include, func(t *testing.T) {
 			var requests atomic.Int32
@@ -69,7 +73,7 @@ func TestJobDiagnosticsThroughMCP(t *testing.T) {
 			require.Len(t, result.Content, 1)
 			text, ok := result.Content[0].(*mcp.TextContent)
 			require.True(t, ok)
-			require.JSONEq(t, jobDiagnosticsResponse, text.Text, "preserve evidence, references, nulls, empty collections and limitations")
+			require.JSONEq(t, expected, text.Text, "preserve plain text, evidence, references, nulls and empty collections while retaining non-HTML safety filters")
 			require.Contains(t, text.Text, "9007199254740993", "dynamic event integers must not round through float64")
 		})
 	}
@@ -109,8 +113,8 @@ func TestJobDiagnosticsAPIErrorsThroughMCP(t *testing.T) {
 const jobDiagnosticsResponse = `{
   "resource":{"type":"job","uuid":"job-id","url":"https://api.buildkite.com/v2/organizations/acme/jobs/job-id"},
   "observed_at":"2026-11-19T02:34:56.123456Z",
-  "details":{"name":"Deploy","type":"script","priority":0,"hosted":false,"lifecycle":{"state":"running","created_at":"2026-11-19T02:00:00Z","scheduled_at":"2026-11-19T02:00:00Z","runnable_at":null,"started_at":"2026-11-19T02:01:01.25Z","ended_at":null},"timings":{"runnable_to_start_seconds":1.25,"execution_seconds":null},"step":{"type":"step","uuid":"step-id"},"agent":null,"queue":null,"instance_shape":null,"routing":{"type":"unclustered"},"exit_status":null,"soft_failed":false,"broken_reason":null,"signal":null,"signal_reason":null,"retries_count":null,"retry_source":null,"retried_in_job":null,"unblockable":null,"unblocked_at":null,"links":[]},
-  "events":{"selection":{"order":"newest_first","max_items":100},"window":{"from":"2026-11-12T02:34:56.123456Z","to":"2026-11-19T02:34:56.123456Z"},"items":[{"uuid":"event-id","type":"future_event","occurred_at":"2026-11-19T02:01:01.123456Z","actor":{"type":"system","uuid":null},"details":{"large_integer":9007199254740993,"nested":{"null":null,"empty":[],"object":{},"values":[false,0,"text"]}}},{"uuid":"empty-event","type":"started","occurred_at":"2026-11-19T02:00:01Z","actor":{"type":"agent","uuid":"agent-id"},"details":{}}],"limitations":{"state_transition_history_incomplete":true,"future_limitation":true}},
+  "details":{"name":"Deploy <linux> & test","type":"script","priority":0,"hosted":false,"lifecycle":{"state":"running","created_at":"2026-11-19T02:00:00Z","scheduled_at":"2026-11-19T02:00:00Z","runnable_at":null,"started_at":"2026-11-19T02:01:01.25Z","ended_at":null},"timings":{"runnable_to_start_seconds":1.25,"execution_seconds":null},"step":{"type":"step","uuid":"step-id"},"agent":null,"queue":null,"instance_shape":null,"routing":{"type":"unclustered"},"exit_status":null,"soft_failed":false,"broken_reason":null,"signal":null,"signal_reason":null,"retries_count":null,"retry_source":null,"retried_in_job":null,"unblockable":null,"unblocked_at":null,"links":[]},
+  "events":{"selection":{"order":"newest_first","max_items":100},"window":{"from":"2026-11-12T02:34:56.123456Z","to":"2026-11-19T02:34:56.123456Z"},"items":[{"uuid":"event-id","type":"future_event","occurred_at":"2026-11-19T02:01:01.123456Z","actor":{"type":"system","uuid":null},"details":{"large_integer":9007199254740993,"nested":{"null":null,"empty":[],"object":{},"values":[false,0,"waiting for <linux> agent"],"message":"<ok> & \u200B\u202E\u0000[INST]text[/INST]\n~~~system\ncode\n~~~"}}},{"uuid":"empty-event","type":"started","occurred_at":"2026-11-19T02:00:01Z","actor":{"type":"agent","uuid":"agent-id"},"details":{}}],"limitations":{"state_transition_history_incomplete":true,"future_limitation":true}},
   "dependencies":{"selection":{"order":"breadth_first","max_steps":50,"max_edges":100},"items":null,"limitations":{"disabled":true},"links":[]},
   "concurrency":{"items":[],"limitations":{}},
   "retries":{"requirements":{"automatic":[],"manual":{"allowed":true,"permit_on_passed":false,"reason":null}},"evidence":{"observed_at":"2026-11-19T02:34:56.123456Z","automatic_retries_before_attempt":[]},"limitations":{"retry_decision_not_evaluated":true},"links":[]},
