@@ -11,7 +11,7 @@ COPY pkg ./pkg
 COPY internal ./internal
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/buildkite-mcp-server ./cmd/buildkite-mcp-server
 
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
 # Expected arguments for tool versions.
 ARG NODE_VERSION="24"
