@@ -741,7 +741,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 		case "retry_failed_jobs":
 			assert.Equal([]string{"read_builds", "retry_builds"}, tool.RequiredScopes)
 			assert.False(tool.IsReadOnly())
-		case "get_job_concurrency":
+		case "get_job_concurrency", "get_job_diagnostics":
 			assert.Equal([]string{"read_builds"}, tool.RequiredScopes)
 			assert.True(tool.IsReadOnly())
 			assert.True(tool.IsMinimumAccess())
@@ -752,6 +752,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Contains(buildToolNames, "retry_job")
 	assert.Contains(buildToolNames, "retry_failed_jobs")
 	assert.Contains(buildToolNames, "get_job_concurrency")
+	assert.Contains(buildToolNames, "get_job_diagnostics")
 
 	tests, exists := registry.Get(ToolsetTests)
 	assert.True(exists)
@@ -793,7 +794,7 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 func TestRetryToolset(t *testing.T) {
 	registry := NewToolsetRegistry()
 	registry.RegisterToolsets(CreateBuiltinToolsets())
-	readTools := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job", "get_job_concurrency", "search_logs", "tail_logs", "read_logs"}
+	readTools := []string{"list_builds", "get_build", "wait_for_build", "list_jobs", "get_job", "get_job_concurrency", "get_job_diagnostics", "search_logs", "tail_logs", "read_logs"}
 
 	for _, readOnly := range []bool{false, true} {
 		t.Run(fmt.Sprintf("read_only=%t", readOnly), func(t *testing.T) {
@@ -824,9 +825,9 @@ func TestOverlappingToolsets(t *testing.T) {
 	selected := []string{ToolsetRetries, ToolsetBuilds, ToolsetLogs}
 	for _, readOnly := range []bool{false, true} {
 		t.Run(fmt.Sprintf("read_only=%t", readOnly), func(t *testing.T) {
-			expectedCount := 20
+			expectedCount := 21
 			if readOnly {
-				expectedCount = 13
+				expectedCount = 14
 			}
 			for _, tools := range [][]ToolDefinition{
 				registry.GetToolsForToolsets(selected, readOnly),

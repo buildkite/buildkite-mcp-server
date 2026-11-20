@@ -52,6 +52,10 @@ func (m *MockJobsClient) GetJobConcurrencyByOrg(ctx context.Context, org string,
 	return buildkite.JobConcurrency{}, &buildkite.Response{}, nil
 }
 
+func (m *MockJobsClient) GetJobDiagnosticsByOrg(ctx context.Context, org string, jobID string, opt *buildkite.JobDiagnosticsOptions) (buildkite.JobDiagnostics, *buildkite.Response, error) {
+	return buildkite.JobDiagnostics{}, &buildkite.Response{}, nil
+}
+
 func (m *MockJobsClient) UnblockJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string, opt *buildkite.JobUnblockOptions) (buildkite.Job, *buildkite.Response, error) {
 	if m.UnblockJobFunc != nil {
 		return m.UnblockJobFunc(ctx, org, pipeline, buildNumber, jobID, opt)
