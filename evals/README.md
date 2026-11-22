@@ -21,6 +21,22 @@ The matrix keeps two live cases: `scheduler-metrics-live` reviews build [#253068
 
 The successful-access case retains its preflight: pool listing must return items and each pool's metrics must be readable before the model runs. These pools expire, so refresh its build URL and scenario ID together with the corresponding reference when needed. The unavailable case deliberately has no nonempty-pool preflight; the model must investigate the API responses. An empty successful listing does not confirm expiry, and missing-scope errors are authorization failures, not proof of expired pools. Neither case uses synthetic data or changes production pools.
 
+Five additional cases use synthetic HAR inputs through the real MCP server and SDK:
+
+| Entry ID | Distinct coverage |
+| --- | --- |
+| `scheduler-coded-errors` | Explicit disabled/no-build-usage codes, with generic 404 after an empty listing and missing-scope 403 controls. Four independent organizations/builds in one session. |
+| `scheduler-partial-access` | Two readable pools and one denied pool; successful reads must not turn unknown results into a build-wide success claim. |
+| `scheduler-drained-unfinished` | An errored, drained pool retaining waiting attempts and failed results despite zero active leases. |
+| `scheduler-pagination` | Successful pools on page one, unfinished work on a later page, including an opaque cursor containing a plus sign. |
+| `scheduler-retries-leases` | Entries versus attempts, active versus expired lease holds, workload versus elapsed time, and unknown execution history. |
+
+`scenario.replay` selects a HAR basename under `fixtures/`. The image generates these inputs from `scripts/scheduler-fixtures.mjs`; for local use, generate them with `node evals/scripts/scheduler-fixtures.mjs evals/fixtures` first. Replay is supported for Claude MCP entries only, requires no `token_env`, clears the entry's `BUILDKITE_API_TOKEN`, and never falls back to a live API for unmatched requests. It does not remove other ambient harness credentials or sandbox the agent's Bash tools. The prompt directs the agent to investigate through MCP rather than inspect fixture files. These are reasoning/SDK integration cases, not proof of deployed API behavior; the coded responses model the contract in [API PR #39682](https://github.com/buildkite/buildkite/pull/39682).
+
+The same neutral fixture prompt is used across all five cases. References under `expected/scheduler-fixture/` are excluded from the agent image and loaded only by the reviewer after the run. Run metadata records the replay basename so fixture and live results remain distinguishable. Regular PR CI checks fixture discovery, detail, metrics and error responses through a freshly built MCP binary, without a model or production credentials.
+
+To run a subset, set the build environment variable `EVAL_IDS` to comma-separated entry IDs, for example `scheduler-coded-errors,scheduler-partial-access`. Unknown IDs fail rather than silently running another case. Unset means all seven entries; creating or pushing the PR does not itself authorize a model-eval run.
+
 ## Supported agents
 
 `evals.yaml` entries choose the agent per scenario (`agent:` key):

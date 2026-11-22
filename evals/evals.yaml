@@ -51,6 +51,8 @@
 #                 environment. To pass values on to the prompt, append KEY=VALUE
 #                 lines to the file at $SCENARIO_VARS_FILE.
 #     vars        Static KEY=VALUE map substituted into the prompt template.
+#     replay      Optional HAR basename under fixtures/. Offline claude/mcp
+#                 only; no token_env. Unmatched requests fail, never go live.
 #   evaluator     Optional. How the agent's run is judged afterwards:
 #                 'yilong' — scripts/yilong.sh, in its own pipeline
 #                 step: three cheap Jev (TypeSafe) scored questions, each
@@ -316,4 +318,65 @@ matrix:
       vars:
         BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/251943
     token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN
+    mcp_version: source
+
+  # Synthetic snapshots exercise edge cases without changing production pools,
+  # flags or credentials. The real MCP server and SDK decode replayed API data.
+  - id: scheduler-coded-errors
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-fixture
+    scenario:
+      id: coded-errors
+      replay: scheduler-coded-errors.har
+      vars:
+        BUILD_URLS: >-
+          https://buildkite.com/fixture-disabled/scheduler/builds/101,
+          https://buildkite.com/fixture-no-usage/scheduler/builds/101,
+          https://buildkite.com/fixture-generic/scheduler/builds/101,
+          https://buildkite.com/fixture-scope/scheduler/builds/101
+    mcp_version: source
+
+  - id: scheduler-partial-access
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-fixture
+    scenario:
+      id: partial-access
+      replay: scheduler-partial-access.har
+      vars:
+        BUILD_URLS: https://buildkite.com/scheduler-fixture/scheduler/builds/101
+    mcp_version: source
+
+  - id: scheduler-drained-unfinished
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-fixture
+    scenario:
+      id: drained-unfinished
+      replay: scheduler-drained-unfinished.har
+      vars:
+        BUILD_URLS: https://buildkite.com/scheduler-fixture/scheduler/builds/101
+    mcp_version: source
+
+  - id: scheduler-pagination
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-fixture
+    scenario:
+      id: pagination
+      replay: scheduler-pagination.har
+      vars:
+        BUILD_URLS: https://buildkite.com/scheduler-fixture/scheduler/builds/101
+    mcp_version: source
+
+  - id: scheduler-retries-leases
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-fixture
+    scenario:
+      id: retries-leases
+      replay: scheduler-retries-leases.har
+      vars:
+        BUILD_URLS: https://buildkite.com/scheduler-fixture/scheduler/builds/101
     mcp_version: source

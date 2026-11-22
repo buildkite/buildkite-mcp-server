@@ -18,6 +18,7 @@ vendor/
 
 # eval run bundles produced by evals/scripts/babystand.sh
 /evals/runs/
+/evals/fixtures/
 
 # debugger binaries
 __debug_bin*
