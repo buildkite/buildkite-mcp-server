@@ -128,6 +128,8 @@ func TestSchedulerToolsPreserveAPIErrors(t *testing.T) {
 		body   string
 	}{
 		{"list_test_pools", http.StatusForbidden, `{"message":"missing read_test_pool"}`},
+		{"list_test_pools", http.StatusNotFound, `{"message":"Test Scheduler is not enabled for your organization","code":"test_scheduler_not_enabled"}`},
+		{"get_test_pool_metrics", http.StatusNotFound, `{"message":"No Test Scheduler usage was found for this build","code":"test_scheduler_build_usage_not_found"}`},
 		{"get_test_pool", http.StatusNotFound, `{"message":"Not Found"}`},
 		{"get_test_pool_metrics", http.StatusServiceUnavailable, `{"message":"scheduler temporarily unavailable"}`},
 	} {
