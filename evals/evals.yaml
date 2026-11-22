@@ -286,7 +286,7 @@ matrix:
         BUILD_URL=https://buildkite.com/buildkite/buildkite/builds/251943
         api_get() {
           curl --fail --silent --show-error --max-time 30 \
-            -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN}" "$1"
+            -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN}" "$1"
         }
         base=https://api.buildkite.com/v2/organizations/buildkite/test-scheduler
         build=$(api_get "https://api.buildkite.com/v2/organizations/buildkite/pipelines/buildkite/builds/${BUILD_URL##*/}")
@@ -299,5 +299,5 @@ matrix:
             | jq -e --arg id "$pool_id" '.pool.id == $id and (.observed_at | type == "string")' >/dev/null
         done < <(jq -r '.items[].id' <<<"$pools")
         printf 'BUILD_URL=%s\n' "$BUILD_URL" >> "$SCENARIO_VARS_FILE"
-    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_BUILDKITE_API_TOKEN
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN
     mcp_version: source
