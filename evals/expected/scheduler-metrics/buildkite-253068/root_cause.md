@@ -1,6 +1,6 @@
 # Scheduler metrics review
 
-Build https://buildkite.com/buildkite/buildkite/builds/251943 used Test Scheduler: its metadata records core, features and browser pool IDs. The task is a read-only review of the metrics behind Orchestration, not a browser UI test or a failure diagnosis.
+Build https://buildkite.com/buildkite/buildkite/builds/253068 used Test Scheduler: its metadata records core, features and browser pool IDs. The task is a read-only review of the metrics behind Orchestration, not a browser UI test or a failure diagnosis.
 
 A successful investigation discovers the build and pipeline UUIDs, lists the build's pools (following continuation links if present), and retrieves metrics for each pool. The answer identifies the pools and accurately summarizes the returned state, entry/attempt counts, result counts and lease activity at their observed_at timestamps. Numerical summaries must agree with those responses. Do not infer passing tests from the build's passed state or a pool's consumed/drained state alone, or execution history and stalls from a single snapshot.
 

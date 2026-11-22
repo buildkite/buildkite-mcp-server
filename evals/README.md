@@ -15,6 +15,12 @@ A set of artifacts, and annotations in the Buildkite build showing:
 * Datadog dashboard
   * Charts the LLM agent metrics (see above) over runs
 
+## Scheduler metrics scenarios
+
+The matrix keeps two live cases: `scheduler-metrics-live` reviews build [#253068](https://buildkite.com/buildkite/buildkite/builds/253068), while `scheduler-metrics-unavailable` uses [#251943](https://buildkite.com/buildkite/buildkite/builds/251943) to evaluate reporting unavailable pool data without inventing metrics. Both use `MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN`.
+
+The successful-access case retains its preflight: pool listing must return items and each pool's metrics must be readable before the model runs. These pools expire, so refresh its build URL and scenario ID together with the corresponding reference when needed. The unavailable case deliberately has no nonempty-pool preflight; the model must investigate the API responses. An empty successful listing does not confirm expiry, and missing-scope errors are authorization failures, not proof of expired pools. Neither case uses synthetic data or changes production pools.
+
 ## Supported agents
 
 `evals.yaml` entries choose the agent per scenario (`agent:` key):

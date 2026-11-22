@@ -276,14 +276,14 @@ matrix:
   # Live Scheduler metrics review. Requires read_test_pool, build/pipeline
   # discovery access, and Scheduler enablement. Refresh the target after expiry.
   # Setup fails before the model on unreadable data.
-  - id: scheduler-metrics
+  - id: scheduler-metrics-live
     agent: claude
     model: claude-opus-4-8
     prompt: scheduler-metrics
     scenario:
-      id: buildkite-251943
+      id: buildkite-253068
       setup: |
-        BUILD_URL=https://buildkite.com/buildkite/buildkite/builds/251943
+        BUILD_URL=https://buildkite.com/buildkite/buildkite/builds/253068
         api_get() {
           curl --fail --silent --show-error --max-time 30 \
             -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN}" "$1"
@@ -293,11 +293,27 @@ matrix:
         build_id=$(jq -er '.id' <<<"$build")
         pipeline_id=$(jq -er '.pipeline.id' <<<"$build")
         pools=$(api_get "$base/pools?pipeline_id=$pipeline_id&build_id=$build_id&per_page=100")
-        jq -e '.items | length > 0' <<<"$pools" >/dev/null
+        jq -e '.items | length > 0' <<<"$pools" >/dev/null || {
+          echo "No accessible, unexpired pools returned for $BUILD_URL; refresh the live eval target." >&2
+          exit 1
+        }
         while IFS= read -r pool_id; do
           api_get "$base/pools/$pool_id/metrics?build_id=$build_id" \
             | jq -e --arg id "$pool_id" '.pool.id == $id and (.observed_at | type == "string")' >/dev/null
         done < <(jq -r '.items[].id' <<<"$pools")
         printf 'BUILD_URL=%s\n' "$BUILD_URL" >> "$SCENARIO_VARS_FILE"
+    token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN
+    mcp_version: source
+
+  # Keep the original live build as the unavailable-pool case. Do not require
+  # nonempty pools in setup: handling unavailable data is the model's task.
+  - id: scheduler-metrics-unavailable
+    agent: claude
+    model: claude-opus-4-8
+    prompt: scheduler-metrics
+    scenario:
+      id: buildkite-251943-unavailable
+      vars:
+        BUILD_URL: https://buildkite.com/buildkite/buildkite/builds/251943
     token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN
     mcp_version: source
