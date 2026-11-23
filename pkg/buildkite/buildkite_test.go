@@ -172,6 +172,79 @@ func TestLimitSanitizedJSONPayloadRejectsOversizedArrayStructure(t *testing.T) {
 	require.ErrorContains(t, err, "JSON structure exceeds 100 byte limit")
 }
 
+func TestLimitJSONValueKeepsIdentifiersWhole(t *testing.T) {
+	const uuid = "019f8923-bcfd-4c6d-8ed8-29f580a20384"
+	root := map[string]any{
+		"artifacts": []any{map[string]any{
+			"id": uuid, "job_id": uuid, "path": "log/test/spec/features/viewing_build_waterfall_spec_line_30.log",
+		}},
+		"jobs": []any{map[string]any{
+			"id": uuid, "step_id": uuid,
+			"failed_tests": []any{map[string]any{
+				"test_id": uuid, "run_id": uuid, "test_suite_slug": "buildkite-rspec", "name": "should keep docked drawer open",
+			}},
+		}},
+	}
+
+	limitedValue, truncated := limitJSONValue(root, 4, "")
+	require.True(t, truncated)
+	limited := limitedValue.(map[string]any)
+
+	artifact := limited["artifacts"].([]any)[0].(map[string]any)
+	require.Equal(t, uuid, artifact["id"])
+	require.Equal(t, uuid, artifact["job_id"])
+	require.Len(t, artifact["path"], 4)
+
+	job := limited["jobs"].([]any)[0].(map[string]any)
+	require.Equal(t, uuid, job["id"])
+	require.Equal(t, uuid, job["step_id"])
+
+	test := job["failed_tests"].([]any)[0].(map[string]any)
+	require.Equal(t, uuid, test["test_id"])
+	require.Equal(t, uuid, test["run_id"])
+	require.Equal(t, "buildkite-rspec", test["test_suite_slug"])
+	require.Len(t, test["name"], 4)
+}
+
+func TestLimitSanitizedJSONPayloadKeepsIdentifiersWholeAtTightLimits(t *testing.T) {
+	const uuid = "019f8923-bcfd-4c6d-8ed8-29f580a20384"
+	artifacts := make([]map[string]any, 5)
+	for i := range artifacts {
+		artifacts[i] = map[string]any{"id": uuid, "job_id": uuid, "path": strings.Repeat("x", 200)}
+	}
+	payload, err := json.Marshal(map[string]any{
+		"content_bytes":       0,
+		"content_limit_bytes": 1000,
+		"artifacts":           artifacts,
+	})
+	require.NoError(t, err)
+
+	// Just above the strings-emptied floor, every shortenable string must be
+	// cut below an identifier's length; identifiers must still come through.
+	floor, err := payloadStructureBytes(payload, 1000)
+	require.NoError(t, err)
+	limit := floor + 20
+
+	limited, err := limitSanitizedJSONPayload(payload, limit)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(limited), limit)
+
+	var result struct {
+		Artifacts []struct {
+			ID    string `json:"id"`
+			JobID string `json:"job_id"`
+			Path  string `json:"path"`
+		} `json:"artifacts"`
+	}
+	require.NoError(t, json.Unmarshal(limited, &result))
+	require.Len(t, result.Artifacts, len(artifacts))
+	for _, artifact := range result.Artifacts {
+		require.Equal(t, uuid, artifact.ID)
+		require.Equal(t, uuid, artifact.JobID)
+		require.Less(t, len(artifact.Path), len(uuid))
+	}
+}
+
 func TestLimitSanitizedJSONPayloadUpdatesNestedTruncationMetadata(t *testing.T) {
 	content := strings.Repeat("<", 1_000)
 	payload, err := json.Marshal(map[string]any{

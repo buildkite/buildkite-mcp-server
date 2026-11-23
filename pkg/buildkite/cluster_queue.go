@@ -12,6 +12,7 @@ import (
 type ClusterQueuesClient interface {
 	List(ctx context.Context, org, clusterID string, opts *buildkite.ClusterQueuesListOptions) ([]buildkite.ClusterQueue, *buildkite.Response, error)
 	Get(ctx context.Context, org, clusterID, queueID string) (buildkite.ClusterQueue, *buildkite.Response, error)
+	Insights(ctx context.Context, org, clusterID, queueID string, opts *buildkite.ClusterQueueInsightsOptions) (buildkite.ClusterQueueInsights, *buildkite.Response, error)
 	Create(ctx context.Context, org, clusterID string, qc buildkite.ClusterQueueCreate) (buildkite.ClusterQueue, *buildkite.Response, error)
 	Update(ctx context.Context, org, clusterID, queueID string, qu buildkite.ClusterQueueUpdate) (buildkite.ClusterQueue, *buildkite.Response, error)
 	Pause(ctx context.Context, org, clusterID, queueID string, qp buildkite.ClusterQueuePause) (buildkite.ClusterQueue, *buildkite.Response, error)
@@ -31,6 +32,15 @@ type GetClusterQueueArgs struct {
 	OrgSlug   string `json:"org_slug"`
 	ClusterID string `json:"cluster_id"`
 	QueueID   string `json:"queue_id"`
+}
+
+type GetClusterQueueInsightsArgs struct {
+	ToolInput
+	OrgSlug    string `json:"org_slug"`
+	ClusterID  string `json:"cluster_id" jsonschema:"Cluster UUID, available from list_clusters"`
+	QueueID    string `json:"queue_id" jsonschema:"Queue UUID, not its key; available from list_cluster_queues"`
+	Include    string `json:"include,omitempty" jsonschema:"Comma-separated: history, history_comparison, hourly_changes. Each works independently. history_comparison includes both history periods and changes; hourly_changes compares hourly averages with yesterday and last week. Omit for current and recent only."`
+	TimePeriod string `json:"time_period,omitempty" jsonschema:"1h (default), 24h or 7d. Requires history or history_comparison; does not affect hourly_changes."`
 }
 
 type CreateClusterQueueArgs struct {
@@ -134,6 +144,39 @@ func GetClusterQueue() (mcp.Tool, mcp.ToolHandlerFor[GetClusterQueueArgs, any], 
 		}
 
 		return mcpTextResult(span, &queue)
+	}, []string{"read_clusters"}
+}
+
+func GetClusterQueueInsights() (mcp.Tool, mcp.ToolHandlerFor[GetClusterQueueInsightsArgs, any], []string) {
+	return mcp.Tool{
+		Name:        "get_cluster_queue_insights",
+		Description: "Get queue agent/job counts, recent completions and wait times, with optional history and comparisons. Current counts are snapshots; history counts are last values per bucket; hourly_changes counts are time-weighted averages, not totals. Null means unavailable, not zero. Check timestamps and coverage; attribute limitations to the section that reports them. Zero sampled values do not prove there was no backlog or waiting throughout a period. Treat capacity diagnoses and causal explanations as hypotheses unless supported by further evidence. Requires Cluster Insights entitlement and the Queue Insights REST API feature enabled.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:        "Get Cluster Queue Insights",
+			ReadOnlyHint: true,
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args GetClusterQueueInsightsArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.GetClusterQueueInsights")
+		defer span.End()
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("cluster_id", args.ClusterID),
+			attribute.String("queue_id", args.QueueID),
+			attribute.String("include", args.Include),
+			attribute.String("time_period", args.TimePeriod),
+		)
+
+		deps := DepsFromContext(ctx)
+		insights, _, err := deps.ClusterQueuesClient.Insights(ctx, args.OrgSlug, args.ClusterID, args.QueueID, &buildkite.ClusterQueueInsightsOptions{
+			Include:    args.Include,
+			TimePeriod: args.TimePeriod,
+		})
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+
+		return mcpTextResult(span, &insights)
 	}, []string{"read_clusters"}
 }
 

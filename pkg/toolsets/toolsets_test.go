@@ -717,7 +717,17 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Len(investigations.Tools, 2)
 	assert.Equal("get_build_failure_summary", investigations.Tools[0].Tool.Name)
 	assert.Equal("compare_builds", investigations.Tools[1].Tool.Name)
-	assert.Equal([]string{"read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
+	assert.Equal([]string{"read_artifacts", "read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
+
+	var insightsEnabled bool
+	for _, tool := range registry.GetEnabledTools([]string{ToolsetClusters}, true) {
+		if tool.Tool.Name == "get_cluster_queue_insights" {
+			insightsEnabled = true
+			assert.Equal([]string{"read_clusters"}, tool.RequiredScopes)
+			assert.False(tool.IsMinimumAccess())
+		}
+	}
+	assert.True(insightsEnabled, "queue insights should be available in the read-only clusters toolset")
 
 	builds, exists := registry.Get(ToolsetBuilds)
 	assert.True(exists)
@@ -748,6 +758,11 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	toolNames := make([]string, 0, len(tests.Tools))
 	for _, tool := range tests.Tools {
 		toolNames = append(toolNames, tool.Tool.Name)
+		switch tool.Tool.Name {
+		case "list_test_pools", "get_test_pool", "get_test_pool_metrics":
+			assert.Equal([]string{"read_test_pool"}, tool.RequiredScopes, tool.Tool.Name)
+			assert.False(tool.IsMinimumAccess(), tool.Tool.Name)
+		}
 	}
 	assert.Contains(toolNames, "list_tests")
 	assert.Contains(toolNames, "list_tests_for_build")
@@ -765,18 +780,6 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 			if tool.Tool.Name == name {
 				enabled = true
 				assert.Equal([]string{"read_suites"}, tool.RequiredScopes)
-				assert.False(tool.IsMinimumAccess())
-			}
-		}
-		assert.True(enabled, "%s should be available in read-only mode", name)
-	}
-	for _, name := range []string{"list_test_pools", "get_test_pool", "get_test_pool_metrics"} {
-		assert.Contains(toolNames, name)
-		var enabled bool
-		for _, tool := range registry.GetEnabledTools([]string{ToolsetTests}, true) {
-			if tool.Tool.Name == name {
-				enabled = true
-				assert.Equal([]string{"read_test_pool"}, tool.RequiredScopes)
 				assert.False(tool.IsMinimumAccess())
 			}
 		}

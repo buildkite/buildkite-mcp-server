@@ -8,6 +8,20 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Reading queue insights
+
+`get_cluster_queue_insights` is available in the `clusters` toolset, including read-only mode. It accepts `org_slug`, a cluster UUID in `cluster_id`, and a queue UUID in `queue_id` (not the queue key). It requires `read_clusters`, Cluster Insights entitlement, and the Queue Insights REST API feature enabled for the organisation.
+
+By default, it returns current agent and job counts plus recent completions and wait times. The optional `include` parameter accepts a comma-separated list:
+
+- `history`: the selected period's counts, completions and wait times.
+- `history_comparison`: selected and previous history periods, plus change summaries. It does not also require `history`.
+- `hourly_changes`: time-weighted average counts for the current window, yesterday and last week, with changes based on the last completed hour.
+
+Each include works independently. `time_period` accepts `1h` (the default), `24h` or `7d`; it requires `history` or `history_comparison` and does not affect `hourly_changes`. The API validates options and access.
+
+Current counts are snapshots; history counts use the last value per bucket; hourly averages can be fractional. Responses retain null values, timestamps, coverage and limitations. Null means unavailable, not zero. Check these fields before interpreting changes.
+
 ## Retrying builds with limited permissions
 
 The `retries` toolset supports investigating failures and retrying jobs without
@@ -143,50 +157,6 @@ Any change in `soft_failed` is reported as `state_changed`: transitions between 
 By default, up to three newly blocking failures include their last 20 log entries: `newly_failing` jobs first, then `state_changed` jobs that are now hard failures, such as a job that soft-failed in the baseline. Logs are bounded to 8 KiB of log content each. Set `include_logs: false` to omit logs. Log errors do not discard the comparison, except HTTP 401 authentication errors, which propagate through the server's reauthentication path. The tool requires `read_builds` and `read_build_logs` scopes. Use `get_build_failure_summary` or `tail_logs` to investigate further; a shared failing step does not establish a shared root cause or make a retry safe.
 
 Baseline discovery searches at most 500 candidates. If none is found, the response says no comparison was performed and asks for an explicit baseline. Job inventories are limited to 1,000 jobs per build; larger inventories return an error instead of misleading partial added/removed results. Output omissions are reported separately from the complete outcome counts.
-
----
-
-## Inspecting Test Scheduler pools (pre-GA)
-
-The read-only `list_test_pools`, `get_test_pool`, and `get_test_pool_metrics`
-tools are in the `tests` toolset. They require `read_test_pool`, build/suite
-access, and scheduler API enablement, not `read_suites`. Minimum-access mode
-excludes them. This API is not publicly released.
-
-From a build URL, use `get_build` to obtain its `id` and `get_pipeline` to
-obtain the pipeline's `id` (enable the `builds` and `pipelines` toolsets for
-these discovery calls, which separately require `read_builds` and
-`read_pipelines`). Then call `list_test_pools` with `org_slug`, `build_uuid`,
-and `pipeline_uuid`. These are UUIDs, not a build number or pipeline slug.
-
-Listing returns one compact `items` page and `links`, with 30 items by default
-and at most 100. Filter by a case-insensitive exact `key`. To continue, copy
-the `after` or `before` cursor from the appropriate link, retaining the same
-build, pipeline, key, and page size; never supply both cursors. Pages omit
-policies and muted-test snapshots; inspect an item's `id` with `get_test_pool`
-using `pool_uuid` and the same `build_uuid` for complete planning detail.
-
-`get_test_pool_metrics` takes the same inputs as `get_test_pool` and returns a
-replica-backed snapshot at `observed_at`, unavailable after expiry. Neither
-`drained: true` nor zero active leases independently proves completion or
-success; an errored/drained pool can retain waiting work. Inspect all relevant
-pools/pages before making build-wide claims, limited to scheduler-managed
-tests. Aggregate counts cannot name individual stuck tests, and `muted_tests`
-is a planning snapshot, not the pending backlog.
-
-Consumed state alone does not establish passing results, even for a comparison
-pool. Current waiting/leased counts and retry policies do not establish execution
-history or a proven stall. State workload totals are neither elapsed time nor
-the per-lease `lease.costs` budget; planned parallelism is not a pool-wide lease
-cap. Pool `expires_at` controls availability, while
-`timing.next_active_lease_expires_at` is a lease deadline. Keep these observations
-separate from hypotheses about worker behavior or future completion.
-
-An empty list is not evidence that tests passed. A 404 can mean missing,
-inaccessible, expired, or gated data; missing `read_test_pool` returns 403.
-API errors remain errors rather than successful empty results. Repeated 401s
-do not rule out a temporary authentication failure. Failed or unqueried reads
-leave data unknown, not absent.
 
 ---
 
