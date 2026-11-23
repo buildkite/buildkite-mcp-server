@@ -15,27 +15,19 @@ A set of artifacts, and annotations in the Buildkite build showing:
 * Datadog dashboard
   * Charts the LLM agent metrics (see above) over runs
 
-## Scheduler metrics scenarios
+## Checking a Scheduler build before testing
 
-The matrix keeps two live cases: `scheduler-metrics-live` reviews build [#253068](https://buildkite.com/buildkite/buildkite/builds/253068), while `scheduler-metrics-unavailable` uses [#251943](https://buildkite.com/buildkite/buildkite/builds/251943) to evaluate reporting unavailable pool data without inventing metrics. Both use `MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN`.
+`scripts/check-scheduler-build.sh` extracts the read-only preflight used during Scheduler testing. It accepts an existing build URL, resolves its build and pipeline UUIDs, requires a nonempty pool listing, and checks each returned pool's metrics before a model is invoked. It does not create builds, enable Scheduler, change pools, or run an eval.
 
-The successful-access case retains its preflight: pool listing must return items and each pool's metrics must be readable before the model runs. These pools expire, so refresh its build URL and scenario ID together with the corresponding reference when needed. The unavailable case deliberately has no nonempty-pool preflight; the model must investigate the API responses. An empty successful listing does not confirm expiry, and missing-scope errors are authorization failures, not proof of expired pools. Neither case uses synthetic data or changes production pools.
+With `BUILDKITE_API_TOKEN` already set privately, run from the repository root:
 
-Five additional cases use synthetic HAR inputs through the real MCP server and SDK:
+```bash
+bash evals/scripts/check-scheduler-build.sh 'https://buildkite.com/<org>/<pipeline>/builds/<number>'
+```
 
-| Entry ID | Distinct coverage |
-| --- | --- |
-| `scheduler-coded-errors` | Explicit disabled/no-build-usage codes, with generic 404 after an empty listing and missing-scope 403 controls. Four independent organizations/builds in one session. |
-| `scheduler-partial-access` | Two readable pools and one denied pool; successful reads must not turn unknown results into a build-wide success claim. |
-| `scheduler-drained-unfinished` | An errored, drained pool retaining waiting attempts and failed results despite zero active leases. |
-| `scheduler-pagination` | Successful pools on page one, unfinished work on a later page, including an opaque cursor containing a plus sign. |
-| `scheduler-retries-leases` | Entries versus attempts, active versus expired lease holds, workload versus elapsed time, and unknown execution history. |
+Requires Bash, curl, jq, and a token with `read_builds`, `read_test_pool`, and access to the target build and suites. The existing `.buildkite/pipeline.evals.yml` makes `MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN` available to future scenarios; pass it to the script as `BUILDKITE_API_TOKEN` and select it with the scenario's `token_env` when running the model. The script is included in the eval image at `/workspace/scripts/check-scheduler-build.sh`.
 
-`scenario.replay` selects a HAR basename under `fixtures/`. The image generates these inputs from `scripts/scheduler-fixtures.mjs`; for local use, generate them with `node evals/scripts/scheduler-fixtures.mjs evals/fixtures` first. Replay is supported for Claude MCP entries only, requires no `token_env`, clears the entry's `BUILDKITE_API_TOKEN`, and never falls back to a live API for unmatched requests. It does not remove other ambient harness credentials or sandbox the agent's Bash tools. The prompt directs the agent to investigate through MCP rather than inspect fixture files. These are reasoning/SDK integration cases, not proof of deployed API behavior; the coded responses model the contract in [API PR #39682](https://github.com/buildkite/buildkite/pull/39682).
-
-The same neutral fixture prompt is used across all five cases. References under `expected/scheduler-fixture/` are excluded from the agent image and loaded only by the reviewer after the run. Run metadata records the replay basename so fixture and live results remain distinguishable. Regular PR CI checks fixture discovery, detail, metrics and error responses through a freshly built MCP binary, without a model or production credentials.
-
-To run a subset, set the build environment variable `EVAL_IDS` to comma-separated entry IDs, for example `scheduler-coded-errors,scheduler-partial-access`. Unknown IDs fail rather than silently running another case. Unset means all seven entries; creating or pushing the PR does not itself authorize a model-eval run.
+If `SCENARIO_VARS_FILE` is set by scenario setup, the script appends `BUILD_URL` only after the checks succeed. Pool data expires, so use a recent build. An empty listing or failed lookup is not proof of expiry or of the build never using Scheduler. Like the original preflight, this checks the first page (up to 100 returned pools), not complete build-wide coverage. It checks readability, not completion or passing results. No Scheduler eval cases are enabled by this helper.
 
 ## Supported agents
 

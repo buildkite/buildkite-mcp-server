@@ -1,3 +1,0 @@
-/goal Review Test Scheduler pool metrics for {{.BUILD_URLS}}. For each build, summarize each pool's state, workload progress, test results and lease activity, with the evidence behind your summary. Is all Scheduler-managed work finished and passing? If data is unavailable, explain what the responses establish and what remains unknown. Read only; do not change anything or trigger a build.{{.DEBUG_STRING}}
-
-These build URLs identify synthetic offline API snapshots available through the configured Buildkite MCP tools, not builds on the public website. Use those tools to investigate. Do not inspect replay/fixture source files, evaluation reference answers, evaluator reviews or candidate answer artifacts, locally or remotely.

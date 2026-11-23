@@ -652,23 +652,7 @@ run_entry() {
     # agent's MCP server as BUILDKITE_API_TOKEN — the server's fixed interface
     # (see mcp.json / mcp_in_ci.json) — for this entry's run only. Without
     # token_env the ambient BUILDKITE_API_TOKEN is used, as before.
-    local REPLAY_PATH="" REPLAY
-    REPLAY=$(jq -r '.scenario.replay // ""' <<<"$entry")
-    if [[ -n "$REPLAY" ]]; then
-        if [[ "$AGENT" != "claude" || "$MODE" != "mcp" || -n "$TOKEN_ENV" \
-                || ! "$REPLAY" =~ ^[A-Za-z0-9_-]+\.har$ ]]; then
-            echo "ERROR: [$ENTRY_ID] replay requires claude/mcp, a fixture basename and no token_env." >&2
-            return 1
-        fi
-        REPLAY_PATH="$ROOT_DIR/fixtures/$REPLAY"
-        if [[ ! -s "$REPLAY_PATH" ]]; then
-            echo "ERROR: [$ENTRY_ID] replay fixture missing: $REPLAY_PATH" >&2
-            return 1
-        fi
-    fi
     local ENTRY_TOKEN="${BUILDKITE_API_TOKEN:-}"
-    # Offline replay needs no token and never falls through to the network.
-    [[ -z "$REPLAY_PATH" ]] || ENTRY_TOKEN=""
     if [[ -n "$TOKEN_ENV" ]]; then
         if [[ ! "$TOKEN_ENV" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
             echo "WARNING: entry '$ENTRY_ID' has an invalid token_env name '$TOKEN_ENV'; skipping." >&2
@@ -751,7 +735,6 @@ run_entry() {
         --arg agent "$AGENT" --arg harness "$HARNESS_VERSION" --arg model "${MODEL:-default}" \
         --arg bk_bin "$BK_CLI_BIN" --arg bk_ver "$BK_CLI_VERSION" --arg bk_org "$BK_CLI_ORG" \
         --arg mcp_req "$MCP_VERSION" --arg mcp_ver "$MCP_SERVER_VERSION" --arg mcp_sha "$MCP_SOURCE_SHA" \
-        --arg replay "$REPLAY" \
         --arg req_log "$REQUEST_LOG" --arg bk_shim "$BK_SHIM_DIR" \
         '{mode: $mode, mode_params: $params,
           api_request_log: {mcp_server: ($req_log != "" and $mode == "mcp"), bk_cli: ($bk_shim != "")},
@@ -762,7 +745,6 @@ run_entry() {
                    else null end),
           mcp_server: (if $mode == "mcp" then
                          {requested: $mcp_req, version: $mcp_ver,
-                          replay: (if $replay == "" then null else $replay end),
                           source_sha: (if $mcp_sha == "" then null else $mcp_sha end)}
                        else null end)}')"
     local RUN_LABEL="mode: $MODE · $AGENT $HARNESS_VERSION"
@@ -858,7 +840,7 @@ run_entry() {
     [[ -n "$BK_SHIM_DIR" ]] && AGENT_PATH="$BK_SHIM_DIR:$AGENT_PATH"
     if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" EVAL_MODE="$MODE" PATH="$AGENT_PATH" \
             BUILDKITE_ORGANIZATION_SLUG="$AGENT_ORG" BK_TELEMETRY=false \
-            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" BUILDKITE_REPLAY="$REPLAY_PATH" \
+            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" \
             run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
@@ -1158,14 +1140,6 @@ run_entry() {
 
 # --- Drive the matrix -------------------------------------------------------
 MATRIX_JSON="$(yq -o=json '.matrix' "$EVALS_CONFIG")"
-if [[ -n "${EVAL_IDS:-}" ]]; then
-    UNKNOWN_IDS="$(jq -r --arg ids "$EVAL_IDS" '($ids | split(",")) - map(.id) | join(",")' <<<"$MATRIX_JSON")"
-    if [[ -n "$UNKNOWN_IDS" ]]; then
-        echo "babystand: unknown EVAL_IDS: $UNKNOWN_IDS" >&2
-        exit 1
-    fi
-    MATRIX_JSON="$(jq --arg ids "$EVAL_IDS" 'map(select(.id as $id | $ids | split(",") | index($id)))' <<<"$MATRIX_JSON")"
-fi
 ENTRY_COUNT="$(jq 'length' <<<"$MATRIX_JSON")"
 echo "*** Matrix entries: $ENTRY_COUNT"
 [[ "$ENTRY_COUNT" -gt 0 ]] || { echo "babystand: matrix is empty; nothing to run." >&2; exit 0; }

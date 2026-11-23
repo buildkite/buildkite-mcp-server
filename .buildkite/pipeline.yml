@@ -54,16 +54,6 @@ steps:
       plugins:
         - mise#v1.1.5: ~
 
-    - name: ":test_tube: Scheduler replay fixtures (no model)"
-      commands:
-        - go build -o /tmp/scheduler-eval-mcp ./cmd/buildkite-mcp-server
-        - MCP_TEST_BINARY=/tmp/scheduler-eval-mcp node --test evals/scripts/test_scheduler_fixtures.mjs
-      env:
-        GOCACHE: /gocache
-        GOMODCACHE: /gomodcache
-      plugins:
-        - mise#v1.1.5: ~
-
   - label: ":terminal: build ({{matrix}})"
     command: ".buildkite/release.sh release --clean --snapshot"
     depends_on: quality-checks

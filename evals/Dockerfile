@@ -87,11 +87,6 @@ COPY evals/evals.yaml /workspace/
 RUN npm ci && npm run build
 RUN rm scripts/*.ts tsconfig.json
 
-# Deterministic Scheduler edge cases use the real MCP server's HAR replay.
-# Inputs are synthetic and contain no production credentials or answer keys.
-RUN node scripts/scheduler-fixtures.mjs /workspace/fixtures \
-    && rm scripts/scheduler-fixtures.mjs scripts/test_scheduler_fixtures.mjs
-
 # Give the non-root user ownership of the workspace.
 RUN chown -R agent:agent /workspace
 
