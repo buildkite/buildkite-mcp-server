@@ -19,6 +19,7 @@ type ToolDependencies struct {
 	ClustersClient              ClustersClient
 	ClusterSecretsClient        ClusterSecretsClient
 	CacheRegistriesClient       CacheRegistriesClient
+	PackageRegistriesClient     PackageRegistriesClient
 	ClusterQueuesClient         ClusterQueuesClient
 	AgentsClient                AgentsClient
 	ArtifactsClient             ArtifactsClient

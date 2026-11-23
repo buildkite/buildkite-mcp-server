@@ -8,6 +8,26 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Updating a Packages registry
+
+`update_package_registry` is in the `packages` toolset (not `cache_registries`).
+For example, to make a registry private and clear its description, pass:
+
+```json
+{"org_slug":"acme","registry_slug":"widgets","visibility":"private","description":null}
+```
+
+Supply at least one of `visibility` (exactly `public` or `private`), `name`,
+`description`, `emoji`, `color`, or `oidc_policy`. Omitted fields stay unchanged.
+Use `null` to clear `description`, `emoji`, `color`, or `oidc_policy`. To replace
+the OIDC policy, pass a YAML string or a JSON array of policy statements. Setting
+visibility alone does not change OIDC policy. Making a registry public can also
+make its organization public. Renaming a registry can change its slug.
+
+The tool returns the updated registry with its `public` boolean. It requires
+`write_registries` and permission to edit the registry, and is excluded in
+read-only and minimum-access modes.
+
 ## Reading queue insights
 
 `get_cluster_queue_insights` is available in the `clusters` toolset, including read-only mode. It accepts `org_slug`, a cluster UUID in `cluster_id`, and a queue UUID in `queue_id` (not the queue key). It requires `read_clusters`, Cluster Insights entitlement, and the Queue Insights REST API feature enabled for the organisation.
