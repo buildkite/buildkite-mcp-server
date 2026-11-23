@@ -160,50 +160,6 @@ Baseline discovery searches at most 500 candidates. If none is found, the respon
 
 ---
 
-## Inspecting Test Scheduler pools (pre-GA)
-
-The read-only `list_test_pools`, `get_test_pool`, and `get_test_pool_metrics`
-tools are in the `tests` toolset. They require `read_test_pool`, build/suite
-access, and scheduler API enablement, not `read_suites`. Minimum-access mode
-excludes them. This API is not publicly released.
-
-From a build URL, use `get_build` to obtain its `id` and `get_pipeline` to
-obtain the pipeline's `id` (enable the `builds` and `pipelines` toolsets for
-these discovery calls, which separately require `read_builds` and
-`read_pipelines`). Then call `list_test_pools` with `org_slug`, `build_uuid`,
-and `pipeline_uuid`. These are UUIDs, not a build number or pipeline slug.
-
-Listing returns one compact `items` page and `links`, with 30 items by default
-and at most 100. Filter by a case-insensitive exact `key`. To continue, copy
-the `after` or `before` cursor from the appropriate link, retaining the same
-build, pipeline, key, and page size; never supply both cursors. Pages omit
-policies and muted-test snapshots; inspect an item's `id` with `get_test_pool`
-using `pool_uuid` and the same `build_uuid` for complete planning detail.
-
-`get_test_pool_metrics` takes the same inputs as `get_test_pool` and returns a
-replica-backed snapshot at `observed_at`, unavailable after expiry. Neither
-`drained: true` nor zero active leases independently proves completion or
-success; an errored/drained pool can retain waiting work. Inspect all relevant
-pools/pages before making build-wide claims, limited to scheduler-managed
-tests. Aggregate counts cannot name individual stuck tests, and `muted_tests`
-is a planning snapshot, not the pending backlog.
-
-Consumed state alone does not establish passing results, even for a comparison
-pool. Current waiting/leased counts and retry policies do not establish execution
-history or a proven stall. State workload totals are neither elapsed time nor
-the per-lease `lease.costs` budget; planned parallelism is not a pool-wide lease
-cap. Pool `expires_at` controls availability, while
-`timing.next_active_lease_expires_at` is a lease deadline. Keep these observations
-separate from hypotheses about worker behavior or future completion.
-
-An empty list is not evidence that tests passed. A 404 can mean missing,
-inaccessible, expired, or gated data; missing `read_test_pool` returns 403.
-API errors remain errors rather than successful empty results. Repeated 401s
-do not rule out a temporary authentication failure. Failed or unqueried reads
-leave data unknown, not absent.
-
----
-
 ## Inspecting Test Engine workflows
 
 The read-only `list_test_workflows` and `get_test_workflow` tools in the `tests`
