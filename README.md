@@ -8,6 +8,20 @@ Full documentation is available at [buildkite.com/docs/apis/mcp-server](https://
 
 ---
 
+## Reading queue insights
+
+`get_cluster_queue_insights` is available in the `clusters` toolset, including read-only mode. It accepts `org_slug`, a cluster UUID in `cluster_id`, and a queue UUID in `queue_id` (not the queue key). It requires `read_clusters`, Cluster Insights entitlement, and the Queue Insights REST API feature enabled for the organisation.
+
+By default, it returns current agent and job counts plus recent completions and wait times. The optional `include` parameter accepts a comma-separated list:
+
+- `history`: the selected period's counts, completions and wait times.
+- `history_comparison`: selected and previous history periods, plus change summaries. It does not also require `history`.
+- `hourly_changes`: time-weighted average counts for the current window, yesterday and last week, with changes based on the last completed hour.
+
+Each include works independently. `time_period` accepts `1h` (the default), `24h` or `7d`; it requires `history` or `history_comparison` and does not affect `hourly_changes`. The API validates options and access.
+
+Current counts are snapshots; history counts use the last value per bucket; hourly averages can be fractional. Responses retain null values, timestamps, coverage and limitations. Null means unavailable, not zero. Check these fields before interpreting changes.
+
 ## Retrying builds with limited permissions
 
 The `retries` toolset supports investigating failures and retrying jobs without

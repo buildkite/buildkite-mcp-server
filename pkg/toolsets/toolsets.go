@@ -352,6 +352,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CreateCluster),
 				newToolDef(buildkite.UpdateCluster),
 				newToolDef(buildkite.GetClusterQueue),
+				newToolDef(buildkite.GetClusterQueueInsights),
 				newToolDef(buildkite.ListClusterQueues),
 				newToolDef(buildkite.CreateClusterQueue),
 				newToolDef(buildkite.UpdateClusterQueue),
