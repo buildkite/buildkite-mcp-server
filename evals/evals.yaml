@@ -275,14 +275,14 @@ matrix:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source
 
-  # Live Scheduler metrics review against a fresh, non-deploying scenario build.
-  # The shared setup waits for readable pools before invoking the model.
+  # Live Scheduler metrics review against a recent existing application build.
+  # The shared setup discovers readable pools before invoking the model.
   - id: scheduler-metrics-live
     agent: claude
     model: claude-opus-4-8
     prompt: scheduler-metrics
     scenario:
-      id: fresh-scheduler-build
+      id: recent-scheduler-build
       setup: |
         BUILDKITE_API_TOKEN="$MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN" \
           bash "$SCRIPT_DIR/setup-scheduler-build.sh"
