@@ -180,6 +180,46 @@ Baseline discovery searches at most 500 candidates. If none is found, the respon
 
 ---
 
+## Inspecting Test Scheduler pools
+
+The read-only `tests` toolset includes three Test Scheduler tools:
+
+- `list_test_pools`: find pools for a pipeline/build, with optional
+  case-insensitive exact `key` filtering.
+- `get_test_pool`: inspect a pool's state, planning errors, retry/lease policies,
+  and optional planning details.
+- `get_test_pool_metrics`: read timestamped workload, attempt/result counts,
+  lease holds, and timing for one pool.
+
+These reads require `read_test_pool` and access to the build and suite, not
+`read_suites`. Scheduler must be enabled for the organization. The tools are
+available in read-only mode, but excluded from minimum-access mode.
+
+From a build URL, use `get_build` to obtain the build's `id` and `get_pipeline`
+to obtain the pipeline's `id`. These discovery calls need `read_builds` and
+`read_pipelines`, respectively. Pass those UUIDs as `build_uuid` and
+`pipeline_uuid`, with `org_slug`, to `list_test_pools`; use a returned `id` as
+`pool_uuid` for detail or metrics, retaining `build_uuid`. If discovery tools
+are not enabled, supply the UUIDs directly, not build numbers or pipeline slugs.
+
+Listing returns one page (default 30, maximum 100); no pages are fetched
+automatically. Continue with `after` or `before` from the returned cursor links,
+keeping the same pipeline, build, and key filters. Only accessible, unexpired,
+matching pools are listed; an empty page does not prove no pools exist.
+
+Metrics can lag recent writes and are unavailable after pool expiry. Scope
+conclusions to the pool's Scheduler-managed attempts at `observed_at`, not
+unique tests or the whole build. Neither `drained` nor zero active leases alone
+proves completion or success; use outstanding work and result counts. One
+snapshot cannot establish a stall or execution history. These tools do not
+mutate pools, upload entries, or manage leases.
+
+Local or self-hosted tool support does not establish hosted availability.
+Hosted use also requires a deployment exposing these tools and OAuth access
+with the required scopes.
+
+---
+
 ## Inspecting Test Engine workflows
 
 The read-only `list_test_workflows` and `get_test_workflow` tools in the `tests`
