@@ -275,35 +275,17 @@ matrix:
   #       BUILD_URL: https://buildkite.com/anothertest/buildkite-mcp-server/builds/677
   #   mcp_version: source
 
-  # Live Scheduler metrics review. Requires read_test_pool, build/pipeline
-  # discovery access, and Scheduler enablement. Refresh the target after expiry.
-  # Setup fails before the model on unreadable data.
+  # Live Scheduler metrics review against a fresh, non-deploying scenario build.
+  # The shared setup waits for readable pools before invoking the model.
   - id: scheduler-metrics-live
     agent: claude
     model: claude-opus-4-8
     prompt: scheduler-metrics
     scenario:
-      id: buildkite-253068
+      id: fresh-scheduler-build
       setup: |
-        BUILD_URL=https://buildkite.com/buildkite/buildkite/builds/253068
-        api_get() {
-          curl --fail --silent --show-error --max-time 30 \
-            -H "Authorization: Bearer ${MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN}" "$1"
-        }
-        base=https://api.buildkite.com/v2/organizations/buildkite/test-scheduler
-        build=$(api_get "https://api.buildkite.com/v2/organizations/buildkite/pipelines/buildkite/builds/${BUILD_URL##*/}")
-        build_id=$(jq -er '.id' <<<"$build")
-        pipeline_id=$(jq -er '.pipeline.id' <<<"$build")
-        pools=$(api_get "$base/pools?pipeline_id=$pipeline_id&build_id=$build_id&per_page=100")
-        jq -e '.items | length > 0' <<<"$pools" >/dev/null || {
-          echo "No accessible, unexpired pools returned for $BUILD_URL; refresh the live eval target." >&2
-          exit 1
-        }
-        while IFS= read -r pool_id; do
-          api_get "$base/pools/$pool_id/metrics?build_id=$build_id" \
-            | jq -e --arg id "$pool_id" '.pool.id == $id and (.observed_at | type == "string")' >/dev/null
-        done < <(jq -r '.items[].id' <<<"$pools")
-        printf 'BUILD_URL=%s\n' "$BUILD_URL" >> "$SCENARIO_VARS_FILE"
+        BUILDKITE_API_TOKEN="$MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN" \
+          bash "$SCRIPT_DIR/setup-scheduler-build.sh"
     token_env: MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN
     mcp_version: source
 
