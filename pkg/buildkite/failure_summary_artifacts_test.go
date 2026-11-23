@@ -23,7 +23,7 @@ func failureSummaryArtifactsTestDeps(artifactsClient ArtifactsClient) ToolDepend
 	return ToolDependencies{
 		BuildsClient: &MockBuildsClient{
 			GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
-				return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{}, nil
+				return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{Response: &http.Response{StatusCode: http.StatusOK}}, nil
 			},
 		},
 		JobsClient: &MockJobsClient{
@@ -240,13 +240,41 @@ func TestGetBuildFailureSummaryBoundsMaxArtifacts(t *testing.T) {
 	}
 }
 
-func TestGetBuildFailureSummaryCanDisableArtifacts(t *testing.T) {
-	client, requested := perJobArtifactsClient(t, nil, nil)
+func TestGetBuildFailureSummaryArtifactScope(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		scopes   string
+		include  *bool
+		wantRead bool
+	}{
+		{name: "scope not granted", scopes: "read_builds, read_build_logs, read_suites"},
+		{name: "scope granted", scopes: "read_builds, read_artifacts , read_suites", wantRead: true},
+		{name: "explicit opt-out with scope", scopes: "read_builds,read_artifacts", include: boolPtr(false)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, requested := perJobArtifactsClient(t, map[string]int{"job-failed": 1}, nil)
+			deps := failureSummaryArtifactsTestDeps(client)
+			deps.BuildsClient = &MockBuildsClient{
+				GetFunc: func(context.Context, string, string, string, *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
+					header := make(http.Header)
+					header.Set("X-OAuth-Scopes", tc.scopes)
+					return buildkite.Build{Number: 1, State: "failed"}, &buildkite.Response{Response: &http.Response{StatusCode: http.StatusOK, Header: header}}, nil
+				},
+			}
 
-	summary := callFailureSummaryForArtifacts(t, failureSummaryArtifactsTestDeps(client), GetBuildFailureSummaryArgs{IncludeArtifacts: boolPtr(false)})
-
-	require.Empty(t, requested())
-	require.Empty(t, summaryArtifactIDs(summary))
+			summary := callFailureSummaryForArtifacts(t, deps, GetBuildFailureSummaryArgs{IncludeArtifacts: tc.include})
+			require.Equal(t, "failed", summary.Build.State)
+			require.Equal(t, "failed", summaryJob(t, summary, "job-failed").State)
+			require.Empty(t, summary.Warnings)
+			if tc.wantRead {
+				require.Equal(t, []string{"job-canceled", "job-failed", "job-timed-out"}, requested())
+				require.Equal(t, []string{"job-failed-artifact-0"}, summaryArtifactIDs(summary))
+			} else {
+				require.Empty(t, requested())
+				require.Empty(t, summaryArtifactIDs(summary))
+			}
+		})
+	}
 }
 
 func TestGetBuildFailureSummaryArtifactErrorBecomesJobWarning(t *testing.T) {
