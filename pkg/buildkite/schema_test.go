@@ -484,7 +484,7 @@ func TestGetJobDiagnosticsArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"job_id", "org_slug"}, sortedToolRequired(t, s))
 	require.Contains(t, s.Properties["job_id"].Description, "UUID")
 	require.Equal(t, "string", s.Properties["include"].Type)
-	for _, value := range []string{"dependencies", "events", "insights"} {
+	for _, value := range []string{"auto", "dependencies", "events", "insights", "guidance"} {
 		require.Contains(t, s.Properties["include"].Description, value)
 	}
 	require.Len(t, s.Properties, 4, "only org, job UUID, includes and optional telemetry")

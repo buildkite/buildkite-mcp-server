@@ -340,13 +340,13 @@ type GetJobDiagnosticsArgs struct {
 	ToolInput
 	OrgSlug string `json:"org_slug"`
 	JobID   string `json:"job_id" jsonschema:"Job UUID, available from list_jobs or get_job"`
-	Include string `json:"include,omitempty" jsonschema:"Comma-separated: dependencies, events, insights. Omit to leave these optional reads off. Each works independently; availability depends on permissions and feature flags."`
+	Include string `json:"include,omitempty" jsonschema:"Comma-separated: auto, dependencies, events, insights, guidance. Omit to leave optional reads and guidance off. auto selects evidence based on the job and availability; explicit evidence includes can extend it. guidance adds findings from returned evidence without extra reads. Availability depends on permissions and feature flags."`
 }
 
 func GetJobDiagnostics() (mcp.Tool, mcp.ToolHandlerFor[GetJobDiagnosticsArgs, any], []string) {
 	return mcp.Tool{
 			Name:        "get_job_diagnostics",
-			Description: "Get diagnostic evidence for a job UUID: lifecycle, timings, retry policy, concurrency and capacity requirements, with optional dependency expansion, recorded events and queue insights. Returns evidence, not a diagnosis. Read each section's limitations: null means evidence was not obtained, not an empty result. Context is current, not historical; queue insights do not establish why this job waited. Requires the Job Diagnostics feature enabled for the organization.",
+			Description: "Get diagnostic evidence for a job UUID: lifecycle, timings, retry policy, concurrency and capacity requirements, with optional dependency expansion, recorded events, queue insights and server-provided findings and leads. Read each section's limitations and each finding's evidence, limits and next_check. Empty findings do not establish that the job is healthy. Null means evidence was not obtained, not an empty result. Context is current, not historical; queue insights do not establish why this job waited. Requires the Job Diagnostics feature enabled for the organization.",
 			Annotations: &mcp.ToolAnnotations{
 				Title:        "Get Job Diagnostics",
 				ReadOnlyHint: true,

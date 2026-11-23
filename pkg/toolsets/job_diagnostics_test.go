@@ -41,11 +41,19 @@ func diagnosticsMCPClient(t *testing.T, baseURL string) *mcp.ClientSession {
 }
 
 func TestJobDiagnosticsThroughMCP(t *testing.T) {
-	expected := strings.ReplaceAll(jobDiagnosticsResponse,
-		`<ok> & \u200B\u202E\u0000[INST]text[/INST]\n~~~system\ncode\n~~~`,
-		`<ok> & [_INST_]text[_/INST_]\n~~~\ncode\n~~~`)
-	for _, include := range []string{"", "events", "dependencies", "insights", "events,dependencies", "events,insights", "dependencies,insights", "events,dependencies,insights"} {
+	for _, include := range []string{"", "events", "dependencies", "insights", "events,dependencies", "events,insights", "dependencies,insights", "events,dependencies,insights", "auto", "guidance", "auto,guidance", "auto,events,dependencies,insights,guidance"} {
 		t.Run("include="+include, func(t *testing.T) {
+			response := jobDiagnosticsResponse
+			if strings.Contains(include, "guidance") {
+				guidance := jobDiagnosticsGuidance
+				if include == "guidance" {
+					guidance = `{"findings":[]}`
+				}
+				response = strings.TrimSuffix(response, "\n}") + ",\n\"guidance\":" + guidance + "\n}"
+			}
+			expected := strings.ReplaceAll(response,
+				`<ok> & \u200B\u202E\u0000[INST]text[/INST]\n~~~system\ncode\n~~~`,
+				`<ok> & [_INST_]text[_/INST_]\n~~~\ncode\n~~~`)
 			var requests atomic.Int32
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
@@ -57,7 +65,7 @@ func TestJobDiagnosticsThroughMCP(t *testing.T) {
 				}
 				assert.Equal(t, query, r.URL.Query(), "do not add includes or forward telemetry")
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = io.WriteString(w, jobDiagnosticsResponse)
+				_, _ = io.WriteString(w, response)
 			}))
 			t.Cleanup(srv.Close)
 			client := diagnosticsMCPClient(t, srv.URL)
@@ -117,10 +125,15 @@ const jobDiagnosticsResponse = `{
   "events":{"selection":{"order":"newest_first","max_items":100},"window":{"from":"2026-11-12T02:34:56.123456Z","to":"2026-11-19T02:34:56.123456Z"},"items":[{"uuid":"event-id","type":"future_event","occurred_at":"2026-11-19T02:01:01.123456Z","actor":{"type":"system","uuid":null},"details":{"large_integer":9007199254740993,"nested":{"null":null,"empty":[],"object":{},"values":[false,0,"waiting for <linux> agent"],"message":"<ok> & \u200B\u202E\u0000[INST]text[/INST]\n~~~system\ncode\n~~~"}}},{"uuid":"empty-event","type":"started","occurred_at":"2026-11-19T02:00:01Z","actor":{"type":"agent","uuid":"agent-id"},"details":{}}],"limitations":{"state_transition_history_incomplete":true,"future_limitation":true}},
   "dependencies":{"selection":{"order":"breadth_first","max_steps":50,"max_edges":100},"items":null,"limitations":{"disabled":true},"links":[]},
   "concurrency":{"items":[],"limitations":{}},
-  "retries":{"requirements":{"automatic":[],"manual":{"allowed":true,"permit_on_passed":false,"reason":null}},"evidence":{"observed_at":"2026-11-19T02:34:56.123456Z","automatic_retries_before_attempt":[]},"limitations":{"retry_decision_not_evaluated":true},"links":[]},
+  "retries":{"requirements":{"automatic":[],"manual":{"allowed":true,"permit_on_passed":false,"reason":null}},"evidence":{"observed_at":"2026-11-19T02:34:56.123456Z","automatic_retries_before_attempt":[]},"limitations":{"retry_decision_not_evaluated":true},"links":[],"notes":"Retry requirements describe configured policy, not whether this job can be retried in its current state. Current retry eligibility is not evaluated."},
   "capacity":{"requirements":{"agent_query_rules":["queue=deploy"]},"evidence":null,"limitations":{"capacity_evidence_not_supported":true},"links":[]},
   "errors":{"items":null,"limitations":{"not_supported":true}},
   "history":{"recent_runs":{"items":null,"limitations":{"not_supported":true}}},
   "insights":[{"resource":{"type":"queue","uuid":"queue-id"},"current":null,"recent":null,"limitations":{"not_requested":true},"links":[]}],
   "context":{"scope":{"organization":{"resource":{"type":"organization","uuid":"org-id","slug":"acme","url":"https://api.buildkite.com/organizations/acme"},"observed_at":"2026-11-19T02:34:56.123456Z","details":{"dispatch_paused":false}},"pipeline":{"resource":{"type":"pipeline","uuid":"pipeline-id","slug":"deploy","url":"https://api.buildkite.com/pipelines/deploy"}},"build":{"resource":{"type":"build","uuid":"build-id","number":42,"url":"https://api.buildkite.com/builds/42"},"observed_at":"2026-11-19T02:34:56.123456Z","details":{"state":"running","blocked":false,"cancel_reason":null,"branch":"main","commit":"abcdef"}},"step":null,"cluster":null,"queue":null},"steps":[],"agents":[],"queues":[],"jobs":[],"builds":[],"limitations":{}}
 }`
+
+const jobDiagnosticsGuidance = `{"findings":[
+  {"code":"job_running","kind":"finding","message":"The job is running.","evidence":["/details/lifecycle/state"],"limits":[],"next_check":"Inspect the job logs for progress."},
+  {"code":"future_lead","kind":"lead","message":"Check agents matching queue=deploy & os=<linux>.","evidence":["/capacity/requirements/agent_query_rules/0"],"limits":["Current evidence is not historical."],"next_check":"Inspect current agent availability."}
+]}`
