@@ -719,6 +719,10 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	assert.Equal("compare_builds", investigations.Tools[1].Tool.Name)
 	assert.Equal([]string{"read_artifacts", "read_build_logs", "read_builds", "read_suites"}, investigations.GetRequiredScopes())
 
+	assert.NoError(ValidateToolsets([]string{"packages"}))
+	assert.Equal([]string{"write_registries"}, registry.GetRequiredScopes([]string{"packages"}, false))
+	assert.Empty(registry.GetRequiredScopes([]string{"packages"}, true))
+
 	var insightsEnabled bool
 	for _, tool := range registry.GetEnabledTools([]string{ToolsetClusters}, true) {
 		if tool.Tool.Name == "get_cluster_queue_insights" {

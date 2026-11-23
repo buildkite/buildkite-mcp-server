@@ -246,6 +246,7 @@ const (
 	ToolsetClusters              = "clusters"
 	ToolsetClusterSecrets        = "cluster_secrets"
 	ToolsetCacheRegistries       = "cache_registries"
+	ToolsetPackages              = "packages"
 	ToolsetAgents                = "agents"
 	ToolsetPipelines             = "pipelines"
 	ToolsetBuilds                = "builds"
@@ -265,6 +266,7 @@ var ValidToolsets = []string{
 	ToolsetClusters,
 	ToolsetClusterSecrets,
 	ToolsetCacheRegistries,
+	ToolsetPackages,
 	ToolsetAgents,
 	ToolsetPipelines,
 	ToolsetBuilds,
@@ -378,6 +380,13 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.CreateCacheRegistry),
 				newToolDef(buildkite.UpdateCacheRegistry),
 				newToolDef(buildkite.SetDefaultCacheRegistry),
+			},
+		},
+		ToolsetPackages: {
+			Name:        "Package Registry Management",
+			Description: "Tools for managing Buildkite Packages registries",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.UpdatePackageRegistry),
 			},
 		},
 		ToolsetAgents: {
