@@ -112,8 +112,8 @@ var instructionSections = []instructionSection{
 		toolsets: []string{toolsets.ToolsetSkills},
 		text:     "Skill discovery: Always call list_skills early in a session — it's cheap (names and one-line descriptions only) and surfaces guidance not visible in any tool's name or schema. When a task matches a listed skill, call load_skill for that guide — it covers parameter tuning, caching behavior, and details beyond the summaries below. Guides cover the full server; only follow steps for tools advertised in this session. Never call tools excluded by minimum-access mode or toolset settings.",
 	},
-	{text: "Authorization: Tools available depend on the scopes and organization access granted to the configured API token. A 401 response means the token is invalid, expired, or revoked and requires reauthentication. A 403 response means the credentials were accepted but access was denied, commonly because the token lacks a required scope or organization access, or the user lacks permission."},
-	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Build, job, artifact, and log tools all require this identifier — do not use the build's UUID id field."},
+	{text: "Authorization: Tools available depend on the scopes and organization access granted to the configured API token. A 401 response means authentication failed for that request; check authentication securely. It does not establish a missing scope or why authentication failed, even when other reads succeed. Repeated failures establish repetition during those requests, not that a temporary failure is ruled out. A 403 response means the credentials were accepted but access was denied, commonly because the token lacks a required scope or organization access, or the user lacks permission. Distinguish a successful empty read from a failed or unqueried read: the latter leaves data unknown, not absent."},
+	{text: "Common pitfalls:\n\nbuild_number is a sequential integer string (e.g. \"42\"), not a UUID. Tools with a build_number parameter require this identifier, not the build's UUID id field. Parameters named build_uuid require the UUID instead."},
 	{
 		toolsets: []string{toolsets.ToolsetInvestigations},
 		tools:    []string{"get_build_failure_summary"},
@@ -127,6 +127,14 @@ var instructionSections = []instructionSection{
 		toolsets: []string{toolsets.ToolsetInvestigations},
 		tools:    []string{"compare_builds"},
 		text:     "Build comparison: use compare_builds when asked what changed since a build worked, or to compare two builds. Without an explicit baseline it selects an earlier successful build on the same pipeline and branch. Report the selected baseline and unmatched steps; shared failing steps do not establish a shared cause or justify a retry. Timings cover final attempts, not total retry cost or build wall-clock duration.",
+	},
+	{
+		toolsets: []string{toolsets.ToolsetTests},
+		tools:    []string{"list_test_pools"},
+		text: "Scheduler pools: start scheduler planning/workload questions with list_test_pools, use get_test_pool for returned errors/policies and optional planning detail, and get_test_pool_metrics for aggregate progress. Use user-supplied UUIDs directly; from a build URL, use get_build's id and get_pipeline's id when those tools are advertised; otherwise ask for UUIDs. " +
+			"Follow cursor links with unchanged filters. Even after the last page, say 'all returned pools', not 'all Scheduler work', unless independent evidence establishes coverage. The listing excludes inaccessible suites, expired pools and pools that do not match a key filter. One unfinished pool is enough to disprove all-finished. " +
+			"A consumed, drained pool with no waiting or leased attempts has no outstanding Scheduler work. Report canceled attempts separately: they are terminal but did not complete. Neither drained nor zero active leases alone proves completion or success. Consumed is lifecycle state, not passed results, including for comparison pools. Say all completed attempts passed only if result counts show that; without result evidence, leave passing unknown. " +
+			"Attribute each finding and timestamp to the specific completed call and returned field; a pool's metrics observed_at does not timestamp a listing or another pool's data. Keep policies and muted-test details scoped to pools whose detail reads supplied them; readable pools do not establish an inaccessible pool's settings. Report which detail and metrics calls actually completed for each pool, distinguishing successful, failed and unqueried reads; do not summarize planned calls as completed. Separate observed counts from unknown execution history/cause and proposed checks; a snapshot of unfinished work does not prove a stall. Limit conclusions to Scheduler-managed attempts at observed_at, not unique tests or the whole build. Reads require read_test_pool, not read_suites; read_builds/read_pipelines are needed only for separate discovery calls.",
 	},
 	{
 		toolsets: []string{toolsets.ToolsetBuilds, toolsets.ToolsetRetries},

@@ -762,6 +762,11 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 	toolNames := make([]string, 0, len(tests.Tools))
 	for _, tool := range tests.Tools {
 		toolNames = append(toolNames, tool.Tool.Name)
+		switch tool.Tool.Name {
+		case "list_test_pools", "get_test_pool", "get_test_pool_metrics":
+			assert.Equal([]string{"read_test_pool"}, tool.RequiredScopes, tool.Tool.Name)
+			assert.False(tool.IsMinimumAccess(), tool.Tool.Name)
+		}
 	}
 	assert.Contains(toolNames, "list_tests")
 	assert.Contains(toolNames, "list_tests_for_build")
