@@ -15,15 +15,15 @@ A set of artifacts, and annotations in the Buildkite build showing:
 * Datadog dashboard
   * Charts the LLM agent metrics (see above) over runs
 
-## Fresh Scheduler build setup
+## Recent Scheduler build setup
 
-`evals.yaml` contains a commented-out `scenario.setup` example for future Scheduler tests. It calls `scripts/setup-scheduler-build.sh`, which uploads a native Buildkite trigger step targeting `buildkite/buildkite` at the commit of its latest main build. There is no hard-coded build number to expire. The helper appends the newly triggered build's `BUILD_URL` to `SCENARIO_VARS_FILE` once the first page of returned pools has readable metrics; this is readiness, not complete pool coverage or proof of completion/passing results. It waits up to 30 minutes and fails on API errors rather than silently switching targets.
+`evals.yaml` contains a commented-out `scenario.setup` example for future Scheduler tests. It calls `scripts/setup-scheduler-build.sh`, which checks the latest 100 `buildkite/buildkite` main builds created in the last 30 days, newest first. It selects the first build with nonempty pools and readable metrics for every pool on the first page (up to 100 pools), then appends its `BUILD_URL` to `SCENARIO_VARS_FILE`. Discovery runs each time, so there is no hard-coded build number to expire. This checks data availability, not complete pool coverage or proof of completion/passing results; the selected build may still be running.
 
-The target uses its existing `SCHEDULED_MAIN_BUILD=true` and `PREFLIGHT=true` flags to skip deployment, merged-PR actions and schema publication, with `EXPERIMENT_RUNNING=false` and `RSPEC_DYNAMIC_PARALLELISM=true` / `RSPEC_STATIC_SPLIT=false` to select Scheduler explicitly. It still starts real application CI, including downstream test jobs. Each invocation creates one fresh build and does not change repository refs, pipeline settings or feature flags. It can return while the build is still running.
+Builds with empty, missing or expired Scheduler data are skipped. Authentication, permission, transport and server errors fail setup rather than being mistaken for missing data. If no candidate qualifies, setup fails without running the model for that entry.
 
-The setup runs only inside a Buildkite eval build in the `buildkite` organization, with Bash, curl, jq and `buildkite-agent` available. The agent must have permission to trigger `buildkite/buildkite`. The existing `MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN` supplies read access (`read_builds`, `read_test_pool`, plus build/suite access); trigger authorization comes from the existing Buildkite agent, not an added write scope on the model's API token. `babystand.sh` exposes `SCRIPT_DIR` to scenario setup so the helper resolves independently of the cloned eval repository. The same token is selected through `token_env` for the model's read-only investigation.
+The helper needs Bash, curl, jq, `SCENARIO_VARS_FILE`, and a `BUILDKITE_API_TOKEN` with `read_builds` and `read_test_pool` access to `buildkite/buildkite`. It only makes GET requests: no builds, branches, pipeline settings or feature flags are created or changed. The existing dedicated Scheduler token supplies this access. `babystand.sh` exposes `SCRIPT_DIR` to scenario setup so the helper resolves independently of the cloned eval repository. The same token is selected through `token_env` for the model's read-only investigation.
 
-The example is disabled and includes no Scheduler eval prompt, case or reference answer. Enabling it or running the helper starts CI and requires approval. Pushing this code alone does not run a model eval.
+The example is disabled and includes no Scheduler eval prompt, case or reference answer. Pushing this code alone does not run a model eval.
 
 ## Supported agents
 

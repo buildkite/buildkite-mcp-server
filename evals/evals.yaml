@@ -172,13 +172,11 @@ matrix:
   #  # compare_base/compare_target take their defaults: the entry's bundle from
   #  # the last successful main build vs this run.
 
-  # Fresh Scheduler build setup for a future entry (not an enabled eval).
+  # Recent Scheduler build setup for a future entry (not an enabled eval).
   # Copy these fields into a scenario that uses a BUILD_URL prompt. The helper
-  # triggers buildkite/buildkite on a pinned recent main commit, in its existing
-  # non-deploying preflight/scheduled mode with Scheduler explicitly selected.
-  # It waits for readable pool metrics, then supplies the new BUILD_URL. Each
-  # invocation starts real CI; it does not reuse or refresh an old build number.
-  # Requires the eval job's agent to be allowed to trigger buildkite/buildkite.
+  # finds a recent buildkite/buildkite main build with readable Scheduler pool
+  # metrics and supplies its BUILD_URL. Discovery runs each time; it never
+  # creates a build or pushes a branch. Fails if no readable build is found.
   # scenario:
   #   setup: |
   #     BUILDKITE_API_TOKEN="$MCP_EVAL_FRAMEWORK_BUILDKITE_ORG_SCHEDULER_API_TOKEN" \
