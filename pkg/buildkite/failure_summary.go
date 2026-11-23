@@ -64,7 +64,7 @@ type GetBuildFailureSummaryArgs struct {
 	IncludeLogs            *bool  `json:"include_logs,omitempty" jsonschema:"Include a bounded log tail for failed, timed-out, canceled, and promised-failing jobs (default true)"`
 	IncludeAnnotations     *bool  `json:"include_annotations,omitempty" jsonschema:"Include error and warning annotation bodies (default true)"`
 	IncludeFailedTests     *bool  `json:"include_failed_tests,omitempty" jsonschema:"Include Test Engine tests whose executions in this build all failed, when the build has Test Engine runs (default true)"`
-	IncludeArtifacts       *bool  `json:"include_artifacts,omitempty" jsonschema:"List artifacts from returned failed, timed-out, and canceled jobs (default true). Skipped if the token lacks read_artifacts; best effort if token scopes are unknown"`
+	IncludeArtifacts       *bool  `json:"include_artifacts,omitempty" jsonschema:"List job artifacts (default true) unless the reported scopes exclude read_artifacts"`
 	IncludeFailureExpanded *bool  `json:"include_failure_expanded,omitempty" jsonschema:"Include expanded test failure details such as stack traces within the summary's bounded test-content budget (default true); set false to keep failed_tests to the one-line failure_reason"`
 	IncludeNeverRanJobs    *bool  `json:"include_never_ran_jobs,omitempty" jsonschema:"Also list jobs that never ran, in the max_jobs slots left after failed and canceled jobs: waiting_failed, blocked_failed and unblocked_failed (stopped by a failed dependency) and broken (excluded by pipeline configuration) (default true). They have no log and never explain why a build failed; job_state_counts tallies them either way. Set false to omit them and shrink the response"`
 }
