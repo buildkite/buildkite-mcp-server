@@ -1,35 +1,22 @@
 package buildkite
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"strings"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
 	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
+	"github.com/buildkite/go-buildkite/v5"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 type PackageRegistriesClient interface {
-	UpdatePackageRegistry(ctx context.Context, orgSlug, registrySlug string, patch map[string]json.RawMessage) (json.RawMessage, error)
-}
-
-func (a *BuildkiteClientAdapter) UpdatePackageRegistry(ctx context.Context, orgSlug, registrySlug string, patch map[string]json.RawMessage) (json.RawMessage, error) {
-	// The SDK's update input has no visibility field, and its response type omits public:false.
-	path := fmt.Sprintf("v2/packages/organizations/%s/registries/%s", orgSlug, registrySlug)
-	req, err := a.NewRequest(ctx, http.MethodPatch, path, patch)
-	if err != nil {
-		return nil, err
-	}
-
-	var registry json.RawMessage
-	if _, err := a.Do(req, &registry); err != nil {
-		return nil, err
-	}
-	return registry, nil
+	Update(ctx context.Context, orgSlug, registrySlug string, input buildkite.UpdatePackageRegistryInput) (buildkite.PackageRegistry, *buildkite.Response, error)
 }
 
 type UpdatePackageRegistryArgs struct {
@@ -83,29 +70,97 @@ func UpdatePackageRegistry() (mcp.Tool, mcp.ToolHandlerFor[UpdatePackageRegistry
 		if err != nil {
 			return utils.NewToolResultError(err.Error()), nil, nil
 		}
-		// Forward only validated settings, preserving explicit nulls and omitted keys.
-		patch := make(map[string]json.RawMessage)
-		for _, key := range []string{"visibility", "name", "description", "emoji", "color", "oidc_policy"} {
-			if value, ok := fields[key]; ok {
-				patch[key] = value
-			}
+		input := buildkite.UpdatePackageRegistryInput{
+			Description: packageRegistryMetadata(args.Description, fields["description"]),
+			Emoji:       packageRegistryMetadata(args.Emoji, fields["emoji"]),
+			Color:       packageRegistryMetadata(args.Color, fields["color"]),
 		}
-		if len(patch) == 0 {
+		if args.Visibility != "" {
+			input.Visibility = buildkite.Some(args.Visibility)
+		}
+		if _, ok := fields["name"]; ok {
+			input.Name = buildkite.Some(args.Name)
+		}
+		policy := bytes.TrimSpace(fields["oidc_policy"])
+		if input.Visibility.IsZero() && input.Name.IsZero() && input.Description.IsZero() && input.Emoji.IsZero() && input.Color.IsZero() && len(policy) == 0 {
 			return utils.NewToolResultError("supply at least one registry setting to update: visibility, name, description, emoji, color, or oidc_policy"), nil, nil
 		}
+		if len(policy) > 0 {
+			switch {
+			case isJSONNull(policy):
+				input.OIDCPolicy = buildkite.Null[buildkite.PackageRegistryOIDCPolicy]()
+			case policy[0] == '[':
+				policyYAML, err := packageRegistryJSONPolicy(policy)
+				if err != nil {
+					return utils.NewToolResultError(fmt.Sprintf("invalid oidc_policy: %v", err)), nil, nil
+				}
+				input.OIDCPolicyYAML = &policyYAML
+			default:
+				var policyYAML string
+				if err := json.Unmarshal(policy, &policyYAML); err != nil {
+					return utils.NewToolResultError(fmt.Sprintf("invalid oidc_policy: %v", err)), nil, nil
+				}
+				input.OIDCPolicyYAML = &policyYAML
+			}
+		}
 
-		registry, err := DepsFromContext(ctx).PackageRegistriesClient.UpdatePackageRegistry(ctx, args.OrgSlug, args.RegistrySlug, patch)
+		registry, _, err := DepsFromContext(ctx).PackageRegistriesClient.Update(ctx, args.OrgSlug, args.RegistrySlug, input)
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
-		if args.Visibility != "" {
-			var updated struct {
-				Public *bool `json:"public"`
-			}
-			if err := json.Unmarshal(registry, &updated); err != nil || updated.Public == nil || *updated.Public != (args.Visibility == "public") {
-				return utils.NewToolResultError(fmt.Sprintf("The API did not confirm %s registry visibility. It may not support visibility updates. Other supplied settings may already have been applied.", args.Visibility)), nil, nil
-			}
+		if args.Visibility != "" && registry.Public != (args.Visibility == "public") {
+			return utils.NewToolResultError(fmt.Sprintf("The API did not confirm %s registry visibility. It may not support visibility updates. Other supplied settings may already have been applied.", args.Visibility)), nil, nil
 		}
-		return mcpTextResult(span, registry)
+		return mcpTextResult(span, &registry)
 	}, []string{"write_registries"}
+}
+
+func packageRegistryMetadata(value *string, raw json.RawMessage) buildkite.Optional[string] {
+	if value != nil {
+		return buildkite.Some(*value)
+	}
+	if isJSONNull(raw) {
+		return buildkite.Null[string]()
+	}
+	return buildkite.Optional[string]{}
+}
+
+// REST accepts JSON as YAML. Re-encode the policy without narrowing it to the
+// SDK's statement types, which don't support every REST claim predicate form.
+func packageRegistryJSONPolicy(raw []byte) (string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var policy any
+	if err := decoder.Decode(&policy); err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(yamlCompatibleJSONNumbers(policy))
+	return string(encoded), err
+}
+
+func yamlCompatibleJSONNumbers(value any) any {
+	switch v := value.(type) {
+	case []any:
+		for i, item := range v {
+			v[i] = yamlCompatibleJSONNumbers(item)
+		}
+	case map[string]any:
+		for key, item := range v {
+			v[key] = yamlCompatibleJSONNumbers(item)
+		}
+	case json.Number:
+		if i := strings.IndexAny(v.String(), "eE"); i != -1 {
+			// Psych recognizes scientific notation as a float only with a
+			// decimal point and an explicit exponent sign.
+			mantissa, exponent := v.String()[:i], v.String()[i+1:]
+			if !strings.Contains(mantissa, ".") {
+				mantissa += ".0"
+			}
+			if exponent[0] != '+' && exponent[0] != '-' {
+				exponent = "+" + exponent
+			}
+			return json.Number(mantissa + "e" + exponent)
+		}
+	}
+	return value
 }

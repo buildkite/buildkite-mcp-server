@@ -44,23 +44,31 @@ func TestUpdatePackageRegistryDiscovery(t *testing.T) {
 
 func TestUpdatePackageRegistryThroughMCP(t *testing.T) {
 	for _, tt := range []struct {
-		name      string
-		fields    string
-		wantBody  string
-		status    int
-		response  string
-		wantError string
+		name       string
+		fields     string
+		wantBody   string
+		status     int
+		response   string
+		wantOutput string
+		wantError  string
 	}{
 		{name: "public", fields: `,"visibility":"public","telemetry":{"context":"The user wants packages to be downloadable without authentication and has requested that the package registry be made public."}`, wantBody: `{"visibility":"public"}`, status: 200, response: `{"slug":"widgets","public":true,"description":"unchanged"}`},
-		{name: "private", fields: `,"visibility":"private"`, wantBody: `{"visibility":"private"}`, status: 200, response: `{"slug":"widgets","public":false,"description":null}`},
-		{name: "metadata only", fields: `,"name":"Widget builds","description":"Build outputs","emoji":":package:","color":"#94cfff"`, wantBody: `{"name":"Widget builds","description":"Build outputs","emoji":":package:","color":"#94cfff"}`, status: 200, response: `{"slug":"widget-builds","public":false}`},
-		{name: "clear metadata", fields: `,"description":null,"emoji":null,"color":null`, wantBody: `{"description":null,"emoji":null,"color":null}`, status: 200, response: `{"slug":"widgets","public":false,"description":null,"emoji":null,"color":null}`},
-		{name: "explicit empty description", fields: `,"description":""`, wantBody: `{"description":""}`, status: 200, response: `{"slug":"widgets","public":false,"description":""}`},
+		{name: "private", fields: `,"visibility":"private"`, wantBody: `{"visibility":"private"}`, status: 200, response: `{"slug":"widgets","public":false,"description":null}`, wantOutput: `{"slug":"widgets","public":false}`},
+		{name: "metadata only", fields: `,"name":"Widget builds","description":"Build outputs","emoji":":package:","color":"#94cfff"`, wantBody: `{"name":"Widget builds","description":"Build outputs","emoji":":package:","color":"#94cfff"}`, status: 200, response: `{"slug":"widget-builds","public":false,"description":"Build outputs","emoji":":package:","color":"#94cfff","type":"composite","team_ids":["team-id"],"upstreams":[{"slug":"source"}]}`, wantOutput: `{"slug":"widget-builds","public":false,"description":"Build outputs","emoji":":package:","color":"#94cfff"}`},
+		{name: "clear metadata", fields: `,"description":null,"emoji":null,"color":null`, wantBody: `{"description":null,"emoji":null,"color":null}`, status: 200, response: `{"slug":"widgets","public":false,"description":null,"emoji":null,"color":null}`, wantOutput: `{"slug":"widgets","public":false}`},
+		{name: "explicit empty description", fields: `,"description":""`, wantBody: `{"description":""}`, status: 200, response: `{"slug":"widgets","public":false,"description":""}`, wantOutput: `{"slug":"widgets","public":false}`},
 		{name: "mixed visibility and metadata", fields: `,"visibility":"public","description":"Release artifacts"`, wantBody: `{"visibility":"public","description":"Release artifacts"}`, status: 200, response: `{"slug":"widgets","public":true,"description":"Release artifacts"}`},
 		{name: "older API ignores visibility", fields: `,"visibility":"public","description":"Release artifacts"`, wantBody: `{"visibility":"public","description":"Release artifacts"}`, status: 200, response: `{"slug":"widgets","public":false,"description":"Release artifacts"}`, wantError: "The API did not confirm public registry visibility. It may not support visibility updates. Other supplied settings may already have been applied."},
-		{name: "clear OIDC policy", fields: `,"oidc_policy":null`, wantBody: `{"oidc_policy":null}`, status: 200, response: `{"slug":"widgets","public":false,"oidc_policy":null}`},
-		{name: "OIDC policy as YAML", fields: `,"oidc_policy":"[]\n"`, wantBody: `{"oidc_policy":"[]\n"}`, status: 200, response: `{"slug":"widgets","public":false,"oidc_policy":"[]\n"}`},
-		{name: "OIDC policy as JSON", fields: `,"oidc_policy":[{"iss":"https://agent.example.com","scopes":["read_packages"],"claims":{"pipeline-slug":{"in":["widgets"]}}}]`, wantBody: `{"oidc_policy":[{"iss":"https://agent.example.com","scopes":["read_packages"],"claims":{"pipeline-slug":{"in":["widgets"]}}}]}`, status: 200, response: `{"slug":"widgets","public":false}`},
+		{name: "private visibility mismatch", fields: `,"visibility":"private"`, wantBody: `{"visibility":"private"}`, status: 200, response: `{"slug":"widgets","public":true}`, wantError: "The API did not confirm private registry visibility. It may not support visibility updates. Other supplied settings may already have been applied."},
+		{name: "clear OIDC policy", fields: `,"oidc_policy":null`, wantBody: `{"oidc_policy":null}`, status: 200, response: `{"slug":"widgets","public":false,"oidc_policy":null}`, wantOutput: `{"slug":"widgets","public":false}`},
+		{name: "OIDC policy as YAML", fields: `,"oidc_policy":"- iss: https://agent.buildkite.com\n  scopes: [read_packages]\n  claims:\n    pipeline_slug: widgets\n"`, wantBody: `{"oidc_policy":"- iss: https://agent.buildkite.com\n  scopes: [read_packages]\n  claims:\n    pipeline_slug: widgets\n"}`, status: 200, response: `{"slug":"widgets","public":false,"oidc_policy":"- iss: https://agent.buildkite.com\n  scopes: [read_packages]\n  claims:\n    pipeline_slug: widgets\n"}`},
+		{
+			name:     "OIDC policy as JSON retains REST predicate forms and numeric precision",
+			fields:   `,"oidc_policy":[{"iss":"https://agent.buildkite.com","scopes":["read_packages"],"claims":{"pipeline_slug":{"matches":"widgets*"},"nested":{"in":[9007199254740993,1e3,2E-2,null,false]},"org_slug":"\ud83d\ude00"}}]`,
+			wantBody: `{"oidc_policy":"[{\"claims\":{\"nested\":{\"in\":[9007199254740993,1.0e+3,2.0e-2,null,false]},\"org_slug\":\"😀\",\"pipeline_slug\":{\"matches\":\"widgets*\"}},\"iss\":\"https://agent.buildkite.com\",\"scopes\":[\"read_packages\"]}]"}`,
+			status:   200,
+			response: `{"slug":"widgets","public":false}`,
+		},
 		{name: "case sensitive even with metadata", fields: `,"visibility":"Public","description":"must not update"`},
 		{name: "no normalization", fields: `,"visibility":" private "`},
 		{name: "no empty value", fields: `,"visibility":""`},
@@ -93,7 +101,7 @@ func TestUpdatePackageRegistryThroughMCP(t *testing.T) {
 			t.Cleanup(api.Close)
 			client, err := buildkiteapi.NewOpts(buildkiteapi.WithBaseURL(api.URL + "/"))
 			require.NoError(t, err)
-			deps := buildkite.ToolDependencies{PackageRegistriesClient: &buildkite.BuildkiteClientAdapter{Client: client}}
+			deps := buildkite.ToolDependencies{PackageRegistriesClient: client.PackageRegistriesService}
 			srv := NewMCPServer("test", deps, WithToolsets("packages"))
 			serverTransport, clientTransport := mcp.NewInMemoryTransports()
 			serverSession, err := srv.Connect(t.Context(), serverTransport, nil)
@@ -126,7 +134,11 @@ func TestUpdatePackageRegistryThroughMCP(t *testing.T) {
 				require.Equal(t, tt.wantError, text.Text)
 				return
 			}
-			require.JSONEq(t, tt.response, text.Text)
+			wantOutput := tt.wantOutput
+			if wantOutput == "" {
+				wantOutput = tt.response
+			}
+			require.JSONEq(t, wantOutput, text.Text)
 		})
 	}
 }

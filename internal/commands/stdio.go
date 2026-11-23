@@ -21,7 +21,6 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 		return err
 	}
 
-	adapter := &buildkite.BuildkiteClientAdapter{Client: globals.Client, HTTPClient: globals.HTTPClient}
 	deps := buildkite.ToolDependencies{
 		BuildsClient:                globals.Client.Builds,
 		PipelinesClient:             globals.Client.Pipelines,
@@ -29,10 +28,10 @@ func (c *StdioCmd) Run(ctx context.Context, globals *Globals) error {
 		ClustersClient:              globals.Client.Clusters,
 		ClusterSecretsClient:        globals.Client.ClusterSecrets,
 		CacheRegistriesClient:       globals.Client.CacheRegistries,
-		PackageRegistriesClient:     adapter,
+		PackageRegistriesClient:     globals.Client.PackageRegistriesService,
 		ClusterQueuesClient:         globals.Client.ClusterQueues,
 		AgentsClient:                globals.Client.Agents,
-		ArtifactsClient:             adapter,
+		ArtifactsClient:             &buildkite.BuildkiteClientAdapter{Client: globals.Client, HTTPClient: globals.HTTPClient},
 		AnnotationsClient:           globals.Client.Annotations,
 		OrganizationsClient:         globals.Client.Organizations,
 		RepositoryConnectionsClient: globals.Client.RepositoryConnections,
