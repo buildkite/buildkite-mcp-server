@@ -715,6 +715,10 @@ func TestCreateBuiltinToolsets(t *testing.T) {
 
 	user, exists := registry.Get(ToolsetUser)
 	assert.True(exists)
+	for _, tool := range user.Tools {
+		assert.NotEqual("get_rate_limit", tool.Tool.Name, "default registry must not advertise an unconfigured tool")
+	}
+	user = CreateBuiltinToolsetsWithRateLimit()[ToolsetUser]
 	foundRateLimit := false
 	for _, tool := range user.Tools {
 		if tool.Tool.Name == "get_rate_limit" {

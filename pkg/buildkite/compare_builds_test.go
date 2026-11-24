@@ -485,16 +485,18 @@ func TestCompareBuildsLogEvidenceForNewlyBlockingStateChange(t *testing.T) {
 	}
 }
 
-func TestCompareBuildsLogAuthenticationErrors(t *testing.T) {
+func TestCompareBuildsLogErrors(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "https://api.buildkite.com/log", nil)
 	for _, tc := range []struct {
 		name         string
 		err          error
 		unauthorized bool
+		wantLogError string
 	}{
-		{"401", &buildkite.ErrorResponse{Response: &http.Response{StatusCode: http.StatusUnauthorized, Request: request}, Message: "expired token"}, true},
-		{"wrapped sentinel", fmt.Errorf("log access: %w", ErrUnauthorized), true},
-		{"403", &buildkite.ErrorResponse{Response: &http.Response{StatusCode: http.StatusForbidden, Request: request}, Message: "missing log scope"}, false},
+		{"401", &buildkite.ErrorResponse{Response: &http.Response{StatusCode: http.StatusUnauthorized, Request: request}, Message: "expired token"}, true, ""},
+		{"wrapped sentinel", fmt.Errorf("log access: %w", ErrUnauthorized), true, ""},
+		{"403", &buildkite.ErrorResponse{Response: &http.Response{StatusCode: http.StatusForbidden, Request: request}, Message: "missing log scope"}, false, "missing log scope"},
+		{"429", &buildkite.ErrorResponse{Response: &http.Response{StatusCode: http.StatusTooManyRequests, Request: request, Header: http.Header{"Retry-After": {"53"}, "Ratelimit-Reset": {"12"}}}}, false, "resets in 53 seconds"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			builds := &MockBuildsClient{GetFunc: func(_ context.Context, _, _, number string, _ *buildkite.BuildGetOptions) (buildkite.Build, *buildkite.Response, error) {
@@ -525,7 +527,7 @@ func TestCompareBuildsLogAuthenticationErrors(t *testing.T) {
 				var result BuildComparison
 				require.NoError(t, json.Unmarshal([]byte(getTextResult(t, res).Text), &result))
 				require.Equal(t, 1, result.ChangeCounts["newly_failing"])
-				require.Contains(t, result.Steps[0].Target.LogError, "missing log scope")
+				require.Contains(t, result.Steps[0].Target.LogError, tc.wantLogError)
 			}
 		})
 	}

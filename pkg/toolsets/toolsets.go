@@ -341,7 +341,7 @@ func newToolDef[In, Out any](toolFunc func() (mcp.Tool, mcp.ToolHandlerFor[In, O
 	}
 }
 
-// CreateBuiltinToolsets creates the default toolsets with all available tools.
+// CreateBuiltinToolsets creates the default toolsets for embedders.
 // Tool functions retrieve their dependencies from the request context at call time.
 func CreateBuiltinToolsets() map[string]Toolset {
 	return map[string]Toolset{
@@ -522,7 +522,6 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.CurrentUser),
 				newToolDef(buildkite.UserTokenOrganization),
-				newToolDef(buildkite.GetRateLimit),
 				newToolDef(buildkite.AccessToken),
 			},
 		},
@@ -543,4 +542,14 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			},
 		},
 	}
+}
+
+// CreateBuiltinToolsetsWithRateLimit includes get_rate_limit for servers that
+// configure a RateLimitClient, or tooling that describes those servers.
+func CreateBuiltinToolsetsWithRateLimit() map[string]Toolset {
+	sets := CreateBuiltinToolsets()
+	user := sets[ToolsetUser]
+	user.Tools = append(user.Tools, newToolDef(buildkite.GetRateLimit))
+	sets[ToolsetUser] = user
+	return sets
 }

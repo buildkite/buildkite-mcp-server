@@ -555,9 +555,9 @@ func WaitForBuild() (mcp.Tool, mcp.ToolHandlerFor[WaitForBuildArgs, any], []stri
 					}
 
 					// Before the first successful poll there is no state to fall back
-					// on, and an authentication failure will not resolve itself, so
-					// both of those propagate.
-					if !polled || isBuildkiteUnauthorized(err) {
+					// on. Authentication and rate-limit errors also propagate so the
+					// caller can reauthenticate or back off instead of polling again.
+					if !polled || isBuildkiteUnauthorized(err) || buildkiteRateLimitError(err) != nil {
 						return handleBuildkiteError(err)
 					}
 

@@ -7,6 +7,7 @@ import (
 	"net/url"
 
 	"github.com/buildkite/buildkite-mcp-server/pkg/trace"
+	"github.com/buildkite/buildkite-mcp-server/pkg/utils"
 	"github.com/buildkite/go-buildkite/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.opentelemetry.io/otel/attribute"
@@ -39,7 +40,7 @@ func GetRateLimit() (mcp.Tool, mcp.ToolHandlerFor[GetRateLimitArgs, any], []stri
 	return mcp.Tool{
 		Name: "get_rate_limit",
 		Description: "Inspect Buildkite API quotas without consuming quota, even when exhausted. " +
-			"Ordinary REST requests use rest and rest_user; hosted remote MCP uses mcp instead. " +
+			"Tokens issued to the hosted MCP OAuth application use mcp; ordinary API tokens, including personal tokens passed to /direct, use rest and, for user tokens, rest_user. " +
 			"rest_user is organization-scoped; mcp is user-wide. " +
 			"current is consumed quota, reset is seconds until reset, and enforced indicates enforcement. " +
 			"Caller buckets are null for compute tokens. Endpoint-specific limits are not included. " +
@@ -55,6 +56,9 @@ func GetRateLimit() (mcp.Tool, mcp.ToolHandlerFor[GetRateLimitArgs, any], []stri
 		span.SetAttributes(attribute.String("org_slug", args.OrgSlug))
 
 		deps := DepsFromContext(ctx)
+		if deps.RateLimitClient == nil {
+			return utils.NewToolResultError("get_rate_limit is not configured on this server."), nil, nil
+		}
 		status, _, err := deps.RateLimitClient.GetRateLimit(ctx, args.OrgSlug)
 		if err != nil {
 			return handleBuildkiteError(err)

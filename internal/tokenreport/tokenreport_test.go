@@ -23,7 +23,7 @@ func TestBuild(t *testing.T) {
 	require.NoError(t, err)
 
 	registry := toolsets.NewToolsetRegistry()
-	registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
+	registry.RegisterToolsets(toolsets.CreateBuiltinToolsetsWithRateLimit())
 	require.Len(t, r.Tools, len(registry.GetEnabledTools([]string{"all"}, false)))
 	require.Equal(t, len(r.Tools), r.Totals.All.Tools)
 	require.LessOrEqual(t, r.Totals.ReadOnly.Total, r.Totals.All.Total)
@@ -54,6 +54,7 @@ func TestBuild(t *testing.T) {
 			readOnlySum += tool.Tokens
 		}
 	}
+	require.True(t, seen["get_rate_limit"], "report includes tools available in the bundled server")
 	require.Equal(t, r.Totals.All.ToolTokens, sum)
 	require.Equal(t, r.Totals.ReadOnly.ToolTokens, readOnlySum)
 	require.Equal(t, len(registry.GetEnabledTools([]string{"all"}, true)), r.Totals.ReadOnly.Tools)

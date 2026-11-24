@@ -37,6 +37,14 @@ func isBuildkiteUnauthorized(err error) bool {
 	return errors.As(err, &errResp) && errResp.Response != nil && errResp.Response.StatusCode == http.StatusUnauthorized
 }
 
+func buildkiteRateLimitError(err error) *buildkite.ErrorResponse {
+	var errResp *buildkite.ErrorResponse
+	if errors.As(err, &errResp) && errResp.Response != nil && errResp.Response.StatusCode == http.StatusTooManyRequests {
+		return errResp
+	}
+	return nil
+}
+
 // handleBuildkiteError converts a Buildkite API error into tool handler return values.
 // On a 401 it returns (nil, nil, ErrUnauthorized) so the error propagates as a
 // JSON-RPC error and can be intercepted by middleware. On other errors it returns
@@ -46,12 +54,12 @@ func handleBuildkiteError(err error) (*mcp.CallToolResult, any, error) {
 	if isBuildkiteUnauthorized(err) {
 		return nil, nil, ErrUnauthorized
 	}
+	if rateLimit := buildkiteRateLimitError(err); rateLimit != nil {
+		return utils.NewToolResultError(rateLimitedMessage(rateLimit)), nil, nil
+	}
 
 	var errResp *buildkite.ErrorResponse
 	if errors.As(err, &errResp) {
-		if errResp.Response != nil && errResp.Response.StatusCode == http.StatusTooManyRequests {
-			return utils.NewToolResultError(rateLimitedMessage(errResp)), nil, nil
-		}
 		if errResp.RawBody != nil {
 			return utils.NewToolResultError(string(errResp.RawBody)), nil, nil
 		}
@@ -62,6 +70,15 @@ func handleBuildkiteError(err error) (*mcp.CallToolResult, any, error) {
 	return utils.NewToolResultError(err.Error()), nil, nil
 }
 
+// partialResultErrorMessage keeps backoff guidance when a tool returns data
+// alongside an error rather than returning an MCP tool error.
+func partialResultErrorMessage(err error) string {
+	if rateLimit := buildkiteRateLimitError(err); rateLimit != nil {
+		return rateLimitedMessage(rateLimit)
+	}
+	return err.Error()
+}
+
 // rateLimitedMessage explains a 429 to the agent. It prefers the API's
 // message, which names the exceeded limit and its reset time; RateLimit-Reset
 // reports the organization's window even when a per-user limit was exceeded.
@@ -70,11 +87,16 @@ func rateLimitedMessage(errResp *buildkite.ErrorResponse) string {
 	if errResp.Message != "" {
 		detail = errResp.Message
 	} else {
-		// HEAD responses have no message; conservatively wait for both windows.
-		reset := -1
-		for _, header := range []string{"RateLimit-Reset", "RateLimit-User-Reset"} {
-			if secs, err := strconv.Atoi(errResp.Response.Header.Get(header)); err == nil && secs >= 0 {
-				reset = max(reset, secs)
+		// HEAD responses have no message. Retry-After identifies the wait for
+		// endpoint-specific limits such as job log chunks. Without it, wait
+		// for the longer of the organization and user windows.
+		reset, err := strconv.Atoi(errResp.Response.Header.Get("Retry-After"))
+		if err != nil || reset < 0 {
+			reset = -1
+			for _, header := range []string{"RateLimit-Reset", "RateLimit-User-Reset"} {
+				if secs, err := strconv.Atoi(errResp.Response.Header.Get(header)); err == nil && secs >= 0 {
+					reset = max(reset, secs)
+				}
 			}
 		}
 		if reset >= 0 {

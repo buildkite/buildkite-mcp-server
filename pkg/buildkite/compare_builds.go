@@ -364,7 +364,7 @@ func CompareBuilds() (mcp.Tool, mcp.ToolHandlerFor[CompareBuildsArgs, any], []st
 					if isBuildkiteUnauthorized(logErr) {
 						return nil, nil, ErrUnauthorized
 					}
-					step.Target.LogError = logErr.Error()
+					step.Target.LogError = partialResultErrorMessage(logErr)
 					continue
 				}
 				entries, _, bounded := boundFailureLogEntries(entries, 8*1024)

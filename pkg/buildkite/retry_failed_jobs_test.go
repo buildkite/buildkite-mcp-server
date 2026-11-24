@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/buildkite/go-buildkite/v5"
@@ -112,6 +113,42 @@ func TestRetryFailedJobs(t *testing.T) {
 		assert.Equal(t, []string{"real:command_failed", "allowed:soft_failed"}, ids(decoded.Skipped))
 		assert.Equal(t, []string{"stopped:agent_stop"}, ids(decoded.Errors))
 		assert.Equal(t, "manual retries are not allowed", decoded.Errors[0].Error)
+	})
+
+	t.Run("RateLimitStopsWritesAndReportsPartialProgress", func(t *testing.T) {
+		var attempted []string
+		mockJobs := &MockJobsClient{
+			ListByBuildFunc: func(context.Context, string, string, string, *buildkite.JobsListOptions) (buildkite.JobsList, *buildkite.Response, error) {
+				jobs := append([]buildkite.Job{}, failedJobs...)
+				jobs = append(jobs, buildkite.Job{ID: "expired", Type: "script", State: "expired"})
+				return buildkite.JobsList{Items: jobs}, &buildkite.Response{}, nil
+			},
+			RetryJobFunc: func(_ context.Context, _, _, _, jobID string) (buildkite.Job, *buildkite.Response, error) {
+				attempted = append(attempted, jobID)
+				if jobID == "stopped" {
+					return buildkite.Job{}, nil, &buildkite.ErrorResponse{
+						Response: &http.Response{
+							StatusCode: http.StatusTooManyRequests,
+							Request:    &http.Request{Method: http.MethodPut, URL: &url.URL{Path: "/jobs/stopped/retry"}},
+						},
+						Message: "Please wait 47 seconds before making more requests.",
+					}
+				}
+				return buildkite.Job{ID: jobID + "-retry"}, &buildkite.Response{}, nil
+			},
+		}
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{JobsClient: mockJobs})
+		_, handler, _ := RetryFailedJobs()
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), args)
+		require.NoError(t, err)
+		decoded := decode(t, result)
+
+		require.Equal(t, []string{"lost", "stopped"}, attempted)
+		require.Equal(t, []string{"lost:agent_lost"}, ids(decoded.Retried))
+		require.Equal(t, "lost-retry", decoded.Retried[0].RetryJobID)
+		require.Equal(t, []string{"real:command_failed", "allowed:soft_failed", "expired:rate_limited"}, ids(decoded.Skipped))
+		require.Equal(t, []string{"stopped:agent_stop"}, ids(decoded.Errors))
+		require.Contains(t, decoded.Errors[0].Error, "Please wait 47 seconds")
 	})
 
 	t.Run("DryRunDoesNotRetry", func(t *testing.T) {

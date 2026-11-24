@@ -1121,6 +1121,23 @@ func TestWaitForBuildPollErrorHandling(t *testing.T) {
 		assert.ErrorIs(err, ErrUnauthorized)
 	})
 
+	t.Run("RateLimitPropagatesAfterSuccessfulPoll", func(t *testing.T) {
+		shortenBuildWait(t, 2*time.Second, time.Millisecond)
+		client, _ := runningThenError(1, &buildkite.ErrorResponse{
+			Response: &http.Response{StatusCode: http.StatusTooManyRequests},
+			Message:  "Please wait 47 seconds before making more requests.",
+		})
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{BuildsClient: client})
+		_, handler, _ := WaitForBuild()
+
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), WaitForBuildArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		require.Contains(t, getTextResult(t, result).Text, "Please wait 47 seconds")
+	})
+
 	t.Run("ClientAbortSkipsTheAnnotationFetch", func(t *testing.T) {
 		assert := require.New(t)
 		shortenBuildWait(t, 2*time.Second, time.Millisecond)

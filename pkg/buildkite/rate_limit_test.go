@@ -11,6 +11,15 @@ import (
 )
 
 func TestGetRateLimit(t *testing.T) {
+	t.Run("unconfigured client", func(t *testing.T) {
+		ctx := ContextWithDeps(context.Background(), ToolDependencies{})
+		_, handler, _ := GetRateLimit()
+		result, _, err := handler(ctx, createMCPRequest(t, map[string]any{}), GetRateLimitArgs{OrgSlug: "acme"})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		require.Contains(t, getTextResult(t, result).Text, "not configured")
+	})
+
 	for _, tc := range []struct {
 		name   string
 		status int

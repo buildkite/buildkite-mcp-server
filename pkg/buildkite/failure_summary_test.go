@@ -850,6 +850,29 @@ func TestGetBuildFailureSummaryPreservesPartialResultForForbiddenOptionalSection
 	require.Contains(t, summary.Jobs[0].LogError, forbidden.Message)
 	require.Len(t, summary.Warnings, 1)
 	require.Contains(t, summary.Warnings[0], forbidden.Message)
+
+	t.Run("rate-limited log includes backoff", func(t *testing.T) {
+		deps := DepsFromContext(ctx)
+		deps.BuildkiteLogsClient = &MockBuildkiteLogsClient{
+			NewReaderFunc: func(context.Context, string, string, string, string, time.Duration, bool) (*buildkitelogs.ParquetReader, error) {
+				return nil, &buildkite.ErrorResponse{Response: &http.Response{
+					StatusCode: http.StatusTooManyRequests,
+					Request:    &http.Request{Method: http.MethodHead, URL: &url.URL{Path: "/log"}},
+					Header:     http.Header{"Retry-After": {"53"}, "Ratelimit-Reset": {"12"}},
+				}}
+			},
+		}
+		result, _, err := handler(ContextWithDeps(ctx, deps), nil, GetBuildFailureSummaryArgs{
+			OrgSlug: "org", PipelineSlug: "pipeline", BuildNumber: "1",
+		})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		var summary BuildFailureSummary
+		require.NoError(t, json.Unmarshal([]byte(getTextResult(t, result).Text), &summary))
+		require.Len(t, summary.Jobs, 1)
+		require.Equal(t, "job", summary.Jobs[0].ID)
+		require.Contains(t, summary.Jobs[0].LogError, "resets in 53 seconds")
+	})
 }
 
 func TestFailureSummaryOptionalLoadersPropagateUnauthorized(t *testing.T) {

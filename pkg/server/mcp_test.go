@@ -15,6 +15,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRateLimitToolDiscovery(t *testing.T) {
+	deps := buildkite.ToolDependencies{RateLimitClient: &buildkite.BuildkiteClientAdapter{}}
+	for _, tc := range []struct {
+		name string
+		deps buildkite.ToolDependencies
+		opts []ToolsetOption
+		want bool
+	}{
+		{name: "no client"},
+		{name: "client configured", deps: deps, want: true},
+		{name: "read only", deps: deps, opts: []ToolsetOption{WithReadOnly(true)}, want: true},
+		{name: "minimum access", deps: deps, opts: []ToolsetOption{WithMinimumAccess(true)}},
+		{name: "user toolset disabled", deps: deps, opts: []ToolsetOption{WithDisabledToolsets("user")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			names := listToolNames(t, NewMCPServer("test", tc.deps, tc.opts...))
+			if tc.want {
+				require.Contains(t, names, "get_rate_limit")
+			} else {
+				require.NotContains(t, names, "get_rate_limit")
+			}
+		})
+	}
+}
+
 func TestBuildkiteServerInstructions(t *testing.T) {
 	const (
 		startHere        = "Start here:"
