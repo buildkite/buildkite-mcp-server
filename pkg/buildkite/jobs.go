@@ -17,6 +17,7 @@ type JobsClient interface {
 	GetJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobByOrg(ctx context.Context, org string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobConcurrencyByOrg(ctx context.Context, org string, jobID string) (buildkite.JobConcurrency, *buildkite.Response, error)
+	GetJobDiagnosticsByOrg(ctx context.Context, org string, jobID string, opt *buildkite.JobDiagnosticsOptions) (buildkite.JobDiagnostics, *buildkite.Response, error)
 	UnblockJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string, opt *buildkite.JobUnblockOptions) (buildkite.Job, *buildkite.Response, error)
 	RetryJob(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.Job, *buildkite.Response, error)
 	GetJobEnvironmentVariables(ctx context.Context, org string, pipeline string, buildNumber string, jobID string) (buildkite.JobEnvs, *buildkite.Response, error)
@@ -332,6 +333,44 @@ func GetJobConcurrency() (mcp.Tool, mcp.ToolHandlerFor[GetJobConcurrencyArgs, an
 			}
 
 			return mcpTextResult(span, &concurrency)
+		}, []string{"read_builds"}
+}
+
+type GetJobDiagnosticsArgs struct {
+	ToolInput
+	OrgSlug string `json:"org_slug"`
+	JobID   string `json:"job_id" jsonschema:"Job UUID, available from list_jobs or get_job"`
+	Include string `json:"include,omitempty" jsonschema:"Comma-separated: auto, dependencies, events, insights, guidance. Omit to leave optional reads and guidance off. auto selects evidence based on the job and availability; explicit evidence includes can extend it. guidance adds findings from returned evidence without extra reads. Availability depends on permissions and feature flags."`
+}
+
+func GetJobDiagnostics() (mcp.Tool, mcp.ToolHandlerFor[GetJobDiagnosticsArgs, any], []string) {
+	return mcp.Tool{
+			Name:        "get_job_diagnostics",
+			Description: "Get diagnostic evidence for a job UUID: lifecycle, timings, retry policy, concurrency and capacity requirements, with optional dependency expansion, recorded events, queue insights and server-provided findings and leads. Read each section's limitations and each finding's evidence, limits and next_check. Empty findings do not establish that the job is healthy. Null means evidence was not obtained, not an empty result. Context is current, not historical; queue insights do not establish why this job waited. Requires the Job Diagnostics feature enabled for the organization.",
+			Annotations: &mcp.ToolAnnotations{
+				Title:        "Get Job Diagnostics",
+				ReadOnlyHint: true,
+			},
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, args GetJobDiagnosticsArgs) (*mcp.CallToolResult, any, error) {
+			ctx, span := trace.Start(ctx, "buildkite.GetJobDiagnostics")
+			defer span.End()
+
+			span.SetAttributes(
+				attribute.String("org_slug", args.OrgSlug),
+				attribute.String("job_id", args.JobID),
+				attribute.String("include", args.Include),
+			)
+
+			deps := DepsFromContext(ctx)
+			diagnostics, _, err := deps.JobsClient.GetJobDiagnosticsByOrg(ctx, args.OrgSlug, args.JobID, &buildkite.JobDiagnosticsOptions{
+				Include: args.Include,
+			})
+			if err != nil {
+				return handleBuildkiteError(err)
+			}
+
+			return mcpTextResult(span, &diagnostics)
 		}, []string{"read_builds"}
 }
 

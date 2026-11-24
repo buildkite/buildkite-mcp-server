@@ -479,6 +479,17 @@ func TestGetJobConcurrencyArgsSchema(t *testing.T) {
 	require.Len(t, s.Properties, 3, "only org, job UUID and optional telemetry; no pagination or group membership controls")
 }
 
+func TestGetJobDiagnosticsArgsSchema(t *testing.T) {
+	s := schemaFor[GetJobDiagnosticsArgs](t)
+	require.Equal(t, []string{"job_id", "org_slug"}, sortedToolRequired(t, s))
+	require.Contains(t, s.Properties["job_id"].Description, "UUID")
+	require.Equal(t, "string", s.Properties["include"].Type)
+	for _, value := range []string{"auto", "dependencies", "events", "insights", "guidance"} {
+		require.Contains(t, s.Properties["include"].Description, value)
+	}
+	require.Len(t, s.Properties, 4, "only org, job UUID, includes and optional telemetry")
+}
+
 func TestListJobsArgsSchemaOptionalFields(t *testing.T) {
 	s := schemaFor[ListJobsArgs](t)
 	req := sortedToolRequired(t, s)

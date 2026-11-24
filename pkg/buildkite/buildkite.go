@@ -82,13 +82,16 @@ func marshalSanitizedJSON(result any) ([]byte, error) {
 		return nil, fmt.Errorf("failed to marshal result: %v", err)
 	}
 
-	var plainTextFields []string
+	var sanitized []byte
 	switch result.(type) {
 	case *PaginatedResult[buildkite.Annotation], *BuildFailureSummary:
 		// Raw annotation bodies may contain Markdown code or literal HTML.
-		plainTextFields = []string{"body"}
+		sanitized, err = sanitize.SanitizeJSONBytes(r, "body")
+	case *buildkite.JobDiagnostics:
+		sanitized, err = sanitize.SanitizePlainTextJSONBytes(r)
+	default:
+		sanitized, err = sanitize.SanitizeJSONBytes(r)
 	}
-	sanitized, err := sanitize.SanitizeJSONBytes(r, plainTextFields...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sanitize result: %v", err)
 	}
