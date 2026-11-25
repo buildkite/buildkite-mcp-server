@@ -764,6 +764,7 @@ run_entry() {
         # failed fetch/checkout/push and exit 0.
         if ! env ENTRY_ID="$ENTRY_ID" DATETIME="$DATETIME" ORG_SLUG="$ORG_SLUG" \
                  PIPELINE_SLUG="$PIPELINE_SLUG" SCENARIO_VARS_FILE="$SCENARIO_VARS_FILE" \
+                 SCRIPT_DIR="$SCRIPT_DIR" \
                  bash -euo pipefail -c "$SETUP"; then
             # A failure, not a skip: setup does real work (fetch/checkout/push),
             # so a transient or auth failure must fail the entry, not green it.

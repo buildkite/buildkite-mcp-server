@@ -15,6 +15,16 @@ A set of artifacts, and annotations in the Buildkite build showing:
 * Datadog dashboard
   * Charts the LLM agent metrics (see above) over runs
 
+## Recent Scheduler build setup
+
+`evals.yaml` contains a commented-out `scenario.setup` example for future Scheduler tests. It calls `scripts/setup-scheduler-build.sh`, which checks the latest 100 `buildkite/buildkite` main builds created in the last 30 days, newest first. It selects the first build with nonempty pools and readable metrics for every pool on the first page (up to 100 pools), then appends its `BUILD_URL` to `SCENARIO_VARS_FILE`. Discovery runs each time, so there is no hard-coded build number to expire. This checks data availability, not complete pool coverage or proof of completion/passing results; the selected build may still be running.
+
+Builds with empty, missing or expired Scheduler data are skipped. Authentication, permission, transport and server errors fail setup rather than being mistaken for missing data. If no candidate qualifies, setup fails without running the model for that entry.
+
+The helper needs Bash, curl, jq, `SCENARIO_VARS_FILE`, and a `BUILDKITE_API_TOKEN` with `read_builds` and `read_test_pool` access to `buildkite/buildkite`. It only makes GET requests: no builds, branches, pipeline settings or feature flags are created or changed. The existing dedicated Scheduler token supplies this access. `babystand.sh` exposes `SCRIPT_DIR` to scenario setup so the helper resolves independently of the cloned eval repository. The same token is selected through `token_env` for the model's read-only investigation.
+
+The example is disabled and includes no Scheduler eval prompt, case or reference answer. Pushing this code alone does not run a model eval.
+
 ## Supported agents
 
 `evals.yaml` entries choose the agent per scenario (`agent:` key):
