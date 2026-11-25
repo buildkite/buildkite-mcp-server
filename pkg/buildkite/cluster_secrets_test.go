@@ -59,6 +59,10 @@ func (m *mockClusterSecretsClient) Create(
 	return m.CreateFunc(ctx, org, clusterID, input)
 }
 
+func (*mockClusterSecretsClient) Update(context.Context, string, string, string, buildkite.ClusterSecretUpdate) (buildkite.ClusterSecret, *buildkite.Response, error) {
+	panic("unexpected cluster secret update")
+}
+
 var _ ClusterSecretsClient = (*mockClusterSecretsClient)(nil)
 
 func TestListClusterSecrets(t *testing.T) {

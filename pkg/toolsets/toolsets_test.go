@@ -964,7 +964,7 @@ func TestClusterSecretsToolset(t *testing.T) {
 	clusterSecrets, exists := registry.Get(ToolsetClusterSecrets)
 	assert.True(exists)
 
-	assert.Len(clusterSecrets.Tools, 3)
+	assert.Len(clusterSecrets.Tools, 4)
 	assert.Equal(
 		"get_cluster_secret",
 		clusterSecrets.Tools[0].Tool.Name,
@@ -977,6 +977,8 @@ func TestClusterSecretsToolset(t *testing.T) {
 		"create_cluster_secret",
 		clusterSecrets.Tools[2].Tool.Name,
 	)
+	assert.Equal("update_cluster_secret", clusterSecrets.Tools[3].Tool.Name)
+	assert.Equal([]string{"write_secrets"}, clusterSecrets.Tools[3].RequiredScopes)
 
 	assert.Equal(
 		[]string{"read_secrets_details", "write_secrets"},
@@ -1005,6 +1007,88 @@ func TestClusterSecretsToolset(t *testing.T) {
 			true,
 		),
 	)
+}
+
+func TestUpdateClusterSecretThroughMCP(t *testing.T) {
+	const (
+		policyJSON  = `"- pipeline_slug: release\n  build_branch: main\n"`
+		metadata    = `{"id":"secret-id","key":"RELEASE_KEY","description":"Existing description","policy":` + policyJSON + `,"created_by":{},"organization":{}}`
+		identifiers = `{"org_slug":"acme","cluster_id":"cluster-id","secret_id":"secret-id"`
+		validArgs   = identifiers + `,"policy":` + policyJSON
+	)
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	for _, tt := range []struct {
+		name     string
+		args     string
+		status   int
+		response string
+	}{
+		{name: "policy only", args: validArgs + `}`, status: http.StatusOK,
+			response: metadata[:len(metadata)-1] + `,"value":"synthetic redaction canary"}`},
+		{name: "missing policy", args: identifiers + `}`},
+		{name: "description not accepted", args: validArgs + `,"description":"new description"}`},
+		{name: "key not accepted", args: validArgs + `,"key":"NEW_KEY"}`},
+		{name: "value not accepted", args: validArgs + `,"value":"synthetic value"}`},
+		{name: "API rejection", args: validArgs + `}`, status: http.StatusUnprocessableEntity,
+			response: `{"message":"Invalid secret policy"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if tt.status == 0 {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				assert.Equal(t, http.MethodPut, r.Method)
+				assert.Equal(t, "/v2/organizations/acme/clusters/cluster-id/secrets/secret-id", r.URL.RequestURI())
+				body, err := io.ReadAll(r.Body)
+				assert.NoError(t, err)
+				assert.JSONEq(t, `{"policy":`+policyJSON+`}`, string(body))
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tt.status)
+				_, _ = io.WriteString(w, tt.response)
+			}))
+			t.Cleanup(api.Close)
+			apiClient, err := buildkiteapi.NewOpts(buildkiteapi.WithBaseURL(api.URL + "/"))
+			require.NoError(t, err)
+			server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+			server.AddReceivingMiddleware(buildkite.InjectDepsMiddleware(buildkite.ToolDependencies{ClusterSecretsClient: apiClient.ClusterSecrets}))
+			for _, tool := range registry.GetEnabledTools([]string{ToolsetClusterSecrets}, false) {
+				tool.Register(server)
+			}
+			serverTransport, clientTransport := mcp.NewInMemoryTransports()
+			serverSession, err := server.Connect(t.Context(), serverTransport, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = serverSession.Close() })
+			client, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil).Connect(t.Context(), clientTransport, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = client.Close() })
+
+			result, err := client.CallTool(t.Context(), &mcp.CallToolParams{
+				Name:      "update_cluster_secret",
+				Arguments: json.RawMessage(tt.args),
+			})
+			require.NoError(t, err)
+			if tt.status == 0 {
+				require.True(t, result.IsError)
+				require.Zero(t, calls.Load(), "invalid arguments must not send a PUT")
+				return
+			}
+			require.Equal(t, int32(1), calls.Load())
+			require.Len(t, result.Content, 1)
+			content, ok := result.Content[0].(*mcp.TextContent)
+			require.True(t, ok)
+			if tt.status == http.StatusOK {
+				require.False(t, result.IsError)
+				require.JSONEq(t, metadata, content.Text)
+			} else {
+				require.True(t, result.IsError)
+				require.Contains(t, content.Text, "Invalid secret policy")
+			}
+		})
+	}
 }
 
 func TestCacheRegistriesToolset(t *testing.T) {

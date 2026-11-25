@@ -369,6 +369,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.GetClusterSecret),
 				newToolDef(buildkite.ListClusterSecrets),
 				newToolDef(buildkite.CreateClusterSecret),
+				newToolDef(buildkite.UpdateClusterSecret),
 			},
 		},
 		ToolsetCacheRegistries: {
