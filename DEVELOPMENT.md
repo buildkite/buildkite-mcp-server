@@ -236,22 +236,29 @@ Hub, then adds binaries to the GitHub release.
 
 ### Publishing MCP Registry metadata
 
-The release pipeline does not update the [official MCP Registry listing](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.buildkite%2Fbuildkite-mcp-server/versions/latest).
-Publish the listing separately, once the versioned Docker Hub image is publicly
-pullable:
+Once GoReleaser succeeds, the Buildkite release pipeline dispatches the
+**Publish to the MCP Registry** GitHub Actions workflow with the released version.
+The workflow checks the public Docker Hub tag, generates a versioned copy of
+`server.json` from the default branch, and validates and publishes it using
+GitHub OIDC. There is no per-release edit to `server.json` or separate Registry
+credential in Buildkite. GoReleaser sets the ownership label that the Registry
+checks on the image.
 
-1. Update `version` and the image tag in `packages[0].identifier` in `server.json`
-   to match the published `docker.io/buildkite/mcp-server` tag. Do not use
-   `latest` or a GitHub release tag that has no corresponding image. GoReleaser
-   sets the image's `io.modelcontextprotocol.server.name` label, which the
-   Registry checks against the server name.
-2. After the metadata change merges, install [`mcp-publisher`](https://modelcontextprotocol.io/registry/quickstart)
-   and run `mcp-publisher validate` from the repo root on `main`.
-3. As a Buildkite GitHub organization owner, authenticate with
-   `mcp-publisher login github --token "$MCP_REGISTRY_GITHUB_PAT"` using a token
-   with [permission to read organization membership](https://modelcontextprotocol.io/registry/authentication#personal-vs-organization-namespaces).
-   Run `mcp-publisher publish` and confirm that the listing shows the new
-   version, both hosted URLs, and the pinned OCI image.
+For a transient failure, rerun the GitHub workflow, not the image release. If
+Buildkite could not queue the workflow or an already-published image needs a
+Registry entry, dispatch it separately using GitHub credentials with repository
+Contents write permission. Replace the example version with the publicly
+available Docker Hub tag (without `v`):
+
+```bash
+gh api repos/buildkite/buildkite-mcp-server/dispatches \
+  -f event_type=mcp-image-released -f 'client_payload[version]=1.37.0'
+```
+
+Check the [official listing](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.buildkite%2Fbuildkite-mcp-server/versions/latest)
+for the new version, both hosted URLs, and the pinned OCI image. Published
+Registry versions are immutable; if the requested version already exists, check
+its listing before retrying.
 
 ### Manual GitHub Container Registry release
 

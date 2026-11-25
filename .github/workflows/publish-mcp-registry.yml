@@ -1,0 +1,52 @@
+name: Publish to the MCP Registry
+
+on:
+  repository_dispatch:
+    types: [mcp-image-released]
+
+jobs:
+  publish:
+    if: github.repository == 'buildkite/buildkite-mcp-server'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Check the public image and prepare its manifest
+        env:
+          RELEASE_VERSION: ${{ github.event.client_payload.version }}
+        run: |
+          if [[ ! $RELEASE_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo 'Expected a GoReleaser version without the v prefix' >&2
+            exit 1
+          fi
+          image="docker.io/buildkite/mcp-server:$RELEASE_VERSION"
+          docker manifest inspect "$image" > /dev/null
+          jq --arg version "$RELEASE_VERSION" --arg image "$image" \
+            '.version = $version | .packages[0].identifier = $image' \
+            server.json > "$RUNNER_TEMP/server.json"
+
+      - name: Install the MCP publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.16
+          MCP_PUBLISHER_SHA256: 6e2f799550cf843c6fd3350498d56cc49be3dc0af1e6237eb0e6435c7a9d5c05
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --silent --show-error --location --output mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_VERSION/mcp-publisher_linux_amd64.tar.gz"
+          printf '%s  mcp-publisher.tar.gz\n' "$MCP_PUBLISHER_SHA256" | sha256sum --check
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+
+      - name: Validate and publish the listing
+        run: |
+          "$RUNNER_TEMP/mcp-publisher" validate "$RUNNER_TEMP/server.json"
+          "$RUNNER_TEMP/mcp-publisher" login github-oidc
+          "$RUNNER_TEMP/mcp-publisher" publish "$RUNNER_TEMP/server.json"
