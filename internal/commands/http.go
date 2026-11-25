@@ -57,6 +57,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 		TestsClient:                 globals.Client.Tests,
 		BuildTestsClient:            globals.Client.BuildTests,
 		BuildkiteLogsClient:         globals.BuildkiteLogsClient,
+		UsagesClient:                &buildkite.BuildkiteClientAdapter{Client: globals.Client, HTTPClient: globals.HTTPClient},
 		FailureSummary:              globals.FailureSummary,
 	}
 
