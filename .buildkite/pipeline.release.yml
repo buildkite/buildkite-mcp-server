@@ -27,6 +27,7 @@ steps:
       - mise#v1.1.5: ~
 
   - label: ":package: Publish to Buildkite Packages"
+    key: publish
     depends_on: release
     command: ".buildkite/steps/publish-packages.sh"
     plugins:
