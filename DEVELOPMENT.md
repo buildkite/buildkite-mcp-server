@@ -234,6 +234,25 @@ development.
 The Buildkite pipeline publishes images to GitHub Container Registry and Docker
 Hub, then adds binaries to the GitHub release.
 
+### Publishing MCP Registry metadata
+
+The release pipeline does not update the [official MCP Registry listing](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.buildkite%2Fbuildkite-mcp-server/versions/latest).
+Publish the listing separately, once the versioned Docker Hub image is publicly
+pullable:
+
+1. Update `version` and the image tag in `packages[0].identifier` in `server.json`
+   to match the published `docker.io/buildkite/mcp-server` tag. Do not use
+   `latest` or a GitHub release tag that has no corresponding image. GoReleaser
+   sets the image's `io.modelcontextprotocol.server.name` label, which the
+   Registry checks against the server name.
+2. After the metadata change merges, install [`mcp-publisher`](https://modelcontextprotocol.io/registry/quickstart)
+   and run `mcp-publisher validate` from the repo root on `main`.
+3. As a Buildkite GitHub organization owner, authenticate with
+   `mcp-publisher login github --token "$MCP_REGISTRY_GITHUB_PAT"` using a token
+   with [permission to read organization membership](https://modelcontextprotocol.io/registry/authentication#personal-vs-organization-namespaces).
+   Run `mcp-publisher publish` and confirm that the listing shows the new
+   version, both hosted URLs, and the pinned OCI image.
+
 ### Manual GitHub Container Registry release
 
 The CI pipeline normally performs this process. If a manual release is required,

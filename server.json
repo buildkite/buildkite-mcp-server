@@ -1,54 +1,34 @@
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.buildkite/buildkite-mcp-server",
   "description": "MCP server exposing Buildkite API data (pipelines, builds, jobs, tests) to AI tooling and editors.",
-  "status": "active",
-  "version": "0.7.0",
+  "version": "1.33.0",
   "repository": {
     "url": "https://github.com/buildkite/buildkite-mcp-server",
     "source": "github",
     "id": "962909011"
   },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.buildkite.com/mcp"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.buildkite.com/mcp/readonly"
+    }
+  ],
   "packages": [
     {
       "registryType": "oci",
-      "registryBaseUrl": "https://ghcr.io",
-      "identifier": "buildkite/buildkite-mcp-server",
-      "version": "0.7.0",
+      "identifier": "docker.io/buildkite/mcp-server:1.33.0",
       "transport": {
         "type": "stdio"
       },
-      "runtimeHint": "docker",
-      "runtimeArguments": [
+      "packageArguments": [
         {
           "type": "positional",
-          "value": "run",
-          "description": "The runtime command to execute"
-        },
-        {
-          "type": "named",
-          "name": "-i",
-          "description": "Run container in interactive mode"
-        },
-        {
-          "type": "named",
-          "name": "--rm",
-          "description": "Automatically remove the container when it exits"
-        },
-        {
-          "type": "named",
-          "name": "-e",
-          "description": "Set an environment variable in the runtime"
-        },
-        {
-          "type": "positional",
-          "value": "BUILDKITE_API_TOKEN",
-          "description": "Environment variable name"
-        },
-        {
-          "type": "positional",
-          "value": "ghcr.io/buildkite/buildkite-mcp-server:0.7.0",
-          "description": "The container image to run"
+          "value": "stdio"
         }
       ],
       "environmentVariables": [
