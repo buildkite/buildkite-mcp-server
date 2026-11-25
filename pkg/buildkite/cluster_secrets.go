@@ -13,6 +13,7 @@ type ClusterSecretsClient interface {
 	List(ctx context.Context, org, clusterID string, opt *buildkite.ClusterSecretsListOptions) ([]buildkite.ClusterSecret, *buildkite.Response, error)
 	Get(ctx context.Context, org, clusterID, secretID string) (buildkite.ClusterSecret, *buildkite.Response, error)
 	Create(ctx context.Context, org, clusterID string, input buildkite.ClusterSecretCreate) (buildkite.ClusterSecret, *buildkite.Response, error)
+	Update(ctx context.Context, org, clusterID, secretID string, input buildkite.ClusterSecretUpdate) (buildkite.ClusterSecret, *buildkite.Response, error)
 }
 
 type GetClusterSecretArgs struct {
@@ -143,6 +144,44 @@ func CreateClusterSecret() (mcp.Tool, mcp.ToolHandlerFor[CreateClusterSecretArgs
 		deps := DepsFromContext(ctx)
 		secret, _, err := deps.ClusterSecretsClient.Create(ctx, args.OrgSlug, args.ClusterID, input)
 
+		if err != nil {
+			return handleBuildkiteError(err)
+		}
+
+		return mcpTextResult(span, &secret)
+	}, []string{"write_secrets"}
+}
+
+type UpdateClusterSecretArgs struct {
+	ToolInput
+	OrgSlug   string `json:"org_slug"`
+	ClusterID string `json:"cluster_id"`
+	SecretID  string `json:"secret_id"`
+	Policy    string `json:"policy" jsonschema:"Full replacement access policy as a YAML list of rules"`
+}
+
+func UpdateClusterSecret() (mcp.Tool, mcp.ToolHandlerFor[UpdateClusterSecretArgs, any], []string) {
+	return mcp.Tool{
+		Name:        "update_cluster_secret",
+		Description: "Update a cluster secret's access policy without changing its key, value, or description. Returns updated metadata.",
+		Annotations: &mcp.ToolAnnotations{
+			Title:           "Update Cluster Secret Access Policy",
+			DestructiveHint: boolPtr(true),
+		},
+	}, func(ctx context.Context, request *mcp.CallToolRequest, args UpdateClusterSecretArgs) (*mcp.CallToolResult, any, error) {
+		ctx, span := trace.Start(ctx, "buildkite.UpdateClusterSecret")
+		defer span.End()
+
+		span.SetAttributes(
+			attribute.String("org_slug", args.OrgSlug),
+			attribute.String("cluster_id", args.ClusterID),
+			attribute.String("secret_id", args.SecretID),
+		)
+
+		deps := DepsFromContext(ctx)
+		secret, _, err := deps.ClusterSecretsClient.Update(ctx, args.OrgSlug, args.ClusterID, args.SecretID, buildkite.ClusterSecretUpdate{
+			Policy: buildkite.Some(args.Policy),
+		})
 		if err != nil {
 			return handleBuildkiteError(err)
 		}
