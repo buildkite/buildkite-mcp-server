@@ -238,11 +238,12 @@ Hub, then adds binaries to the GitHub release.
 
 Once GoReleaser succeeds, the Buildkite release pipeline dispatches the
 **Publish to the MCP Registry** GitHub Actions workflow with the released version.
-The workflow checks the public Docker Hub tag, generates a versioned copy of
-`server.json` from the default branch, and validates and publishes it using
-GitHub OIDC. There is no per-release edit to `server.json` or separate Registry
-credential in Buildkite. GoReleaser sets the ownership label that the Registry
-checks on the image.
+The workflow reads the unversioned `server.template.json` from the default
+branch, checks the exact Docker Hub tag, and generates a `server.json` with
+the released version and image tag. It validates and publishes the generated
+file using GitHub OIDC. No per-release edits or separate Registry credentials
+in Buildkite are needed. GoReleaser sets the ownership label that the
+Registry checks on the image.
 
 For a transient failure, rerun the GitHub workflow, not the image release. If
 Buildkite could not queue the workflow or an already-published image needs a

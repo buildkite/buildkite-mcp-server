@@ -28,11 +28,11 @@ jobs:
             echo 'Expected a GoReleaser version without the v prefix' >&2
             exit 1
           fi
-          image="docker.io/buildkite/mcp-server:$RELEASE_VERSION"
+          image="$(jq -er '.packages[0].identifier' server.template.json):$RELEASE_VERSION"
           docker manifest inspect "$image" > /dev/null
           jq --arg version "$RELEASE_VERSION" --arg image "$image" \
             '.version = $version | .packages[0].identifier = $image' \
-            server.json > "$RUNNER_TEMP/server.json"
+            server.template.json > "$RUNNER_TEMP/server.json"
 
       - name: Install the MCP publisher
         env:
