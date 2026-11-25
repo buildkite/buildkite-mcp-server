@@ -60,12 +60,30 @@ else
     fi
 fi
 
-# check if GITHUB_USER is set
-if [[ -z "${GITHUB_USER:-}" ]]; then
-    echo "Skipping GHCR login as GITHUB_USER is not set"
+if [[ -n "${EXCHANGE_FUNCTION_ARN:-}" ]]; then
+    : "${BUILDKITE_TAG:?GitHub publishing requires a tagged Buildkite build}"
+    echo "--- :key: :github: Requesting GitHub release token from Exchange"
+    GITHUB_TOKEN=$(
+        response=$(mktemp) || exit 1
+        trap 'rm -f "$response"' EXIT
+        function_error=$(
+            buildkite-agent oidc request-token --audience exchange --claim organization_id --claim pipeline_id |
+                jq -Rs '{token: rtrimstr("\n"), github_organization: "buildkite"}' |
+                AWS_PAGER="" aws lambda invoke --function-name "$EXCHANGE_FUNCTION_ARN" \
+                    --payload fileb:///dev/stdin --query FunctionError --output text "$response"
+        ) || exit 1
+        [[ "$function_error" == None ]] || exit 1
+        jq -er 'select(.error == null) | .token | strings | select(length > 0)' "$response"
+    ) || { echo "Exchange did not issue a GitHub release token" >&2; exit 1; }
+    printf '%s\n' "$GITHUB_TOKEN" | buildkite-agent redactor add
+    export GITHUB_TOKEN
+fi
+
+if [[ -z "${GHCR_USER:-}" ]]; then
+    echo "Skipping GHCR login as GHCR_USER is not set"
 else
     echo "--- :key: :github: Login to GHCR using ko"
-    echo "$GITHUB_TOKEN" | ko login ghcr.io --username "$GITHUB_USER" --password-stdin
+    printf '%s\n' "${GHCR_TOKEN:?GHCR login requires GHCR_TOKEN}" | ko login ghcr.io --username "$GHCR_USER" --password-stdin
     if [[ $? -ne 0 ]]; then
         echo "GitHub login failed"
         exit 1

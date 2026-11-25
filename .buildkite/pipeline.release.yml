@@ -10,6 +10,7 @@ steps:
       - dist/**/*
     env:
       AWS_REGION: us-east-1
+      EXCHANGE_FUNCTION_ARN: arn:aws:lambda:us-east-1:032379705303:function:exchange
     plugins:
       - aws-assume-role-with-web-identity:
           role-arn: arn:aws:iam::445615400570:role/pipeline-buildkite-buildkite-mcp-server-release
@@ -19,8 +20,8 @@ steps:
             - pipeline_slug
       - aws-ssm#v1.1.0:
           parameters:
-            GITHUB_USER: /pipelines/buildkite/buildkite-mcp-server-release/github-user
-            GITHUB_TOKEN: /pipelines/buildkite/buildkite-mcp-server-release/github-token
+            GHCR_USER: /pipelines/buildkite/buildkite-mcp-server-release/github-user
+            GHCR_TOKEN: /pipelines/buildkite/buildkite-mcp-server-release/github-token
             DOCKERHUB_PASSWORD: /pipelines/buildkite/buildkite-mcp-server-release/dockerhub-password
             DOCKERHUB_USER: /pipelines/buildkite/buildkite-mcp-server-release/dockerhub-user
       - mise#v1.1.5: ~
