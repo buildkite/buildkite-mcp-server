@@ -54,7 +54,7 @@ Known response fields are decoded into SDK types. Event details, retry matcher u
 
 ## Reading organization usage
 
-`list_organization_usage` is in the `usage` toolset and requires `read_usages` plus permission to view the organization's usage. It accepts `org_slug`, a `resource` such as `managed_tests`, `hosted_jobs` or `artifact_storage`, optional inclusive `from` and `to` dates (`YYYY-MM-DD`, given together), `page`, and `per_page` (default 100, up to 2000).
+`list_organization_usage` is in the `usage` toolset and requires `read_usages` plus permission to view the organization's usage. It accepts `org_slug`, a `resource` such as `managed_tests`, `hosted_jobs` or `artifact_storage`, optional inclusive `from` and `to` dates (`YYYY-MM-DD`, given together), `page`, and `per_page` (default 100, up to 500).
 
 Each row is one UTC day of raw usage for the resource, split by pipeline, suite, registry, cluster or model where the resource records them. Rows are not billed amounts. Without dates, it returns the current billing period. The API returns not found until usage API access is enabled for the organization.
 

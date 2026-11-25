@@ -247,6 +247,7 @@ func TestListOrganizationUsageArgsSchema(t *testing.T) {
 	require.Equal(t, []string{"org_slug", "resource"}, sortedToolRequired(t, s))
 	require.Len(t, s.Properties["resource"].Enum, 17)
 	require.Contains(t, s.Properties["resource"].Enum, "managed_tests")
+	require.InDelta(t, 500, *s.Properties["per_page"].Maximum, 0)
 }
 
 func TestCreateBuildArgsSchema(t *testing.T) {

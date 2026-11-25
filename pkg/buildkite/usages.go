@@ -60,7 +60,7 @@ type ListOrganizationUsageArgs struct {
 	From     string `json:"from,omitempty" jsonschema:"First UTC day to include, as YYYY-MM-DD; requires to"`
 	To       string `json:"to,omitempty" jsonschema:"Last UTC day to include, as YYYY-MM-DD; requires from"`
 	Page     int    `json:"page,omitempty" jsonschema:"Page number for pagination (min 1)"`
-	PerPage  int    `json:"per_page,omitempty" jsonschema:"Rows per page (1-2000; omitted or 0 uses 100)"`
+	PerPage  int    `json:"per_page,omitempty" jsonschema:"Rows per page (1-500; omitted or 0 uses 100)"`
 }
 
 func ListOrganizationUsage() (mcp.Tool, mcp.ToolHandlerFor[ListOrganizationUsageArgs, any], []string) {
@@ -87,6 +87,8 @@ func ListOrganizationUsage() (mcp.Tool, mcp.ToolHandlerFor[ListOrganizationUsage
 		"anthropic_tokens",
 		"openai_tokens",
 	}
+	// About 100-270 bytes per row, so a full page stays well under 256 KiB.
+	schema.Properties["per_page"].Maximum = new(500.0)
 
 	return mcp.Tool{
 		Name: "list_organization_usage",
