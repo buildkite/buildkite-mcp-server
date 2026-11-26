@@ -140,6 +140,7 @@ func TestNewPerRequestServerFactory_DisabledToolsetsCannotBeReenabled(t *testing
 		{name: "invalid override", toolsetsHeader: "invalid", disabled: toolsets.ToolsetLogs, absent: []string{"search_logs", "tail_logs", "read_logs"}, present: "get_build"},
 		{name: "builds disabled", toolsetsHeader: "retries", disabled: toolsets.ToolsetBuilds, absent: []string{"get_build", "list_jobs", "retry_job", "retry_failed_jobs"}, present: "tail_logs"},
 		{name: "retries disabled", toolsetsHeader: "builds,logs", disabled: toolsets.ToolsetRetries, absent: []string{"get_build", "tail_logs", "retry_job", "retry_failed_jobs"}, present: "create_build"},
+		{name: "all disabled with opt-in named", toolsetsHeader: "all,program_status", disabled: toolsets.ToolsetAll, absent: []string{"get_job_error_tail", "get_build", "tail_logs"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false, WithDisabledToolsets(tt.disabled))
@@ -153,6 +154,40 @@ func TestNewPerRequestServerFactory_DisabledToolsetsCannotBeReenabled(t *testing
 			}
 			if tt.present != "" {
 				require.Contains(t, toolNames, tt.present)
+			}
+		})
+	}
+}
+
+func TestNewPerRequestServerFactory_OptInToolsetsNeedNaming(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		header   string
+		disabled string
+		present  bool
+	}{
+		{name: "all", header: "all"},
+		{name: "all with logs disabled", header: "all", disabled: toolsets.ToolsetLogs},
+		{name: "named", header: "all,program_status", present: true},
+		{name: "named with logs disabled", header: "all,program_status", disabled: toolsets.ToolsetLogs, present: true},
+		{name: "named but disabled", header: "all,program_status", disabled: toolsets.ToolsetProgramStatus},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var opts []ToolsetOption
+			if tt.disabled != "" {
+				opts = append(opts, WithDisabledToolsets(tt.disabled))
+			}
+			factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false, opts...)
+			req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
+			require.NoError(t, err)
+			req.Header.Set(HeaderToolsets, tt.header)
+
+			toolNames := listToolNames(t, factory(req))
+			require.Contains(t, toolNames, "get_build")
+			if tt.present {
+				require.Contains(t, toolNames, "get_job_error_tail")
+			} else {
+				require.NotContains(t, toolNames, "get_job_error_tail")
 			}
 		})
 	}

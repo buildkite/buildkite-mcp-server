@@ -121,6 +121,10 @@ func Build(maxToolTokens int) (Report, error) {
 			}
 			seen[t.Name] = true
 			r.Tools = append(r.Tools, t)
+			// Opt-in toolsets aren't part of a default deployment.
+			if slices.Contains(toolsets.OptInToolsets, name) {
+				continue
+			}
 			r.Totals.All.Tools++
 			r.Totals.All.ToolTokens += t.Tokens
 			if t.ReadOnly {

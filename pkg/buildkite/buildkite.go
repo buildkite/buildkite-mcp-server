@@ -87,7 +87,7 @@ func marshalSanitizedJSON(result any) ([]byte, error) {
 	case *PaginatedResult[buildkite.Annotation], *BuildFailureSummary:
 		// Raw annotation bodies may contain Markdown code or literal HTML.
 		sanitized, err = sanitize.SanitizeJSONBytes(r, "body")
-	case *buildkite.JobDiagnostics:
+	case *buildkite.JobDiagnostics, jobErrorTail:
 		sanitized, err = sanitize.SanitizePlainTextJSONBytes(r)
 	default:
 		sanitized, err = sanitize.SanitizeJSONBytes(r)

@@ -42,6 +42,7 @@ type ToolDependencies struct {
 	BuildTestsClient            BuildTestsClient
 	BuildkiteLogsClient         BuildkiteLogsClient
 	UsagesClient                UsagesClient
+	ProgramStatusClient         ProgramStatusClient
 	FailureSummary              FailureSummaryConfig
 }
 

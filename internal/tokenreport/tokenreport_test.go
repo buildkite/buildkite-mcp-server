@@ -3,6 +3,7 @@ package tokenreport
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,8 +25,8 @@ func TestBuild(t *testing.T) {
 
 	registry := toolsets.NewToolsetRegistry()
 	registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
-	require.Len(t, r.Tools, len(registry.GetEnabledTools([]string{"all"}, false)))
-	require.Equal(t, len(r.Tools), r.Totals.All.Tools)
+	require.Len(t, r.Tools, len(registry.GetAllTools()))
+	require.Equal(t, len(registry.GetEnabledTools([]string{"all"}, false)), r.Totals.All.Tools)
 	require.LessOrEqual(t, r.Totals.ReadOnly.Total, r.Totals.All.Total)
 	require.Positive(t, r.Instructions.Tokens)
 
@@ -49,6 +50,9 @@ func TestBuild(t *testing.T) {
 		seen[tool.Name] = true
 		require.Positive(t, tool.Tokens, tool.Name)
 		require.NotEmpty(t, tool.Toolset)
+		if slices.Contains(toolsets.OptInToolsets, tool.Toolset) {
+			continue
+		}
 		sum += tool.Tokens
 		if tool.ReadOnly {
 			readOnlySum += tool.Tokens
