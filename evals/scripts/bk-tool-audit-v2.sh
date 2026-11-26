@@ -421,6 +421,13 @@ metrics() {
                 | {key: .tool_use_id, value: $l.timestamp} ] | from_entries) as $rts
     | ($tools | map(select((.ts|type)=="string" and (($rts[.id] // null)|type)=="string")
                     | {name, input, dur: (($rts[.id]|tsec) - (.ts|tsec))})) as $timed
+    | ($tools | map(select(.name | startswith("mcp__"))) | map({key: .id, value: .name}) | from_entries) as $mcp_names
+    | ($all | [ .[] | (.message.content? // []) | select(type=="array") | .[]
+                | select(.type=="tool_result" and $mcp_names[.tool_use_id] != null)
+                | {id: .tool_use_id, name: $mcp_names[.tool_use_id],
+                   text: (if (.content|type)=="string" then .content
+                          else [.content[]? | select(.type=="text") | .text] | join("\n") end)} ]
+            | unique_by(.id) | map({name, bytes: (.text | utf8bytelength)})) as $outputs
     | ($timed | map(select((.name | test("^mcp__.*__wait_for_build$"))
                     or (.name == "Bash" and ((.input.command? // "") | test("\\bsleep\\b")))))) as $waits
     # token sums
@@ -442,6 +449,13 @@ metrics() {
         tokens: {input: $tin, output: $tout, cache_write_5m: $c5, cache_write_1h: $c1h, cache_read: $tread},
         tool_calls_total: ($tools|length),
         tool_calls_mcp: ($tools | map(select(.name | startswith("mcp__"))) | length),
+        mcp_output: {
+          bytes: (($outputs | map(.bytes) | add) // 0),
+          estimated_tokens: (($outputs | map((.bytes / 4) | ceil) | add) // 0),
+          estimation: "UTF-8 bytes / 4, rounded up per result; not provider tokenization",
+          by_tool: ($outputs | group_by(.name) | map({name: .[0].name, calls: length,
+            bytes: (map(.bytes) | add), estimated_tokens: (map((.bytes / 4) | ceil) | add)}))
+        },
         tool_calls_by_name: ($tools | group_by(.name) | map("\(length) \(.[0].name)") | sort | reverse),
         tool_time_seconds: (($timed | map(.dur) | add) // 0),
         wait: {

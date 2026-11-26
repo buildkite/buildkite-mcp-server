@@ -29,6 +29,7 @@ func (c *HTTPCmd) Run(ctx context.Context, globals *Globals) error {
 	}
 
 	deps := buildkite.ToolDependencies{
+		APIClient:                   globals.Client,
 		BuildsClient:                globals.Client.Builds,
 		PipelinesClient:             globals.Client.Pipelines,
 		PipelineSchedulesClient:     globals.Client.PipelineSchedules,

@@ -80,6 +80,8 @@ COPY evals/mcp_in_ci.json /workspace/
 COPY evals/mcp_none.json /workspace/
 COPY evals/mcp_cursor_cloud.json /workspace/
 COPY evals/evals.yaml /workspace/
+COPY evals/failure-evidence.yaml /workspace/
+COPY evals/fixtures /workspace/fixtures
 # Do not copy evals/expected/: these are the reviewed answer keys. Klaren
 # loads pinned references only after the evaluated agent has finished.
 
