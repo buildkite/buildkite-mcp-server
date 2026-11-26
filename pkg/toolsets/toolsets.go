@@ -258,6 +258,7 @@ const (
 	ToolsetInvestigations        = "investigations"
 	ToolsetUser                  = "user"
 	ToolsetRepositoryConnections = "repository_connections"
+	ToolsetUsage                 = "usage"
 	ToolsetSkills                = "skills"
 )
 
@@ -278,6 +279,7 @@ var ValidToolsets = []string{
 	ToolsetInvestigations,
 	ToolsetUser,
 	ToolsetRepositoryConnections,
+	ToolsetUsage,
 	ToolsetSkills,
 }
 
@@ -369,6 +371,7 @@ func CreateBuiltinToolsets() map[string]Toolset {
 				newToolDef(buildkite.GetClusterSecret),
 				newToolDef(buildkite.ListClusterSecrets),
 				newToolDef(buildkite.CreateClusterSecret),
+				newToolDef(buildkite.UpdateClusterSecret),
 			},
 		},
 		ToolsetCacheRegistries: {
@@ -531,6 +534,13 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.ListRepositoryConnections),
 				newToolDef(buildkite.GetRepositoryConnection),
+			},
+		},
+		ToolsetUsage: {
+			Name:        "Organization Usage",
+			Description: "Tools for reading an organization's raw daily usage",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.ListOrganizationUsage),
 			},
 		},
 		ToolsetSkills: {

@@ -5,6 +5,7 @@ agents:
 
 steps:
   - label: ":rocket: :github: MCP Release"
+    key: release
     command: |
       set -euo pipefail
       .buildkite/release.sh release --clean
@@ -37,4 +38,11 @@ steps:
             GITHUB_TOKEN: /pipelines/buildkite/buildkite-mcp-server-release/github-token
             DOCKERHUB_PASSWORD: /pipelines/buildkite/buildkite-mcp-server-release/dockerhub-password
             DOCKERHUB_USER: /pipelines/buildkite/buildkite-mcp-server-release/dockerhub-user
+      - mise#v1.1.5: ~
+
+  - label: ":package: Publish to Buildkite Packages"
+    key: publish
+    depends_on: release
+    command: ".buildkite/steps/publish-packages.sh"
+    plugins:
       - mise#v1.1.5: ~
