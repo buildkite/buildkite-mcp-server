@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.buildkite/buildkite-mcp-server",
+  "description": "MCP server exposing Buildkite API data (pipelines, builds, jobs, tests) to AI tooling and editors.",
+  "repository": {
+    "url": "https://github.com/buildkite/buildkite-mcp-server",
+    "source": "github",
+    "id": "962909011"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.buildkite.com/mcp"
+    },
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.buildkite.com/mcp/readonly"
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "docker.io/buildkite/mcp-server",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "stdio"
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "BUILDKITE_API_TOKEN",
+          "description": "Buildkite API token for authentication. Get one from https://buildkite.com/user/api-access-tokens",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
