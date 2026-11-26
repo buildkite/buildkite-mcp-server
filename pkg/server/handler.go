@@ -66,7 +66,7 @@ func withoutToolsets(enabled, disabled []string) []string {
 		return nil
 	}
 	if slices.Contains(enabled, toolsets.ToolsetAll) {
-		enabled = toolsets.ValidToolsets
+		enabled = append(toolsets.AllToolsets(), enabled...)
 	}
 
 	filtered := make([]string, 0, len(enabled))

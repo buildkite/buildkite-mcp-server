@@ -58,6 +58,12 @@ Known response fields are decoded into SDK types. Event details, retry matcher u
 
 Each row is one UTC day of raw usage for the resource, split by pipeline, suite, registry, cluster or model where the resource records them. Rows are not billed amounts. Without dates, it returns the current billing period. The API returns not found until usage API access is enabled for the organization.
 
+## Reading where a job failed
+
+`get_job_error_tail` is in the opt-in `program_status` toolset. `all` doesn't include it, so name it, for example `all,program_status`. It requires `read_build_logs` and accepts `org_slug`, `pipeline_slug`, `build_number`, `job_id` and optional `bytes` (up to 65536, default 16384).
+
+For a finished job, it returns the failures still open in the failing step (`records`, with `record` the last of them) from the OSC 7501 program status reports in the job's log, and the plain-text log of that step up to `record`. An agent `idle` record means the step was cancelled or timed out. All three fields are null when no failure was reported. The API returns not found until program status is enabled for the organization.
+
 ## Retrying builds with limited permissions
 
 The `retries` toolset supports investigating failures and retrying jobs without

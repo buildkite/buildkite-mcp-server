@@ -863,6 +863,29 @@ func TestOverlappingToolsets(t *testing.T) {
 	}
 }
 
+func TestOptInToolsetsAreLeftOutOfAll(t *testing.T) {
+	registry := NewToolsetRegistry()
+	registry.RegisterToolsets(CreateBuiltinToolsets())
+	names := func(tools []ToolDefinition) []string {
+		var out []string
+		for _, tool := range tools {
+			out = append(out, tool.Tool.Name)
+		}
+		return out
+	}
+
+	require.NotContains(t, names(registry.GetEnabledTools([]string{ToolsetAll}, false)), "get_job_error_tail")
+	require.Contains(t, names(registry.GetEnabledTools([]string{ToolsetAll}, false)), "tail_logs")
+	require.Contains(t, names(registry.GetEnabledTools([]string{ToolsetAll, ToolsetProgramStatus}, true)), "get_job_error_tail")
+	require.Contains(t, names(registry.GetEnabledTools([]string{ToolsetAll, ToolsetProgramStatus}, true)), "tail_logs")
+	require.Equal(t, []string{"get_job_error_tail"}, names(registry.GetEnabledTools([]string{ToolsetProgramStatus}, false)))
+
+	require.False(t, IsToolsetEnabled([]string{ToolsetAll}, ToolsetProgramStatus))
+	require.True(t, IsToolsetEnabled([]string{ToolsetAll, ToolsetProgramStatus}, ToolsetProgramStatus))
+	require.NotContains(t, AllToolsets(), ToolsetAll)
+	require.NotContains(t, AllToolsets(), ToolsetProgramStatus)
+}
+
 func TestToolsetExclusions(t *testing.T) {
 	registry := NewToolsetRegistry()
 	registry.RegisterToolsets(CreateBuiltinToolsets())

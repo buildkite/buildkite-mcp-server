@@ -135,11 +135,13 @@ func (tr *ToolsetRegistry) List() []string {
 	return names
 }
 
-// expandAllToolsets replaces the "all" sentinel with the full list of
-// registered toolset names; otherwise returns enabled unchanged.
+// expandAllToolsets replaces the "all" sentinel with every registered toolset
+// except the opt-in ones, keeping any opt-in toolset that is also named.
 func (tr *ToolsetRegistry) expandAllToolsets(enabled []string) []string {
 	if slices.Contains(enabled, ToolsetAll) {
-		return tr.List()
+		return slices.DeleteFunc(tr.List(), func(name string) bool {
+			return slices.Contains(OptInToolsets, name) && !slices.Contains(enabled, name)
+		})
 	}
 	return enabled
 }
@@ -259,6 +261,7 @@ const (
 	ToolsetUser                  = "user"
 	ToolsetRepositoryConnections = "repository_connections"
 	ToolsetUsage                 = "usage"
+	ToolsetProgramStatus         = "program_status"
 	ToolsetSkills                = "skills"
 )
 
@@ -280,7 +283,22 @@ var ValidToolsets = []string{
 	ToolsetUser,
 	ToolsetRepositoryConnections,
 	ToolsetUsage,
+	ToolsetProgramStatus,
 	ToolsetSkills,
+}
+
+// OptInToolsets are left out of ToolsetAll and must be named to be enabled,
+// such as toolsets whose API is only enabled for some organizations.
+var OptInToolsets = []string{
+	ToolsetProgramStatus,
+}
+
+// AllToolsets returns the toolsets ToolsetAll enables: every valid toolset
+// except ToolsetAll itself and the opt-in toolsets.
+func AllToolsets() []string {
+	return slices.DeleteFunc(slices.Clone(ValidToolsets), func(name string) bool {
+		return name == ToolsetAll || slices.Contains(OptInToolsets, name)
+	})
 }
 
 // IsValidToolset checks if a toolset name is valid
@@ -289,9 +307,9 @@ func IsValidToolset(name string) bool {
 }
 
 // IsToolsetEnabled reports whether name is enabled, treating ToolsetAll as a
-// wildcard that enables every toolset.
+// wildcard that enables every toolset except the opt-in ones.
 func IsToolsetEnabled(enabled []string, name string) bool {
-	return slices.Contains(enabled, ToolsetAll) || slices.Contains(enabled, name)
+	return slices.Contains(enabled, name) || (slices.Contains(enabled, ToolsetAll) && slices.Contains(AllToolsets(), name))
 }
 
 // ValidateToolsets checks if all toolset names are valid
@@ -541,6 +559,13 @@ func CreateBuiltinToolsets() map[string]Toolset {
 			Description: "Tools for reading an organization's raw daily usage",
 			Tools: []ToolDefinition{
 				newToolDef(buildkite.ListOrganizationUsage),
+			},
+		},
+		ToolsetProgramStatus: {
+			Name:        "Program Status",
+			Description: "Tools for reading where a job failed from the program status reports in its log",
+			Tools: []ToolDefinition{
+				newToolDef(buildkite.GetJobErrorTail),
 			},
 		},
 		ToolsetSkills: {
