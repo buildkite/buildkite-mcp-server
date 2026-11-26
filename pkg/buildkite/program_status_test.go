@@ -30,7 +30,7 @@ func TestGetJobErrorTail(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"record":{"id":"","state":"error","app":"lint"},` +
 			`"records":[{"id":"tests/unit","state":"error","app":"gotest"},{"id":"","state":"error","app":"lint"}],` +
-			`"log":{"start_byte":2082,"end_byte":3181,"start":"step","content":"--- FAIL: TestParse\nlint: 2 problems"}}`))
+			`"log":{"start_byte":2082,"end_byte":3181,"start":"step","content":"--- FAIL: TestParse\nexpected Vec<u8>, got Vec<u16>\nlint: 2 problems"}}`))
 	})
 
 	tool, handler, scopes := GetJobErrorTail()
@@ -51,6 +51,7 @@ func TestGetJobErrorTail(t *testing.T) {
 	requireJSONPathEqual(t, text, "tests/unit", "records", 0, "id")
 	requireJSONPathEqual(t, text, "lint", "record", "app")
 	requireJSONPathEqual(t, text, "step", "log", "start")
+	requireJSONPathEqual(t, text, "--- FAIL: TestParse\nexpected Vec<u8>, got Vec<u16>\nlint: 2 problems", "log", "content")
 }
 
 func TestGetJobErrorTailUsesServerDefaultBytesAndPassesNoFailureThrough(t *testing.T) {

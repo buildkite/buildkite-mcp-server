@@ -140,6 +140,7 @@ func TestNewPerRequestServerFactory_DisabledToolsetsCannotBeReenabled(t *testing
 		{name: "invalid override", toolsetsHeader: "invalid", disabled: toolsets.ToolsetLogs, absent: []string{"search_logs", "tail_logs", "read_logs"}, present: "get_build"},
 		{name: "builds disabled", toolsetsHeader: "retries", disabled: toolsets.ToolsetBuilds, absent: []string{"get_build", "list_jobs", "retry_job", "retry_failed_jobs"}, present: "tail_logs"},
 		{name: "retries disabled", toolsetsHeader: "builds,logs", disabled: toolsets.ToolsetRetries, absent: []string{"get_build", "tail_logs", "retry_job", "retry_failed_jobs"}, present: "create_build"},
+		{name: "all disabled with opt-in named", toolsetsHeader: "all,program_status", disabled: toolsets.ToolsetAll, absent: []string{"get_job_error_tail", "get_build", "tail_logs"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			factory := NewPerRequestServerFactory("test", emptyDeps(), []string{"all"}, false, WithDisabledToolsets(tt.disabled))

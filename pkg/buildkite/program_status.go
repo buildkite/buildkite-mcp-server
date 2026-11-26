@@ -44,6 +44,10 @@ func (a *BuildkiteClientAdapter) GetJobErrorTail(ctx context.Context, org, pipel
 	return body, resp, nil
 }
 
+// jobErrorTail is the endpoint's response. Its log is plain text, so it skips
+// HTML filtering, as job diagnostics output does.
+type jobErrorTail struct{ json.RawMessage }
+
 type GetJobErrorTailArgs struct {
 	ToolInput
 	OrgSlug      string `json:"org_slug"`
@@ -98,6 +102,6 @@ func GetJobErrorTail() (mcp.Tool, mcp.ToolHandlerFor[GetJobErrorTailArgs, any], 
 			return handleBuildkiteError(err)
 		}
 
-		return mcpTextResult(span, body)
+		return mcpTextResult(span, jobErrorTail{body})
 	}, []string{"read_build_logs"}
 }

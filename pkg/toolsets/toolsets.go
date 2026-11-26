@@ -154,6 +154,10 @@ func (tr *ToolsetRegistry) GetEnabledTools(enabledToolsets []string, readOnlyMod
 // GetEnabledToolsWithExclusions excludes every tool belonging to disabled
 // toolsets, even when another enabled toolset contains the same tool.
 func (tr *ToolsetRegistry) GetEnabledToolsWithExclusions(enabledToolsets []string, readOnlyMode bool, disabledToolsets []string) []ToolDefinition {
+	// Disabling all also disables opt-in toolsets, which expanding it leaves out.
+	if slices.Contains(disabledToolsets, ToolsetAll) {
+		return nil
+	}
 	blocked := make(map[string]bool)
 	for _, tool := range tr.GetToolsForToolsets(tr.expandAllToolsets(disabledToolsets), false) {
 		blocked[tool.Tool.Name] = true
