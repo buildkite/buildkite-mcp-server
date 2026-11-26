@@ -253,7 +253,11 @@ func NewMCPServer(version string, deps buildkite.ToolDependencies, opts ...Tools
 	)
 
 	// Register tools
-	RegisterTools(s, cfg)
+	createToolsets := toolsets.CreateBuiltinToolsets
+	if deps.RateLimitClient != nil {
+		createToolsets = toolsets.CreateBuiltinToolsetsWithRateLimit
+	}
+	registerTools(s, cfg, createToolsets())
 
 	// Register prompts
 	if !cfg.MinimumAccess {
@@ -288,8 +292,12 @@ func injectLoggerMiddleware(logger zerolog.Logger) mcp.Middleware {
 
 // RegisterTools registers tools from enabled toolsets onto the server
 func RegisterTools(s *mcp.Server, cfg *ToolsetConfig) {
+	registerTools(s, cfg, toolsets.CreateBuiltinToolsets())
+}
+
+func registerTools(s *mcp.Server, cfg *ToolsetConfig, sets map[string]toolsets.Toolset) {
 	registry := toolsets.NewToolsetRegistry()
-	registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
+	registry.RegisterToolsets(sets)
 
 	enabledTools := cfg.enabledTools(registry)
 

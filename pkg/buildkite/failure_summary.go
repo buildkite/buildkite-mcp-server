@@ -640,7 +640,7 @@ func loadFailureLogs(ctx context.Context, client BuildkiteLogsClient, args GetBu
 					unauthorized <- ErrUnauthorized
 					return
 				}
-				jobs[index].LogError = err.Error()
+				jobs[index].LogError = partialResultErrorMessage(err)
 				return
 			}
 			jobs[index].LogTail = entries

@@ -13,7 +13,7 @@ type ToolsCmd struct{}
 
 func (c *ToolsCmd) Run(ctx context.Context, globals *Globals) error {
 	registry := toolsets.NewToolsetRegistry()
-	registry.RegisterToolsets(toolsets.CreateBuiltinToolsets())
+	registry.RegisterToolsets(toolsets.CreateBuiltinToolsetsWithRateLimit())
 
 	tools := registry.GetEnabledTools([]string{"all"}, false)
 

@@ -82,7 +82,7 @@ type Report struct {
 func Build(maxToolTokens int) (Report, error) {
 	r := Report{CharsPerToken: CharsPerToken, MaxToolTokens: maxToolTokens}
 
-	all := toolsets.CreateBuiltinToolsets()
+	all := toolsets.CreateBuiltinToolsetsWithRateLimit()
 	names := make([]string, 0, len(all))
 	for name := range all {
 		names = append(names, name)

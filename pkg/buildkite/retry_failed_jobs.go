@@ -155,6 +155,7 @@ func RetryFailedJobs() (mcp.Tool, mcp.ToolHandlerFor[RetryFailedJobsArgs, any], 
 				Retried: []RetryFailedJobsItem{},
 				Skipped: []RetryFailedJobsItem{},
 			}
+			rateLimited := false
 			for _, job := range jobs {
 				retry, reason := classifyRetry(job)
 				item := retryFailedJobsItem(job, reason)
@@ -163,6 +164,9 @@ func RetryFailedJobs() (mcp.Tool, mcp.ToolHandlerFor[RetryFailedJobsArgs, any], 
 					result.Skipped = append(result.Skipped, item)
 				case args.DryRun:
 					result.Retried = append(result.Retried, item)
+				case rateLimited:
+					item.Reason = "rate_limited"
+					result.Skipped = append(result.Skipped, item)
 				default:
 					retryJob, _, err := deps.JobsClient.RetryJob(ctx, args.OrgSlug, args.PipelineSlug, args.BuildNumber, job.ID)
 					if isBuildkiteUnauthorized(err) {
@@ -172,7 +176,12 @@ func RetryFailedJobs() (mcp.Tool, mcp.ToolHandlerFor[RetryFailedJobsArgs, any], 
 						return nil, nil, ErrUnauthorized
 					}
 					if err != nil {
-						item.Error = err.Error()
+						if rateLimit := buildkiteRateLimitError(err); rateLimit != nil {
+							rateLimited = true
+							item.Error = rateLimitedMessage(rateLimit)
+						} else {
+							item.Error = err.Error()
+						}
 						result.Errors = append(result.Errors, item)
 						continue
 					}
