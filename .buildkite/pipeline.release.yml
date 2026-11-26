@@ -5,7 +5,21 @@ agents:
 
 steps:
   - label: ":rocket: :github: MCP Release"
-    command: ".buildkite/release.sh release --clean"
+    command: |
+      set -euo pipefail
+      .buildkite/release.sh release --clean
+
+      echo "--- Dispatch MCP Registry publish"
+      if ! payload=$$(jq -ce 'select(.version | type == "string" and length > 0) |
+        {event_type: "mcp-image-released", client_payload: {version}}' dist/metadata.json) ||
+        ! curl --fail-with-body --silent --show-error --max-time 30 \
+          --header "Authorization: Bearer $$GITHUB_TOKEN" \
+          --header 'Content-Type: application/json' \
+          --data "$$payload" \
+          https://api.github.com/repos/buildkite/buildkite-mcp-server/dispatches; then
+        buildkite-agent annotate --style warning --context mcp-registry \
+          'Release succeeded, but the MCP Registry workflow could not be queued. See DEVELOPMENT.md to retry.'
+      fi
     artifact_paths:
       - dist/**/*
     env:
