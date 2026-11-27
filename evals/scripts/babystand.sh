@@ -614,12 +614,6 @@ run_entry() {
                 echo "WARNING: entry '$ENTRY_ID' has invalid mode_params.toolsets '$ENTRY_TOOLSETS' (want comma-separated toolset names, e.g. user,builds,logs); skipping." >&2
                 return 0
             fi
-            # mcp_cursor_cloud.json builds and starts the server in Cursor's
-            # VM with fixed arguments, so a toolsets choice wouldn't reach it.
-            if [[ "$AGENT" == "cursor-cloud" && "$ENTRY_TOOLSETS" != "all" ]]; then
-                echo "WARNING: entry '$ENTRY_ID': mode_params.toolsets is not supported for agent 'cursor-cloud' yet; skipping." >&2
-                return 0
-            fi
             ;;
         cli)
             KNOWN_PARAMS='["download_url","org_slug"]'

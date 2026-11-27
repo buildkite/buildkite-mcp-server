@@ -36,7 +36,8 @@
                 "if [ ! -x /tmp/bk-mcp-src/buildkite-mcp-server ]; then rm -rf /tmp/bk-mcp-src && git clone --quiet https://github.com/${MCP_SRC_REPO}.git /tmp/bk-mcp-src && git -C /tmp/bk-mcp-src checkout --quiet ${MCP_SRC_SHA} && (cd /tmp/bk-mcp-src && go build -o buildkite-mcp-server ./cmd/buildkite-mcp-server); fi 1>&2 && exec /tmp/bk-mcp-src/buildkite-mcp-server stdio --read-only"
             ],
             "env": {
-                "BUILDKITE_API_TOKEN": "${BUILDKITE_API_TOKEN}"
+                "BUILDKITE_API_TOKEN": "${BUILDKITE_API_TOKEN}",
+                "BUILDKITE_TOOLSETS": "${BUILDKITE_TOOLSETS}"
             }
         }
     ]

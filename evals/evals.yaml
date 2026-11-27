@@ -110,8 +110,7 @@
 #                   toolsets      Comma-separated toolsets for the MCP server
 #                                 (BUILDKITE_TOOLSETS), e.g. user,builds,logs.
 #                                 Opt-in toolsets must be named; all leaves
-#                                 them out. Default: all. Not
-#                                 supported for cursor-cloud yet (skipped).
+#                                 them out. Default: all.
 #                 mode 'cli' takes:
 #                   download_url  https URL of a bk release archive (.tar.gz /
 #                                 .tgz / .zip — the bk binary inside is used)

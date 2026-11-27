@@ -88,7 +88,7 @@ class CliTokenTest(unittest.TestCase):
             ("claude", "user,builds,logs", "user,builds,logs"),
             ("claude", "all; rm -rf /", None),
             ("claude", "user,bilds", None),
-            ("cursor-cloud", "user,builds,logs", None),
+            ("cursor-cloud", "user,builds,logs", "user,builds,logs"),
         ):
             with self.subTest(agent=agent, toolsets=toolsets), self.harness() as (root, env):
                 # The stub agent records the toolsets it was given, then fails
@@ -97,6 +97,7 @@ class CliTokenTest(unittest.TestCase):
                 (root / "prompts/p.md").write_text("prompt\n")
                 for path, body in (
                     (root / "scripts/claude.sh", 'echo "$BUILDKITE_TOOLSETS" > "$TOOLSETS_OUT"; exit 1'),
+                    (root / "scripts/cursor-cloud.sh", 'echo "$BUILDKITE_TOOLSETS" > "$TOOLSETS_OUT"; exit 1'),
                     # Rejects an unknown name like the real server does.
                     (root / "bin/buildkite-mcp-server",
                      '[[ "${BUILDKITE_TOOLSETS:-}" != *bilds* ]] '
@@ -118,6 +119,35 @@ class CliTokenTest(unittest.TestCase):
                         self.assertIn("invalid toolset names", output)
                     self.assertIn("skipping", output)
                     self.assertFalse((root / "toolsets").exists(), output)
+
+    def test_cursor_cloud_sends_toolsets_to_its_mcp_server(self):
+        for toolsets, expected in ((None, "all"), ("user,builds,logs", "user,builds,logs")):
+            with self.subTest(toolsets=toolsets), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "scripts").mkdir()
+                (root / "prompts").mkdir()
+                shutil.copy(SCRIPTS / "cursor-cloud.sh", root / "scripts")
+                shutil.copy(SCRIPTS.parent / "mcp_cursor_cloud.json", root)
+                (root / "prompts/system.md").write_text("system\n")
+                (root / "prompt.md").write_text("prompt\n")
+                # The stub curl saves the launch request and fails it, so the
+                # script stops before reaching Cursor.
+                curl = root / "curl"
+                curl.write_text('#!/bin/bash\nwhile [[ $# -gt 0 ]]; do [[ "$1" == "-d" ]] && printf "%s" "$2" > "$PAYLOAD_OUT"; shift; done\nprintf "error\\n500"\n')
+                curl.chmod(0o755)
+                env = {k: v for k, v in os.environ.items() if k != "BUILDKITE_TOOLSETS"}
+                env.update(PATH=str(root) + os.pathsep + env["PATH"], CURSOR_API_KEY="test",
+                           BUILDKITE_API_TOKEN="entry-test-token", MCP_SRC_SHA="abc123",
+                           PAYLOAD_OUT=str(root / "payload.json"))
+                if toolsets:
+                    env["BUILDKITE_TOOLSETS"] = toolsets
+                result = subprocess.run(["bash", str(root / "scripts/cursor-cloud.sh"), str(root / "prompt.md"),
+                                         "--repo", "https://github.com/example/repo"],
+                                        env=env, capture_output=True, text=True, timeout=15)
+                self.assertIn("launch failed", result.stderr)
+                server = json.loads((root / "payload.json").read_text())["mcpServers"][0]
+                self.assertEqual(server["env"]["BUILDKITE_TOOLSETS"], expected)
+                self.assertEqual(server["env"]["BUILDKITE_API_TOKEN"], "entry-test-token")
 
     def test_cli_requires_unambiguous_organization_before_scenario(self):
         for org, response, status, expected in (
