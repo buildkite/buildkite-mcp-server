@@ -95,10 +95,12 @@ fi
 MCP_SERVERS="$(jq -c \
     --arg tok  "$BUILDKITE_API_TOKEN" \
     --arg repo "$MCP_SRC_REPO" \
-    --arg sha  "$MCP_SRC_SHA" '
+    --arg sha  "$MCP_SRC_SHA" \
+    --arg toolsets "${BUILDKITE_TOOLSETS:-all}" '
     .mcpServers
     | walk(if type == "string"
            then gsub("\\$\\{BUILDKITE_API_TOKEN\\}"; $tok)
+                | gsub("\\$\\{BUILDKITE_TOOLSETS\\}"; $toolsets)
                 | gsub("\\$\\{MCP_SRC_REPO\\}"; $repo)
                 | gsub("\\$\\{MCP_SRC_SHA\\}"; $sha)
            else . end)' "$MCP_CONFIG")"

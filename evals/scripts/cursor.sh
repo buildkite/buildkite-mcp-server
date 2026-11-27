@@ -141,11 +141,13 @@ if [[ "${EVAL_MODE:-mcp}" == "cli" ]]; then
     MCP_SRC="$ROOT_DIR/mcp_none.json"
 fi
 mkdir -p .cursor
-# BUILDKITE_REQUEST_LOG (the run's API request log, set by babystand.sh) is
-# re-spelled the same way — the source config uses Claude's ${VAR:-} syntax.
+# BUILDKITE_REQUEST_LOG (the run's API request log) and BUILDKITE_TOOLSETS
+# (the entry's toolsets), both set by babystand.sh, are re-spelled the same
+# way — the source config uses Claude's ${VAR:-} syntax.
 jq '.mcpServers |= with_entries(
       .value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}"
-      | .value.env.BUILDKITE_REQUEST_LOG = "${env:BUILDKITE_REQUEST_LOG}")' \
+      | .value.env.BUILDKITE_REQUEST_LOG = "${env:BUILDKITE_REQUEST_LOG}"
+      | .value.env.BUILDKITE_TOOLSETS = "${env:BUILDKITE_TOOLSETS}")' \
     "$MCP_SRC" > .cursor/mcp.json
 # Diff hygiene, not a security control (the file holds no secret): the agent
 # is told to commit and push its fixes, and a plain `git add -A` would drag
