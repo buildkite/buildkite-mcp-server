@@ -54,7 +54,7 @@ type GetJobErrorTailArgs struct {
 	PipelineSlug string `json:"pipeline_slug"`
 	BuildNumber  string `json:"build_number"`
 	JobID        string `json:"job_id" jsonschema:"Buildkite job UUID"`
-	Bytes        int    `json:"bytes,omitempty" jsonschema:"Maximum bytes of log text to return (1-65536, default 16384); the text keeps the last whole lines that fit"`
+	Bytes        int    `json:"bytes,omitempty" jsonschema:"Maximum bytes of log text to return (1-65536, default 4096); the text keeps the last whole lines that fit. Raise it when log.start is \"limit\" and the cause isn't in the returned text"`
 }
 
 func GetJobErrorTail() (mcp.Tool, mcp.ToolHandlerFor[GetJobErrorTailArgs, any], []string) {
