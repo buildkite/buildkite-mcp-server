@@ -85,10 +85,10 @@ class CliTokenTest(unittest.TestCase):
     def test_mcp_toolsets_reach_the_agent(self):
         for agent, toolsets, expected in (
             ("claude", None, "all"),
-            ("claude", "all,program_status", "all,program_status"),
+            ("claude", "user,builds,logs", "user,builds,logs"),
             ("claude", "all; rm -rf /", None),
-            ("claude", "all,program_stats", None),
-            ("cursor-cloud", "all,program_status", None),
+            ("claude", "user,bilds", None),
+            ("cursor-cloud", "user,builds,logs", None),
         ):
             with self.subTest(agent=agent, toolsets=toolsets), self.harness() as (root, env):
                 # The stub agent records the toolsets it was given, then fails
@@ -99,7 +99,7 @@ class CliTokenTest(unittest.TestCase):
                     (root / "scripts/claude.sh", 'echo "$BUILDKITE_TOOLSETS" > "$TOOLSETS_OUT"; exit 1'),
                     # Rejects an unknown name like the real server does.
                     (root / "bin/buildkite-mcp-server",
-                     '[[ "${BUILDKITE_TOOLSETS:-}" != *program_stats* ]] '
+                     '[[ "${BUILDKITE_TOOLSETS:-}" != *bilds* ]] '
                      '|| { echo "error: invalid toolset names" >&2; exit 1; }\necho dev'),
                 ):
                     path.write_text("#!/bin/bash\n" + body + "\n")
@@ -114,7 +114,7 @@ class CliTokenTest(unittest.TestCase):
                     self.assertEqual((root / "toolsets").read_text().strip(), expected, output)
                 else:
                     self.assertIn("toolsets", output)
-                    if toolsets == "all,program_stats":
+                    if toolsets == "user,bilds":
                         self.assertIn("invalid toolset names", output)
                     self.assertIn("skipping", output)
                     self.assertFalse((root / "toolsets").exists(), output)

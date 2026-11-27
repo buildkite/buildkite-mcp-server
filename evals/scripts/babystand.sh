@@ -611,7 +611,7 @@ run_entry() {
             KNOWN_PARAMS='["toolsets"]'
             ENTRY_TOOLSETS="$(jq -r '.toolsets // "all"' <<<"$MODE_PARAMS")"
             if [[ ! "$ENTRY_TOOLSETS" =~ ^[a-z_]+(,[a-z_]+)*$ ]]; then
-                echo "WARNING: entry '$ENTRY_ID' has invalid mode_params.toolsets '$ENTRY_TOOLSETS' (want comma-separated toolset names, e.g. all,program_status); skipping." >&2
+                echo "WARNING: entry '$ENTRY_ID' has invalid mode_params.toolsets '$ENTRY_TOOLSETS' (want comma-separated toolset names, e.g. user,builds,logs); skipping." >&2
                 return 0
             fi
             # mcp_cursor_cloud.json builds and starts the server in Cursor's
