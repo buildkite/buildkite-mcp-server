@@ -82,6 +82,43 @@ class CliTokenTest(unittest.TestCase):
                     self.assertNotIn("bk CLI setup", output)
                     self.assertFalse((root / "runs").exists())
 
+    def test_mcp_toolsets_reach_the_agent(self):
+        for agent, toolsets, expected in (
+            ("claude", None, "all"),
+            ("claude", "all,program_status", "all,program_status"),
+            ("claude", "all; rm -rf /", None),
+            ("claude", "all,program_stats", None),
+            ("cursor-cloud", "all,program_status", None),
+        ):
+            with self.subTest(agent=agent, toolsets=toolsets), self.harness() as (root, env):
+                # The stub agent records the toolsets it was given, then fails
+                # so the harness stops before auditing.
+                (root / "prompts").mkdir()
+                (root / "prompts/p.md").write_text("prompt\n")
+                for path, body in (
+                    (root / "scripts/claude.sh", 'echo "$BUILDKITE_TOOLSETS" > "$TOOLSETS_OUT"; exit 1'),
+                    # Rejects an unknown name like the real server does.
+                    (root / "bin/buildkite-mcp-server",
+                     '[[ "${BUILDKITE_TOOLSETS:-}" != *program_stats* ]] '
+                     '|| { echo "error: invalid toolset names" >&2; exit 1; }\necho dev'),
+                ):
+                    path.write_text("#!/bin/bash\n" + body + "\n")
+                    path.chmod(0o755)
+                env.update(BUILDKITE_API_TOKEN="entry-test-token", CURSOR_API_KEY="test",
+                           TOOLSETS_OUT=str(root / "toolsets"), TMPDIR=str(root))
+                entry = {"id": "toolsets-check", "agent": agent, "prompt": "p",
+                         "mode_params": {"toolsets": toolsets} if toolsets else {}}
+                result = self.run_harness(root, env, entry)
+                output = result.stdout + result.stderr
+                if expected:
+                    self.assertEqual((root / "toolsets").read_text().strip(), expected, output)
+                else:
+                    self.assertIn("toolsets", output)
+                    if toolsets == "all,program_stats":
+                        self.assertIn("invalid toolset names", output)
+                    self.assertIn("skipping", output)
+                    self.assertFalse((root / "toolsets").exists(), output)
+
     def test_cli_requires_unambiguous_organization_before_scenario(self):
         for org, response, status, expected in (
             (None, '[]', 0, None),

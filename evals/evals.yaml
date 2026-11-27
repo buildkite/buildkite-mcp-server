@@ -106,7 +106,12 @@
 #                 cursor; cursor-cloud entries in cli mode are skipped loudly
 #                 (bk is installed on this host, not in Cursor's VM).
 #   mode_params   Optional hash of per-mode settings. Unknown keys skip the entry
-#                 loudly. mode 'mcp' takes none. mode 'cli' takes:
+#                 loudly. mode 'mcp' takes:
+#                   toolsets      Comma-separated toolsets for the MCP server
+#                                 (BUILDKITE_TOOLSETS), e.g. all,program_status
+#                                 to add an opt-in toolset. Default: all. Not
+#                                 supported for cursor-cloud yet (skipped).
+#                 mode 'cli' takes:
 #                   download_url  https URL of a bk release archive (.tar.gz /
 #                                 .tgz / .zip — the bk binary inside is used)
 #                                 or a bare binary, e.g.

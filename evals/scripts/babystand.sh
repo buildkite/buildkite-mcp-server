@@ -454,6 +454,7 @@ run_cursor() {
             '.mcpServers |= with_entries(
                .value.env.BUILDKITE_API_TOKEN = "${env:BUILDKITE_API_TOKEN}"
                | .value.env.BUILDKITE_REQUEST_LOG = "${env:BUILDKITE_REQUEST_LOG}"
+               | .value.env.BUILDKITE_TOOLSETS = "${env:BUILDKITE_TOOLSETS}"
                | .value.command |= (if startswith("./") then $cwd + ltrimstr(".") else . end))' \
             "$mcp_src" > .cursor/mcp.json
         # Diff hygiene, not a security control (the file holds no secret):
@@ -524,7 +525,7 @@ run_cursor_cloud() {
 run_entry() {
     local entry="$1"
     local ENTRY_ID AGENT MODEL PROMPT_NAME SCENARIO_ID MCP_VERSION SETUP COMPARE_BASE COMPARE_TARGET TOKEN_ENV KILL_AGENT_ON_COMPLETE ENTRY_EVALUATOR
-    local MODE MODE_PARAMS
+    local MODE MODE_PARAMS ENTRY_TOOLSETS="all"
     ENTRY_ID=$(jq -r '.id'                    <<<"$entry")
     ENTRY_EVALUATOR="${EVALUATOR:-$(jq -r '.evaluator // "klaren"' <<<"$entry")}"
     case "$ENTRY_EVALUATOR" in
@@ -606,7 +607,20 @@ run_entry() {
     fi
     local KNOWN_PARAMS UNKNOWN_PARAMS
     case "$MODE" in
-        mcp) KNOWN_PARAMS='[]' ;;
+        mcp)
+            KNOWN_PARAMS='["toolsets"]'
+            ENTRY_TOOLSETS="$(jq -r '.toolsets // "all"' <<<"$MODE_PARAMS")"
+            if [[ ! "$ENTRY_TOOLSETS" =~ ^[a-z_]+(,[a-z_]+)*$ ]]; then
+                echo "WARNING: entry '$ENTRY_ID' has invalid mode_params.toolsets '$ENTRY_TOOLSETS' (want comma-separated toolset names, e.g. all,program_status); skipping." >&2
+                return 0
+            fi
+            # mcp_cursor_cloud.json builds and starts the server in Cursor's
+            # VM with fixed arguments, so a toolsets choice wouldn't reach it.
+            if [[ "$AGENT" == "cursor-cloud" && "$ENTRY_TOOLSETS" != "all" ]]; then
+                echo "WARNING: entry '$ENTRY_ID': mode_params.toolsets is not supported for agent 'cursor-cloud' yet; skipping." >&2
+                return 0
+            fi
+            ;;
         cli)
             KNOWN_PARAMS='["download_url","org_slug"]'
             # cursor-cloud runs in Cursor's VM: the bk install below happens
@@ -697,6 +711,16 @@ run_entry() {
         # kong's --version prints the build's version ("dev" for source builds,
         # hence MCP_SOURCE_SHA alongside it).
         MCP_SERVER_VERSION="$("$MCP_SERVER_BIN" --version 2>/dev/null | head -n1 || true)"
+        # An unknown toolset name stops the server at startup, and the agent
+        # would carry on without it. Check the names with the server itself,
+        # which exits at once on empty stdin and needs no network.
+        local TOOLSETS_ERR
+        if [[ "$ENTRY_TOOLSETS" != "all" ]] \
+                && ! TOOLSETS_ERR="$(BUILDKITE_TOOLSETS="$ENTRY_TOOLSETS" BUILDKITE_API_TOKEN=unused \
+                    BUILDKITE_REQUEST_LOG= "$MCP_SERVER_BIN" stdio </dev/null 2>&1 >/dev/null)"; then
+            echo "WARNING: entry '$ENTRY_ID': the MCP server failed to start with mode_params.toolsets '$ENTRY_TOOLSETS' ($(tail -n1 <<<"$TOOLSETS_ERR")); skipping." >&2
+            return 0
+        fi
         BK_STUB_DIR="$HOME/.eval-bk-cli/$RUN_KEY/stub"
         install_bk_stub "$BK_STUB_DIR"
     fi
@@ -840,7 +864,7 @@ run_entry() {
     [[ -n "$BK_SHIM_DIR" ]] && AGENT_PATH="$BK_SHIM_DIR:$AGENT_PATH"
     if ! BUILDKITE_API_TOKEN="$ENTRY_TOKEN" EVAL_MODE="$MODE" PATH="$AGENT_PATH" \
             BUILDKITE_ORGANIZATION_SLUG="$AGENT_ORG" BK_TELEMETRY=false \
-            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" \
+            BUILDKITE_REQUEST_LOG="$REQUEST_LOG" BUILDKITE_TOOLSETS="$ENTRY_TOOLSETS" \
             run_agent "$AGENT" "$RENDERED" "$MODEL" "$LOG"; then
         echo "ERROR: [$ENTRY_ID] agent run failed; skipping audit/bundle/compare for this entry (log: $LOG)" >&2
         return 1
