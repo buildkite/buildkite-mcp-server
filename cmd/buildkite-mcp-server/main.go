@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -19,6 +21,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/net/http/httpguts"
 )
 
 var (
@@ -122,6 +125,11 @@ func run(ctx context.Context, cmd *kong.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create buildkite client: %w", err)
 	}
+	httpClient.Transport = &userAgentTransport{
+		wrapped:   httpClient.Transport,
+		userAgent: commands.UserAgent(version),
+		apiURL:    client.BaseURL,
+	}
 
 	// Create ParquetClient with cache URL from flag/env (uses upstream library's high-level client)
 	buildkiteLogsClient, err := buildkitelogs.NewClient(ctx, client, cli.CacheURL, buildkitelogs.WithMaxLogBytes(cli.MaxLogBytes), buildkitelogs.WithParserOptions(logparser.WithMaxLineBytes(cli.MaxLogLineBytes)))
@@ -182,6 +190,29 @@ func newAPITransport(passthrough *headerpassthrough.Config, recordPath, replayPa
 	}
 
 	return transport, nil
+}
+
+type userAgentTransport struct {
+	wrapped   http.RoundTripper
+	userAgent string
+	apiURL    *url.URL
+}
+
+func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	userAgent := t.userAgent
+	info := trace.ClientInfoFromContext(req.Context())
+	isAPIRequest := strings.EqualFold(req.URL.Scheme, t.apiURL.Scheme) && strings.EqualFold(req.URL.Host, t.apiURL.Host)
+	if isAPIRequest && info.Name != "" && httpguts.ValidHeaderFieldValue(info.Name) && httpguts.ValidHeaderFieldValue(info.Version) {
+		userAgent += " " + info.Name
+		if info.Version != "" {
+			userAgent += "/" + info.Version
+		}
+	}
+	// Limit the generated User-Agent to 1,024 bytes.
+	userAgent = userAgent[:min(len(userAgent), 1024)]
+	cloned := req.Clone(req.Context())
+	cloned.Header.Set("User-Agent", userAgent)
+	return t.wrapped.RoundTrip(cloned)
 }
 
 func resolveAPITokenForMode(passthrough *headerpassthrough.Config, replay, token, tokenFrom1Password string) (string, error) {

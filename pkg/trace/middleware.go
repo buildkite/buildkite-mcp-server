@@ -17,6 +17,13 @@ import (
 // accepted in telemetry context values.
 const TelemetryContextMaxLength = 256
 
+type clientInfoContextKey struct{}
+
+func ClientInfoFromContext(ctx context.Context) mcp.Implementation {
+	info, _ := ctx.Value(clientInfoContextKey{}).(mcp.Implementation)
+	return info
+}
+
 func NewMiddleware() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
@@ -46,6 +53,7 @@ func NewMiddleware() mcp.Middleware {
 
 			var clientName, clientVersion string
 			if ci := clientInfo(req); ci != nil && ci.Name != "" {
+				ctx = context.WithValue(ctx, clientInfoContextKey{}, *ci)
 				clientName = ci.Name
 				clientVersion = ci.Version
 				attrs = append(attrs,
